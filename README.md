@@ -4,36 +4,32 @@ Hệ thống kiểm tra trực tuyến MPEduCenter-Test, phân quyền 3 cấp (
 
 ---
 
-## 🚀 Hướng Dẫn Triển Khai Tự Động Từ AI Studio ➡️ GitHub ➡️ Firebase
+## 🚀 Các Phương Thức Triển Khai Tự Động Trực Tiếp
 
-Dự án đã được tích hợp đầy đủ hệ sinh thái Google (Firebase Firestore, Security Rules, GitHub Actions, Docker, Render/Cloud Run).
+### 🌟 Cách 1: Tự Động Triển Khai Miễn Phí 100% Qua GitHub Pages (Không Cần Render.com)
 
-### Cách 1: Triển Khai Trực Tiếp Từ AI Studio Lên GitHub
-1. Tại giao diện Google AI Studio, bấm vào biểu tượng **Settings (Bánh răng)** ở góc trên bên phải.
-2. Chọn **Export to GitHub**.
-3. Đăng nhập tài khoản GitHub và chọn tên repository (ví dụ: `edutest-pro`).
-4. Bấm **Export**. Toàn bộ mã nguồn đã cấu hình sẵn Firebase và CI/CD sẽ được đồng bộ lên GitHub của bạn.
+Dự án đã tích hợp sẵn kịch bản **GitHub Actions** (`.github/workflows/deploy-github-pages.yml`). Khi bạn đẩy code lên GitHub, GitHub sẽ tự động build và chạy trang web miễn phí.
 
----
-
-### Cách 2: Triển Khai Tự Động Với Render.com (Khuyên Dùng - Tự động 100% khi Push code)
-1. Đăng nhập [Render.com](https://render.com) bằng tài khoản GitHub.
-2. Bấm **New +** ➡️ Chọn **Blueprint** (hoặc **Web Service**).
-3. Chọn kho chứa GitHub `edutest-pro` của bạn.
-4. Render sẽ tự động phát hiện `render.yaml` và cấu hình lệnh build:
-   - **Build Command**: `npm install && npm run build`
-   - **Start Command**: `npm start`
-5. Trong mục **Environment Variables**, điền `GEMINI_API_KEY` (Lấy miễn phí tại [Google AI Studio](https://aistudio.google.com/app/apikey)).
-6. Bấm **Apply**. Mỗi lần bạn sửa code hoặc cập nhật trên GitHub, Render sẽ **tự động deploy bản mới nhất trong 1-2 phút**!
+**Cách bật GitHub Pages chỉ trong 3 bước:**
+1. Xuất mã nguồn lên GitHub: Tại AI Studio, bấm **Settings (Bánh răng)** ➡️ chọn **Export to GitHub**.
+2. Mở Repository trên GitHub của bạn ➡️ vào tab **Settings** ➡️ chọn mục **Pages** ở thanh menu bên trái.
+3. Ở phần **Build and deployment** ➡️ **Source**, chọn **GitHub Actions**.
+4. 🎉 **Xong!** Mỗi lần bạn cập nhật mã nguồn, GitHub sẽ tự động build và tạo đường dẫn web trực tiếp dạng:
+   `https://<ten-tai-khoan-github>.github.io/<ten-repo>/`
 
 ---
 
-### Cách 3: Triển Khai Lên Firebase Hosting
+### 🌟 Cách 2: Triển Khai Qua Firebase Hosting (Google Cloud)
 1. Cài đặt Firebase CLI trên máy tính: `npm install -g firebase-tools`
-2. Đăng nhập: `firebase login`
+2. Đăng nhập tài khoản Google: `firebase login`
 3. Đóng gói ứng dụng: `npm run build`
 4. Triển khai: `firebase deploy --only hosting,firestore:rules`
-5. Trang web của bạn sẽ hoạt động ngay tại `https://gen-lang-client-0415726760.web.app`
+5. Trang web của bạn sẽ hoạt động ngay tại tên miền Google: `https://gen-lang-client-0415726760.web.app`
+
+---
+
+### 🌟 Cách 3: Triển Khai Full-Stack Trên Render / Cloud Run / Vercel (Tùy chọn)
+Nếu cần chạy song song backend Node.js Server và AI Gemini server-side, bạn có thể kết nối GitHub với Render.com qua file `render.yaml` có sẵn.
 
 ---
 
@@ -62,9 +58,8 @@ npm start
 ---
 
 ## 📦 Các Tệp Cấu Hình Đã Chuẩn Bị
-- `firebase-applet-config.json`: Cấu hình kết nối Firebase Firestore của dự án.
+- `.github/workflows/deploy-github-pages.yml`: Tự động build và deploy lên GitHub Pages miễn phí.
+- `firebase-applet-config.json`: Cấu hình kết nối Firebase Firestore.
 - `firestore.rules`: Luật bảo mật và phân quyền truy cập dữ liệu trên đám mây.
 - `src/services/firestoreService.ts`: Lớp dịch vụ đồng bộ thời gian thực cho Đề thi, Người dùng, Bài nộp và Phòng thi.
-- `.github/workflows/ci.yml`: Kịch bản GitHub Actions tự động kiểm tra code mỗi khi có commit.
-- `.github/workflows/firebase-hosting-merge.yml`: Kịch bản tự động triển khai lên Firebase Hosting khi merge nhánh `main`.
 - `Dockerfile` & `render.yaml` & `railway.json`: Các tệp hỗ trợ triển khai đa nền tảng.
