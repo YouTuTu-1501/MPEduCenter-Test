@@ -3,7 +3,6 @@ import { useAuth } from "../context/AuthContext";
 import { BeeLogo } from "./BeeLogo";
 import {
   LogIn,
-  KeyRound,
   Mail,
   Lock,
   UserPlus,
@@ -14,8 +13,9 @@ import {
   EyeOff,
   AlertCircle,
   Sparkles,
+  Info,
 } from "lucide-react";
-import { UserRole, ROLE_LABELS } from "../types/auth";
+import { STANDARD_CLASSES } from "../types/exam";
 
 export const AuthModal: React.FC = () => {
   const {
@@ -23,7 +23,6 @@ export const AuthModal: React.FC = () => {
     setShowAuthModal,
     login,
     register,
-    users,
   } = useAuth();
 
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -32,14 +31,14 @@ export const AuthModal: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Form đăng ký tài khoản mới
+  // Form đăng ký tài khoản học sinh mới
   const [regName, setRegName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPassword, setRegPassword] = useState("");
   const [regConfirmPassword, setRegConfirmPassword] = useState("");
-  const [regRole, setRegRole] = useState<UserRole>("student");
   const [regSchoolClass, setRegSchoolClass] = useState("12A1");
-  const [regSubject, setRegSubject] = useState("Toán học THPT");
+  const [isCustomClass, setIsCustomClass] = useState(false);
+  const [customSchoolClass, setCustomSchoolClass] = useState("");
 
   if (!showAuthModal) return null;
 
@@ -80,13 +79,17 @@ export const AuthModal: React.FC = () => {
       return;
     }
 
+    const finalClass = isCustomClass
+      ? customSchoolClass.trim() || "12A1"
+      : regSchoolClass;
+
+    // Đăng ký trực tuyến chỉ dành cho tài khoản học sinh
     const res = register({
       name: regName.trim(),
       email: regEmail.trim(),
       password: regPassword,
-      role: regRole,
-      schoolClass: regRole === "student" ? regSchoolClass : undefined,
-      subject: regRole === "teacher" ? regSubject : undefined,
+      role: "student",
+      schoolClass: finalClass,
     });
 
     if (res.success) {
@@ -164,7 +167,7 @@ export const AuthModal: React.FC = () => {
             }`}
           >
             <UserPlus className="w-4 h-4" />
-            <span>Đăng ký tài khoản</span>
+            <span>Đăng ký Học sinh</span>
           </button>
         </div>
 
@@ -277,18 +280,34 @@ export const AuthModal: React.FC = () => {
               </div>
             </form>
           ) : (
-            <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
+            <form onSubmit={handleRegisterSubmit} className="space-y-4">
+              {/* Thông báo vai trò chỉ dành cho học sinh */}
+              <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-2xl flex items-start gap-2.5 text-xs text-emerald-900">
+                <GraduationCap className="w-5 h-5 shrink-0 text-emerald-600 mt-0.5" />
+                <div>
+                  <div className="font-extrabold text-emerald-950 flex items-center gap-1.5">
+                    <span>Đăng ký Tài khoản Thí sinh / Học sinh</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-black text-[10px]">
+                      Học sinh
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-emerald-700 mt-0.5 leading-relaxed">
+                    Tài khoản <b>Giáo viên</b> và <b>Quản trị viên (Admin)</b> được tạo và phân quyền tập trung bởi Quản trị viên nhà trường trong mục Quản trị.
+                  </p>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Họ và tên <span className="text-rose-500">*</span>
+                  Họ và tên học sinh <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   required
                   value={regName}
                   onChange={(e) => setRegName(e.target.value)}
-                  placeholder="Ví dụ: Nguyễn Văn A"
-                  className="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Ví dụ: Nguyễn Văn An"
+                  className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
@@ -301,65 +320,49 @@ export const AuthModal: React.FC = () => {
                   required
                   value={regEmail}
                   onChange={(e) => setRegEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="hocsinh@student.vn"
+                  className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
+              {/* Lớp học */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Vai trò đăng ký <span className="text-rose-500">*</span>
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["student", "teacher", "admin"] as UserRole[]).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setRegRole(r)}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                        regRole === r
-                          ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
-                          : "bg-white text-slate-600 border-slate-300 hover:bg-slate-50"
-                      }`}
-                    >
-                      {r === "admin" && <ShieldCheck className="w-3.5 h-3.5" />}
-                      {r === "teacher" && <Award className="w-3.5 h-3.5" />}
-                      {r === "student" && <GraduationCap className="w-3.5 h-3.5" />}
-                      <span>{ROLE_LABELS[r].badge}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {regRole === "student" && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Lớp học
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Lớp học <span className="text-rose-500">*</span>
                   </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomClass(!isCustomClass)}
+                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800"
+                  >
+                    {isCustomClass ? "← Chọn từ danh sách" : "+ Nhập lớp khác"}
+                  </button>
+                </div>
+
+                {isCustomClass ? (
                   <input
                     type="text"
+                    required
+                    value={customSchoolClass}
+                    onChange={(e) => setCustomSchoolClass(e.target.value)}
+                    placeholder="Nhập tên lớp của bạn (ví dụ: 12A5, 11B3...)"
+                    className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                ) : (
+                  <select
                     value={regSchoolClass}
                     onChange={(e) => setRegSchoolClass(e.target.value)}
-                    placeholder="Ví dụ: 12A1, 11B2..."
-                    className="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              )}
-
-              {regRole === "teacher" && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Bộ môn phụ trách
-                  </label>
-                  <input
-                    type="text"
-                    value={regSubject}
-                    onChange={(e) => setRegSubject(e.target.value)}
-                    placeholder="Ví dụ: Toán THPT, Hình học..."
-                    className="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              )}
+                    className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {STANDARD_CLASSES.map((cls) => (
+                      <option key={cls} value={cls}>
+                        Lớp {cls}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -372,7 +375,7 @@ export const AuthModal: React.FC = () => {
                     value={regPassword}
                     onChange={(e) => setRegPassword(e.target.value)}
                     placeholder="Tối thiểu 6 ký tự..."
-                    className="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
                 <div>
@@ -385,7 +388,7 @@ export const AuthModal: React.FC = () => {
                     value={regConfirmPassword}
                     onChange={(e) => setRegConfirmPassword(e.target.value)}
                     placeholder="Nhập lại mật khẩu..."
-                    className="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
               </div>
@@ -393,10 +396,10 @@ export const AuthModal: React.FC = () => {
               <div className="pt-2">
                 <button
                   type="submit"
-                  className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-2"
+                  className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-2"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>Hoàn tất đăng ký & Đăng nhập</span>
+                  <span>Hoàn tất đăng ký Học sinh & Đăng nhập</span>
                 </button>
               </div>
             </form>

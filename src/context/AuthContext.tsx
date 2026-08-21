@@ -24,7 +24,7 @@ interface RegisterData {
   name: string;
   email: string;
   password?: string;
-  role: UserRole;
+  role?: UserRole;
   schoolClass?: string;
   subject?: string;
 }
@@ -252,7 +252,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: true, message: "Đăng nhập thành công" };
   };
 
-  // Đăng ký tài khoản mới
+  // Đăng ký tài khoản học sinh mới
   const register = (data: RegisterData): LoginResult => {
     const cleanEmail = data.email.trim().toLowerCase();
     const exists = users.some((u) => u.email.toLowerCase() === cleanEmail);
@@ -264,14 +264,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    // Đăng ký công khai luôn gán quyền Học sinh (Student)
     const newUser: User = {
       id: `usr_${Date.now()}`,
       name: data.name.trim(),
       email: cleanEmail,
       password: data.password || "123456",
-      role: data.role,
-      schoolClass: data.schoolClass,
-      subject: data.subject,
+      role: "student",
+      schoolClass: data.schoolClass || "12A1",
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.name)}`,
       status: "active",
       createdAt: new Date().toISOString().split("T")[0],
@@ -284,9 +284,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     toast.success(
       "Đăng ký thành công!",
-      `Chào mừng bạn gia nhập hệ thống với vai trò ${
-        data.role === "admin" ? "Quản trị viên" : data.role === "teacher" ? "Giáo viên" : "Học sinh"
-      }.`
+      `Chào mừng bạn gia nhập hệ thống với vai trò Học sinh lớp ${newUser.schoolClass}.`
     );
 
     return { success: true, message: "Đăng ký thành công" };
