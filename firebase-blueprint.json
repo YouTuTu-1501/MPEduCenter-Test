@@ -1,0 +1,99 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile, role, and credentials in the exam system",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "teacher", "student"] },
+        "schoolClass": { "type": "string" },
+        "subject": { "type": "string" },
+        "avatar": { "type": "string" },
+        "phone": { "type": "string" },
+        "bio": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "locked"] },
+        "createdAt": { "type": "string" },
+        "lastLogin": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "Exam": {
+      "title": "Exam",
+      "description": "Mathematics exam with 4 standardized question formats",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "code": { "type": "string" },
+        "subject": { "type": "string" },
+        "grade": { "type": "string" },
+        "chapter": { "type": "string" },
+        "durationMinutes": { "type": "number" },
+        "description": { "type": "string" },
+        "author": { "type": "string" },
+        "totalScore": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title", "code", "subject", "durationMinutes"]
+    },
+    "StudentSubmission": {
+      "title": "StudentSubmission",
+      "description": "Completed exam submission with score, answers, and details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "examId": { "type": "string" },
+        "examTitle": { "type": "string" },
+        "studentName": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentEmail": { "type": "string" },
+        "studentClass": { "type": "string" },
+        "score": { "type": "number" },
+        "maxScore": { "type": "number" },
+        "submittedAt": { "type": "string" },
+        "timeSpentSeconds": { "type": "number" }
+      },
+      "required": ["id", "examId", "studentName", "score", "submittedAt"]
+    },
+    "LiveRoom": {
+      "title": "LiveRoom",
+      "description": "Realtime live exam session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "pin": { "type": "string" },
+        "examId": { "type": "string" },
+        "examTitle": { "type": "string" },
+        "status": { "type": "string" },
+        "mode": { "type": "string" },
+        "currentQuestionIndex": { "type": "number" },
+        "timerRemaining": { "type": "number" },
+        "timerDuration": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "pin", "examId", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Users and profile information"
+    },
+    "/exams/{examId}": {
+      "schema": "Exam",
+      "description": "Exams repository"
+    },
+    "/submissions/{submissionId}": {
+      "schema": "StudentSubmission",
+      "description": "Student test history and results"
+    },
+    "/liveRooms/{roomId}": {
+      "schema": "LiveRoom",
+      "description": "Live real-time exam rooms"
+    }
+  }
+}

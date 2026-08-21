@@ -105,7 +105,8 @@ export function evaluateExamSubmission(
   userAnswers: Record<string, any>,
   studentName: string = "Thí sinh",
   studentId: string = "TS01",
-  timeSpentSeconds: number = 0
+  timeSpentSeconds: number = 0,
+  extraMeta?: { studentEmail?: string; studentClass?: string; studentAvatar?: string }
 ): StudentSubmission {
   let totalScore = 0;
   let totalMaxScore = 0;
@@ -120,7 +121,8 @@ export function evaluateExamSubmission(
   const details: StudentSubmission["details"] = {};
 
   exam.questions.forEach((q) => {
-    const userAns = userAnswers[q.id];
+    const rawUserAns = userAnswers[q.id];
+    const userAns = rawUserAns !== undefined ? rawUserAns : "";
     const qScore = q.score || 1.0;
     const partKey = q.part;
 
@@ -139,9 +141,9 @@ export function evaluateExamSubmission(
         isCorrect,
         earnedScore: earned,
         maxScore: qScore,
-        userAnswer: userAns,
-        correctAnswer: q.correctAnswer,
-        feedback: isCorrect ? "Chính xác" : `Đáp án đúng là ${q.correctAnswer}`,
+        userAnswer: userAns || "",
+        correctAnswer: q.correctAnswer || "",
+        feedback: isCorrect ? "Chính xác" : `Đáp án đúng là ${q.correctAnswer || ""}`,
       };
     } else if (q.type === "true_false") {
       const tfResult = calculateTrueFalseScore(userAns || {}, q);
@@ -174,9 +176,9 @@ export function evaluateExamSubmission(
         isCorrect,
         earnedScore: earned,
         maxScore: qScore,
-        userAnswer: userAns,
-        correctAnswer: q.correctAnswer,
-        feedback: isCorrect ? "Chính xác" : `Đáp án chuẩn: ${q.correctAnswer}`,
+        userAnswer: userAns || "",
+        correctAnswer: q.correctAnswer || "",
+        feedback: isCorrect ? "Chính xác" : `Đáp án chuẩn: ${q.correctAnswer || ""}`,
       };
     } else if (q.type === "essay") {
       // Tự luận: Mặc định ghi nhận bài nộp (văn bản và/hoặc tệp đính kèm)
@@ -205,12 +207,15 @@ export function evaluateExamSubmission(
   });
 
   return {
-    id: "sub_" + Date.now(),
+    id: "sub_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7),
     examId: exam.id,
     examTitle: exam.title,
     studentName,
     studentId,
-    answers: userAnswers,
+    studentEmail: extraMeta?.studentEmail,
+    studentClass: extraMeta?.studentClass,
+    studentAvatar: extraMeta?.studentAvatar,
+    answers: userAnswers || {},
     score: Number(totalScore.toFixed(2)),
     maxScore: Number(totalMaxScore.toFixed(2)),
     partScores: {

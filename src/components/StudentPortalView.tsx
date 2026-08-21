@@ -377,7 +377,21 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{sub.submittedAt || "Gần đây"}</span>
+                          <span>
+                            {(() => {
+                              try {
+                                return new Date(sub.submittedAt).toLocaleString("vi-VN", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  day: "2-digit",
+                                  month: "2-digit",
+                                  year: "numeric",
+                                });
+                              } catch {
+                                return sub.submittedAt || "Gần đây";
+                              }
+                            })()}
+                          </span>
                         </span>
                         <span className="flex items-center gap-1">
                           <Clock className="w-3.5 h-3.5 text-slate-400" />

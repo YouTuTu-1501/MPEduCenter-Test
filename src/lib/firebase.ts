@@ -8,8 +8,8 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 // Khởi tạo Firestore với databaseId chuyên dụng nếu có trong config
 export const db = firebaseConfig.firestoreDatabaseId
-  ? initializeFirestore(app, {}, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+  ? initializeFirestore(app, { ignoreUndefinedProperties: true }, firebaseConfig.firestoreDatabaseId)
+  : initializeFirestore(app, { ignoreUndefinedProperties: true });
 
 // Khởi tạo Authentication
 export const auth = getAuth(app);

@@ -282,8 +282,13 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
       exam,
       userAnswers,
       studentName,
-      studentId,
-      timeSpent
+      currentUser.id || studentId,
+      timeSpent,
+      {
+        studentEmail: currentUser.email,
+        studentClass: currentUser.schoolClass || (studentName.includes("-") ? studentName.split("-")[1]?.trim() : "12A1"),
+        studentAvatar: currentUser.avatar,
+      }
     );
 
     // Xóa bản nháp sau khi đã nộp bài thành công
@@ -314,7 +319,7 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
       });
     }
 
-    // Gửi kết quả về server
+    // Gửi kết quả về server và Firebase
     try {
       await fetch("/api/submissions", {
         method: "POST",
@@ -355,13 +360,13 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
         [q.id]: { loading: false, result: data },
       }));
 
-      // Cập nhật lại điểm tự luận trong submission
+      // Cập nhật lại điểm tự luận trong submission và đồng bộ Firebase
       if (submission && data.score !== undefined) {
         const earnedDiff = data.score - (submission.details[q.id]?.earnedScore || 0);
         setSubmission((prev) => {
           if (!prev) return prev;
           const newScore = Number((prev.score + earnedDiff).toFixed(2));
-          return {
+          const updatedSub: StudentSubmission = {
             ...prev,
             score: newScore,
             partScores: {
@@ -380,6 +385,10 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
               },
             },
           };
+          if (onSubmissionComplete) {
+            onSubmissionComplete(updatedSub);
+          }
+          return updatedSub;
         });
       }
     } catch (err: any) {

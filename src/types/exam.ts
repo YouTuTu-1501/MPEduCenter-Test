@@ -112,6 +112,9 @@ export interface StudentSubmission {
   examTitle: string;
   studentName: string;
   studentId: string;
+  studentEmail?: string;
+  studentClass?: string;
+  studentAvatar?: string;
   answers: Record<string, any>;
   score: number;
   maxScore: number;

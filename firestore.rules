@@ -13,27 +13,22 @@ service cloud.firestore {
 
     // Bộ sưu tập Người dùng (users)
     match /users/{userId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // Bộ sưu tập Ngân hàng Đề thi (exams)
     match /exams/{examId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // Bộ sưu tập Bài nộp & Kết quả thi của học sinh (submissions)
     match /submissions/{submissionId} {
-      allow read: if true;
-      allow create: if true;
-      allow update, delete: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // Bộ sưu tập Phòng thi trực tuyến thời gian thực (liveRooms)
     match /liveRooms/{roomId} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     // Cho phép tất cả các tài liệu khác phục vụ học tập & thi cử

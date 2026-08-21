@@ -19,6 +19,7 @@ import {
   deleteExamFromFirestore,
   subscribeSubmissions,
   saveSubmissionToFirestore,
+  getLocalSubmissions,
 } from "./services/firestoreService";
 import { RotateCcw, Home, Sparkles } from "lucide-react";
 
@@ -111,7 +112,9 @@ function MainApp() {
   const [activeView, setActiveView] = useState<ActiveView>(() => {
     return isStudent ? "student_portal" : "bank";
   });
-  const [submissions, setSubmissions] = useState<StudentSubmission[]>([]);
+  const [submissions, setSubmissions] = useState<StudentSubmission[]>(() =>
+    getLocalSubmissions()
+  );
 
   // Tự động điều chỉnh tab điều hướng khi đổi vai trò (RBAC Route Guard)
   useEffect(() => {
@@ -214,10 +217,11 @@ function MainApp() {
     setActiveView("exam");
   };
 
-  // Lưu kết quả nộp bài thi lên Firestore
+  // Lưu kết quả nộp bài thi lên Firestore & LocalStorage
   const handleSubmissionComplete = (sub: StudentSubmission) => {
     setSubmissions((prev) => {
-      const updated = [sub, ...prev];
+      const filtered = prev.filter((s) => s.id !== sub.id);
+      const updated = [sub, ...filtered];
       try {
         localStorage.setItem("edutest_submissions", JSON.stringify(updated));
       } catch {}
