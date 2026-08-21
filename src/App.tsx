@@ -9,7 +9,8 @@ import { TeacherAnalyticsView } from "./components/TeacherAnalyticsView";
 import { RealtimeLiveRoomView } from "./components/RealtimeLiveRoomView";
 import { AdminManagementView } from "./components/AdminManagementView";
 import { StudentPortalView } from "./components/StudentPortalView";
-import { RoleSwitcherModal } from "./components/RoleSwitcherModal";
+import { AuthModal } from "./components/AuthModal";
+import { UserProfileModal } from "./components/UserProfileModal";
 import { ToastProvider, useToast } from "./context/ToastContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import {
@@ -94,7 +95,8 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
           <MainApp />
-          <RoleSwitcherModal />
+          <AuthModal />
+          <UserProfileModal />
         </AuthProvider>
       </ToastProvider>
     </ErrorBoundary>

@@ -65,6 +65,18 @@ export const saveUserToFirestore = async (user: User): Promise<void> => {
   }
 };
 
+export const saveUsersBatchToFirestore = async (users: User[]): Promise<void> => {
+  try {
+    for (const u of users) {
+      const ref = doc(db, USERS_COLLECTION, u.id);
+      await setDoc(ref, u, { merge: true });
+    }
+  } catch (err) {
+    console.error("Lỗi khi lưu danh sách người dùng lên Firestore:", err);
+    throw err;
+  }
+};
+
 export const deleteUserFromFirestore = async (userId: string): Promise<void> => {
   try {
     const ref = doc(db, USERS_COLLECTION, userId);

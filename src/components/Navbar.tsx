@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   BookOpen,
   Presentation,
@@ -13,7 +13,10 @@ import {
   Settings,
   ChevronDown,
   LogOut,
-  RefreshCw,
+  LogIn,
+  KeyRound,
+  Camera,
+  UserCheck,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { UserRole, ROLE_LABELS } from "../types/auth";
@@ -41,8 +44,28 @@ export const Navbar: React.FC<NavbarProps> = ({
   examTitle,
   examCode,
 }) => {
-  const { currentUser, isAdmin, isTeacher, isStudent, switchRole, setShowRoleModal } = useAuth();
-  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const {
+    currentUser,
+    isAdmin,
+    isTeacher,
+    isStudent,
+    logout,
+    setShowAuthModal,
+    setShowProfileModal,
+  } = useAuth();
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Đóng dropdown khi click bên ngoài
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Danh mục tab điều hướng theo vai trò (RBAC)
   const getNavItems = () => {
@@ -62,35 +85,23 @@ export const Navbar: React.FC<NavbarProps> = ({
         { id: "presentation", label: "Trình chiếu", icon: Presentation },
         { id: "live", label: "Phòng thi Live", icon: Layers },
         { id: "analytics", label: "Báo cáo & Chấm thi", icon: BarChart3 },
-        { id: "exam", label: "Thi thử", icon: Edit3 },
       ];
     }
 
-    // Học sinh (Student)
+    // Học sinh
     return [
-      { id: "student_portal", label: "Cổng Học sinh", icon: GraduationCap },
+      { id: "student_portal", label: "Cổng Luyện Thi", icon: GraduationCap },
       { id: "exam", label: "Làm bài thi", icon: Edit3 },
-      { id: "live", label: "Vào phòng Live", icon: Layers },
+      { id: "live", label: "Vào phòng thi Live", icon: Layers },
     ];
   };
 
   const navItems = getNavItems();
 
-  const getRoleIcon = (role: UserRole) => {
-    switch (role) {
-      case "admin":
-        return <ShieldCheck className="w-4 h-4 text-rose-500" />;
-      case "teacher":
-        return <Award className="w-4 h-4 text-indigo-500" />;
-      case "student":
-        return <GraduationCap className="w-4 h-4 text-emerald-500" />;
-    }
-  };
-
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-3 sm:px-6 py-2.5 shadow-xs">
-      <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-        {/* Logo & Tên Hệ Thống - Bento Brand */}
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
+        {/* Brand Logo & Name */}
         <div
           className="flex items-center gap-3 cursor-pointer group"
           onClick={() => setActiveView(isStudent ? "student_portal" : "bank")}
@@ -104,9 +115,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </h1>
               <span
                 className={`px-2 py-0.5 text-[10px] font-extrabold rounded-full ${
-                  ROLE_LABELS[currentUser.role].bgLight
-                } ${ROLE_LABELS[currentUser.role].textDark} border ${
-                  ROLE_LABELS[currentUser.role].border
+                  ROLE_LABELS[currentUser.role].color
                 }`}
               >
                 {ROLE_LABELS[currentUser.role].badge}
@@ -149,86 +158,101 @@ export const Navbar: React.FC<NavbarProps> = ({
           })}
         </nav>
 
-        {/* User Role Profile & Quick Role Switcher Pill */}
-        <div className="flex items-center gap-2 order-2 md:order-3 relative">
-          {/* Nút chuyển đổi vai trò nhanh 1 chạm */}
-          <div className="hidden lg:flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 gap-1 text-[11px] font-bold">
-            <button
-              type="button"
-              onClick={() => {
-                switchRole("admin");
-                setActiveView("admin");
-              }}
-              className={`px-2.5 py-1 rounded-xl transition ${
-                isAdmin
-                  ? "bg-rose-600 text-white shadow-xs font-extrabold"
-                  : "text-slate-600 hover:text-rose-600"
-              }`}
-              title="Chuyển sang vai trò Admin"
-            >
-              👑 Admin
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                switchRole("teacher");
-                setActiveView("bank");
-              }}
-              className={`px-2.5 py-1 rounded-xl transition ${
-                isTeacher
-                  ? "bg-indigo-600 text-white shadow-xs font-extrabold"
-                  : "text-slate-600 hover:text-indigo-600"
-              }`}
-              title="Chuyển sang vai trò Giáo viên"
-            >
-              👨‍🏫 Giáo viên
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                switchRole("student");
-                setActiveView("student_portal");
-              }}
-              className={`px-2.5 py-1 rounded-xl transition ${
-                isStudent
-                  ? "bg-emerald-600 text-white shadow-xs font-extrabold"
-                  : "text-slate-600 hover:text-emerald-600"
-              }`}
-              title="Chuyển sang vai trò Học sinh"
-            >
-              🎓 Học sinh
-            </button>
-          </div>
+        {/* User Account & Login Menu */}
+        <div className="flex items-center gap-2 order-2 md:order-3 relative" ref={dropdownRef}>
+          <button
+            type="button"
+            onClick={() => setShowDropdown(!showDropdown)}
+            className="flex items-center gap-2.5 p-1.5 pr-3 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-slate-100 transition shadow-2xs group"
+          >
+            <img
+              src={currentUser.avatar}
+              alt={currentUser.name}
+              className="w-8 h-8 rounded-xl object-cover border border-slate-300 group-hover:scale-105 transition"
+            />
+            <div className="text-left hidden sm:block">
+              <div className="text-xs font-bold text-slate-900 leading-tight truncate max-w-[120px]">
+                {currentUser.name}
+              </div>
+              <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isAdmin ? "bg-rose-500" : isTeacher ? "bg-indigo-500" : "bg-emerald-500"
+                  }`}
+                ></span>
+                <span>{ROLE_LABELS[currentUser.role].title}</span>
+              </div>
+            </div>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-700" />
+          </button>
 
-          {/* User Profile Button */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowRoleModal(true)}
-              className="flex items-center gap-2 p-1.5 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-slate-100 transition shadow-2xs group"
-              title="Bấm để chuyển đổi vai trò và tài khoản người dùng"
-            >
-              <img
-                src={currentUser.avatar}
-                alt={currentUser.name}
-                className="w-8 h-8 rounded-xl object-cover border border-slate-300 group-hover:scale-105 transition"
-              />
-              <div className="hidden sm:block text-left">
-                <div className="text-xs font-bold text-slate-900 leading-tight truncate max-w-[120px]">
-                  {currentUser.name}
-                </div>
-                <div className="text-[10px] text-slate-500 flex items-center gap-1">
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      isAdmin ? "bg-rose-500" : isTeacher ? "bg-indigo-500" : "bg-emerald-500"
-                    }`}
-                  ></span>
-                  <span>{ROLE_LABELS[currentUser.role].title}</span>
+          {/* User Account Dropdown */}
+          {showDropdown && (
+            <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 animate-in fade-in slide-in-from-top-2">
+              <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50">
+                <div className="text-xs font-bold text-slate-900 truncate">{currentUser.name}</div>
+                <div className="text-[11px] text-slate-500 truncate">{currentUser.email}</div>
+                <div className="mt-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-white border border-slate-200 text-slate-700">
+                  <span>Vai trò:</span>
+                  <span className={`font-black ${ROLE_LABELS[currentUser.role].textDark}`}>
+                    {ROLE_LABELS[currentUser.role].title}
+                  </span>
                 </div>
               </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-700" />
-            </button>
-          </div>
+
+              <div className="p-1.5 space-y-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDropdown(false);
+                    setShowProfileModal(true);
+                  }}
+                  className="w-full px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-50 rounded-xl flex items-center gap-2 text-left transition"
+                >
+                  <Camera className="w-4 h-4 text-amber-600" />
+                  <span>Đổi hình đại diện & Hồ sơ</span>
+                </button>
+
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveView("admin");
+                      setShowDropdown(false);
+                    }}
+                    className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-xl flex items-center gap-2 text-left"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-rose-500" />
+                    <span>Trang Quản trị Hệ thống</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDropdown(false);
+                    setShowAuthModal(true);
+                  }}
+                  className="w-full px-3 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-xl flex items-center gap-2 text-left"
+                >
+                  <LogIn className="w-4 h-4 text-indigo-600" />
+                  <span>Đăng nhập tài khoản khác</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDropdown(false);
+                    logout();
+                  }}
+                  className="w-full px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl flex items-center gap-2 text-left"
+                >
+                  <LogOut className="w-4 h-4 text-rose-600" />
+                  <span>Đăng xuất</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </header>

@@ -48,6 +48,13 @@ import {
   ChevronDown,
   Zap,
   CheckCheck,
+  Copy,
+  Printer,
+  Wand2,
+  FileDown,
+  Camera,
+  Smile,
+  Share2,
 } from "lucide-react";
 
 interface AdminManagementViewProps {
@@ -70,11 +77,12 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     currentUser,
     users,
     addUser,
+    addUsersBatch,
     updateUser,
+    updateUserAvatar,
     deleteUser,
     toggleUserStatus,
     resetUsers,
-    switchUser,
     setUserRole,
     updateUserPermissions,
     getUserPermissions,
@@ -88,15 +96,68 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   // Chọn người dùng hàng loạt (Batch Selection)
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
-  // Modal Thêm / Sửa người dùng cơ bản
+  // Modal Thêm / Cấp tài khoản đơn lẻ
   const [showUserModal, setShowUserModal] = useState<boolean>(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [formName, setFormName] = useState<string>("");
   const [formEmail, setFormEmail] = useState<string>("");
+  const [formPassword, setFormPassword] = useState<string>("123456");
   const [formRole, setFormRole] = useState<UserRole>("student");
   const [formClass, setFormClass] = useState<string>("12A1");
-  const [formSubject, setFormSubject] = useState<string>("Toán học");
+  const [formSubject, setFormSubject] = useState<string>("Toán học THPT");
   const [formPhone, setFormPhone] = useState<string>("");
+  const [formAvatar, setFormAvatar] = useState<string>("");
+
+  // Modal Cấp tài khoản hàng loạt (Batch Provisioning)
+  const [showBatchModal, setShowBatchModal] = useState<boolean>(false);
+  const [batchNamesText, setBatchNamesText] = useState<string>(
+    "Nguyễn Văn An\nTrần Thị Bích\nLê Hoàng Cường\nPhạm Thị Dung\nHoàng Minh Đức\nĐỗ Hải Đăng"
+  );
+  const [batchRole, setBatchRole] = useState<UserRole>("student");
+  const [batchClass, setBatchClass] = useState<string>("12A1");
+  const [batchSubject, setBatchSubject] = useState<string>("Toán học THPT");
+  const [batchPasswordRule, setBatchPasswordRule] = useState<"default" | "random" | "custom">("default");
+  const [batchCustomPass, setBatchCustomPass] = useState<string>("123456");
+  const [batchDomain, setBatchDomain] = useState<string>("@student.vn");
+
+  // Modal Xuất phiếu cấp tài khoản (Export Credentials Cards / CSV)
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [exportClassFilter, setExportClassFilter] = useState<string>("all");
+
+  // Helper chuyển tên tiếng Việt sang email không dấu
+  const slugifyVietnamese = (str: string): string => {
+    return str
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/Đ/g, "d")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .trim();
+  };
+
+  const generateEmailFromName = (name: string, domain: string, existingList: string[] = []): string => {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return `user${Date.now()}${domain}`;
+    const lastName = slugifyVietnamese(parts[parts.length - 1]);
+    const initials = parts.slice(0, -1).map((p) => slugifyVietnamese(p)[0] || "").join("");
+    let base = `${lastName}.${initials}`;
+    if (!initials) base = lastName;
+    let email = `${base}${domain}`;
+    let counter = 1;
+    while (existingList.includes(email)) {
+      email = `${base}${counter}${domain}`;
+      counter++;
+    }
+    return email;
+  };
+
+  // Sao chép thông tin tài khoản nhanh
+  const handleCopyCredentials = (user: User) => {
+    const text = `Họ tên: ${user.name}\nEmail/Tài khoản: ${user.email}\nMật khẩu: ${user.password || "123456"}\nVai trò: ${ROLE_LABELS[user.role].title}${user.schoolClass ? `\nLớp: ${user.schoolClass}` : ""}`;
+    navigator.clipboard.writeText(text);
+    toast.success("Đã sao chép!", `Thông tin đăng nhập của ${user.name} đã được lưu vào bộ nhớ tạm.`);
+  };
 
   // Modal Phân quyền chi tiết (Granular Permission Modal)
   const [permissionTargetUser, setPermissionTargetUser] = useState<User | null>(null);
@@ -185,11 +246,33 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     setEditingUserId(null);
     setFormName("");
     setFormEmail("");
+    setFormPassword("123456");
     setFormRole("student");
     setFormClass("12A1");
     setFormSubject("Toán học THPT");
     setFormPhone("");
+    setFormAvatar("");
     setShowUserModal(true);
+  };
+
+  // Tự động sinh Email khi nhập tên
+  const handleAutoFillEmail = () => {
+    if (!formName.trim()) {
+      toast.info("Vui lòng nhập họ tên trước", "Hệ thống sẽ dựa vào họ tên để tạo email chuẩn.");
+      return;
+    }
+    const domain = formRole === "student" ? "@student.vn" : "@edulink.vn";
+    const existing = users.map((u) => u.email.toLowerCase());
+    const generated = generateEmailFromName(formName, domain, existing);
+    setFormEmail(generated);
+    toast.info("Đã tạo email!", `Email đề xuất: ${generated}`);
+  };
+
+  // Tạo mật khẩu ngẫu nhiên
+  const handleGenerateRandomPass = () => {
+    const random = Math.floor(100000 + Math.random() * 900000).toString();
+    setFormPassword(random);
+    toast.info("Mật khẩu mới", `Đã tạo mật khẩu ngẫu nhiên 6 chữ số: ${random}`);
   };
 
   // Mở modal sửa thông tin người dùng
@@ -197,11 +280,76 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     setEditingUserId(user.id);
     setFormName(user.name);
     setFormEmail(user.email);
+    setFormPassword(user.password || "123456");
     setFormRole(user.role);
     setFormClass(user.schoolClass || "12A1");
     setFormSubject(user.subject || "Toán học THPT");
     setFormPhone(user.phone || "");
+    setFormAvatar(user.avatar || "");
     setShowUserModal(true);
+  };
+
+  // Xử lý cấp tài khoản hàng loạt
+  const handleExecuteBatchProvision = () => {
+    const rawNames = batchNamesText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    if (rawNames.length === 0) {
+      toast.error("Danh sách trống", "Vui lòng nhập ít nhất một tên người dùng.");
+      return;
+    }
+
+    const existingEmails = users.map((u) => u.email.toLowerCase());
+    const newUsersToCreate = rawNames.map((name) => {
+      const generatedEmail = generateEmailFromName(name, batchDomain, existingEmails);
+      existingEmails.push(generatedEmail.toLowerCase());
+
+      let pass = "123456";
+      if (batchPasswordRule === "random") {
+        pass = Math.floor(100000 + Math.random() * 900000).toString();
+      } else if (batchPasswordRule === "custom" && batchCustomPass.trim()) {
+        pass = batchCustomPass.trim();
+      }
+
+      return {
+        name,
+        email: generatedEmail,
+        password: pass,
+        role: batchRole,
+        schoolClass: batchRole === "student" ? batchClass : undefined,
+        subject: batchRole === "teacher" ? batchSubject : undefined,
+        status: "active" as const,
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
+      };
+    });
+
+    addUsersBatch(newUsersToCreate);
+    setShowBatchModal(false);
+  };
+
+  // Xuất file CSV danh sách tài khoản
+  const handleExportCSV = (userList: User[]) => {
+    const headers = "STT,Họ và tên,Email / Tên đăng nhập,Mật khẩu,Vai trò,Lớp / Bộ môn,Trạng thái\n";
+    const rows = userList
+      .map((u, i) => {
+        const roleLabel = ROLE_LABELS[u.role].title;
+        const cls = u.schoolClass || u.subject || "";
+        const status = u.status === "active" ? "Hoạt động" : "Đã khóa";
+        return `${i + 1},"${u.name}","${u.email}","${u.password || "123456"}","${roleLabel}","${cls}","${status}"`;
+      })
+      .join("\n");
+
+    const blob = new Blob(["\uFEFF" + headers + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Danh_sach_tai_khoan_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Đã tải xuống!", "File CSV danh sách tài khoản đã được tải về máy.");
   };
 
   // Lưu thông tin người dùng
@@ -216,21 +364,24 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
       updateUser(editingUserId, {
         name: formName.trim(),
         email: formEmail.trim(),
+        password: formPassword.trim() || "123456",
         role: formRole,
         schoolClass: formRole === "student" ? formClass.trim() : undefined,
         subject: formRole === "teacher" ? formSubject.trim() : undefined,
         phone: formPhone.trim(),
+        avatar: formAvatar || undefined,
       });
     } else {
       addUser({
         name: formName.trim(),
         email: formEmail.trim(),
+        password: formPassword.trim() || "123456",
         role: formRole,
         schoolClass: formRole === "student" ? formClass.trim() : undefined,
         subject: formRole === "teacher" ? formSubject.trim() : undefined,
         phone: formPhone.trim(),
         status: "active",
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(formName.trim())}`,
+        avatar: formAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(formName.trim())}`,
       });
     }
     setShowUserModal(false);
@@ -534,15 +685,47 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
               </select>
             </div>
 
-            <div className="flex items-center gap-2 w-full lg:w-auto justify-end">
+            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
+              {/* Nút Cấp tài khoản mới */}
+              <button
+                type="button"
+                onClick={handleOpenAddUser}
+                className="px-3.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition flex items-center gap-1.5 shadow-sm"
+                title="Cấp tài khoản mới cho học sinh, giáo viên hoặc quản trị"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Cấp tài khoản mới</span>
+              </button>
+
+              {/* Nút Cấp tài khoản hàng loạt */}
+              <button
+                type="button"
+                onClick={() => setShowBatchModal(true)}
+                className="px-3.5 py-2 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition flex items-center gap-1.5 shadow-2xs"
+                title="Cấp tài khoản hàng loạt theo danh sách lớp học"
+              >
+                <Users className="w-4 h-4 text-indigo-600" />
+                <span>Cấp hàng loạt (Batch)</span>
+              </button>
+
+              {/* Nút Xuất phiếu tài khoản */}
+              <button
+                type="button"
+                onClick={() => setShowExportModal(true)}
+                className="px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center gap-1.5"
+                title="In hoặc xuất danh sách tài khoản & mật khẩu cho học sinh"
+              >
+                <Printer className="w-3.5 h-3.5 text-slate-600" />
+                <span>Xuất phiếu / In</span>
+              </button>
+
               <button
                 type="button"
                 onClick={resetUsers}
-                className="px-3 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center gap-1.5"
+                className="px-2.5 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 rounded-xl transition flex items-center gap-1"
                 title="Khôi phục danh sách tài khoản mẫu ban đầu"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Khôi phục mẫu</span>
               </button>
             </div>
           </div>
@@ -644,11 +827,21 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                         {/* Người dùng */}
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-3">
-                            <img
-                              src={user.avatar}
-                              alt={user.name}
-                              className="w-10 h-10 rounded-2xl object-cover border border-slate-200 shrink-0 shadow-2xs"
-                            />
+                            <div className="relative group shrink-0">
+                              <img
+                                src={user.avatar}
+                                alt={user.name}
+                                className="w-10 h-10 rounded-2xl object-cover border border-slate-200 shadow-2xs group-hover:opacity-80 transition"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditUser(user)}
+                                className="absolute inset-0 flex items-center justify-center bg-slate-900/40 text-white rounded-2xl opacity-0 group-hover:opacity-100 transition"
+                                title="Đổi hình đại diện"
+                              >
+                                <Camera className="w-4 h-4" />
+                              </button>
+                            </div>
                             <div>
                               <div className="font-bold text-slate-900 flex items-center gap-1.5">
                                 <span>{user.name}</span>
@@ -658,7 +851,17 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                                   </span>
                                 )}
                               </div>
-                              <div className="text-slate-500 text-[11px]">{user.email}</div>
+                              <div className="text-slate-500 text-[11px] flex items-center gap-1.5 mt-0.5">
+                                <span>{user.email}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyCredentials(user)}
+                                  className="text-slate-400 hover:text-indigo-600 transition"
+                                  title="Sao chép tài khoản & mật khẩu"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </button>
+                              </div>
                               {user.phone && (
                                 <div className="text-slate-400 text-[10px] font-mono mt-0.5">
                                   {user.phone}
@@ -763,6 +966,16 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                         {/* Thao tác tài khoản */}
                         <td className="py-3.5 px-4 text-right">
                           <div className="flex items-center justify-end gap-1">
+                            {/* Sao chép thông tin đăng nhập */}
+                            <button
+                              type="button"
+                              onClick={() => handleCopyCredentials(user)}
+                              className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition"
+                              title="Sao chép tài khoản & mật khẩu cấp cho người dùng"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </button>
+
                             {/* Phân quyền chi tiết */}
                             <button
                               type="button"
@@ -772,18 +985,6 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                             >
                               <Sliders className="w-4 h-4" />
                             </button>
-
-                            {/* Đăng nhập giả lập để kiểm thử */}
-                            {!isSelf && !isLocked && (
-                              <button
-                                type="button"
-                                onClick={() => switchUser(user.id)}
-                                className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition"
-                                title="Đăng nhập với tư cách tài khoản này để kiểm thử quyền"
-                              >
-                                <KeyRound className="w-4 h-4" />
-                              </button>
-                            )}
 
                             {/* Khóa / Mở khóa */}
                             {!isSelf && (
@@ -1339,28 +1540,122 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveUser} className="p-6 space-y-4 text-xs">
+            <form onSubmit={handleSaveUser} className="p-6 space-y-4 text-xs max-h-[80vh] overflow-y-auto">
+              {/* Hình đại diện (Avatar) */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Họ và Tên (*)</label>
-                <input
-                  type="text"
-                  required
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  placeholder="Ví dụ: Nguyễn Văn A"
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                />
+                <label className="block font-bold text-slate-700 mb-1.5">Hình đại diện (Avatar)</label>
+                <div className="flex items-center gap-3">
+                  <img
+                    src={
+                      formAvatar ||
+                      `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(formName || "User")}`
+                    }
+                    alt="Preview"
+                    className="w-12 h-12 rounded-2xl object-cover border border-slate-200 shadow-xs shrink-0"
+                  />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+                      {[
+                        "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+                        "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
+                        "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150",
+                        "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
+                        "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150",
+                        `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(formName || "Edu")}`,
+                        `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(formName || "Robot")}`,
+                      ].map((url, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setFormAvatar(url)}
+                          className={`w-7 h-7 rounded-xl overflow-hidden border-2 transition shrink-0 ${
+                            formAvatar === url ? "border-indigo-600 scale-105" : "border-slate-200 opacity-70 hover:opacity-100"
+                          }`}
+                        >
+                          <img src={url} alt="" className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={formAvatar}
+                        onChange={(e) => setFormAvatar(e.target.value)}
+                        placeholder="Dán URL ảnh hoặc để trống lấy avatar tự động"
+                        className="flex-1 px-3 py-1.5 text-[11px] rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormAvatar(
+                            `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(formName || Date.now().toString())}`
+                          )
+                        }
+                        className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-[11px] transition shrink-0 flex items-center gap-1"
+                        title="Tạo avatar ngẫu nhiên từ tên"
+                      >
+                        <Wand2 className="w-3 h-3" />
+                        <span>Đổi mẫu</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Địa chỉ Email (*)</label>
+                <label className="block font-bold text-slate-700 mb-1">Họ và Tên (*)</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    required
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    placeholder="Ví dụ: Nguyễn Văn An"
+                    className="flex-1 px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAutoFillEmail}
+                    className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold rounded-xl text-xs transition shrink-0 flex items-center gap-1"
+                    title="Tự động tạo email chuẩn từ họ tên"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" />
+                    <span>Sinh Email</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Địa chỉ Email / Tên đăng nhập (*)</label>
                 <input
                   type="email"
                   required
                   value={formEmail}
                   onChange={(e) => setFormEmail(e.target.value)}
-                  placeholder="Ví dụ: a.nguyen@school.edu.vn"
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  placeholder="Ví dụ: an.nv@student.vn"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none font-mono"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-700">Mật khẩu đăng nhập (*)</label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateRandomPass}
+                    className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1"
+                  >
+                    <KeyRound className="w-3 h-3" />
+                    <span>Tạo 6 số ngẫu nhiên</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={formPassword}
+                  onChange={(e) => setFormPassword(e.target.value)}
+                  placeholder="Mật khẩu (mặc định: 123456)"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none font-mono font-bold"
                 />
               </div>
 
@@ -1431,12 +1726,370 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition shadow-sm"
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition shadow-sm flex items-center gap-1.5"
                 >
-                  {editingUserId ? "Lưu cập nhật" : "Tạo tài khoản"}
+                  <Save className="w-4 h-4" />
+                  <span>{editingUserId ? "Lưu cập nhật" : "Cấp tài khoản"}</span>
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: CẤP TÀI KHOẢN HÀNG LOẠT (BATCH PROVISIONING) */}
+      {showBatchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 bg-indigo-950 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Users className="w-5 h-5 text-indigo-400" />
+                <div>
+                  <h3 className="font-bold text-base">Cấp tài khoản hàng loạt (Batch Provisioning)</h3>
+                  <p className="text-xs text-indigo-300">Tự động sinh email, mật khẩu và đồng bộ tài khoản cho toàn bộ lớp</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBatchModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto text-xs flex-1">
+              {/* Cấu hình vai trò & Lớp */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Vai trò cấp</label>
+                  <select
+                    value={batchRole}
+                    onChange={(e) => setBatchRole(e.target.value as UserRole)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  >
+                    <option value="student">🎓 Học sinh</option>
+                    <option value="teacher">👨‍🏫 Giáo viên</option>
+                    <option value="admin">👑 Quản trị viên</option>
+                  </select>
+                </div>
+
+                {batchRole === "student" && (
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Lớp học</label>
+                    <input
+                      type="text"
+                      value={batchClass}
+                      onChange={(e) => setBatchClass(e.target.value)}
+                      placeholder="12A1"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+
+                {batchRole === "teacher" && (
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Môn phụ trách</label>
+                    <input
+                      type="text"
+                      value={batchSubject}
+                      onChange={(e) => setBatchSubject(e.target.value)}
+                      placeholder="Toán học THPT"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Tên miền Email</label>
+                  <select
+                    value={batchDomain}
+                    onChange={(e) => setBatchDomain(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  >
+                    <option value="@student.vn">@student.vn</option>
+                    <option value="@edulink.vn">@edulink.vn</option>
+                    <option value="@school.edu.vn">@school.edu.vn</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Quy tắc mật khẩu */}
+              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+                <label className="block font-bold text-slate-700 mb-1.5">Quy tắc cấp mật khẩu ban đầu</label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer font-medium">
+                    <input
+                      type="radio"
+                      name="batchPassRule"
+                      checked={batchPasswordRule === "default"}
+                      onChange={() => setBatchPasswordRule("default")}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>Mặc định: <strong>123456</strong></span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-medium">
+                    <input
+                      type="radio"
+                      name="batchPassRule"
+                      checked={batchPasswordRule === "random"}
+                      onChange={() => setBatchPasswordRule("random")}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>Ngẫu nhiên 6 chữ số (Bảo mật cao)</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-medium">
+                    <input
+                      type="radio"
+                      name="batchPassRule"
+                      checked={batchPasswordRule === "custom"}
+                      onChange={() => setBatchPasswordRule("custom")}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>Tùy chỉnh:</span>
+                    {batchPasswordRule === "custom" && (
+                      <input
+                        type="text"
+                        value={batchCustomPass}
+                        onChange={(e) => setBatchCustomPass(e.target.value)}
+                        className="px-2 py-1 rounded-lg border border-slate-300 w-24 text-xs font-mono font-bold"
+                      />
+                    )}
+                  </label>
+                </div>
+              </div>
+
+              {/* Danh sách họ tên */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-bold text-slate-700">
+                    Danh sách họ tên (mỗi học sinh 1 dòng)
+                  </label>
+                  <span className="text-[11px] text-indigo-600 font-bold">
+                    {batchNamesText.split("\n").filter((l) => l.trim().length > 0).length} người dùng
+                  </span>
+                </div>
+                <textarea
+                  rows={6}
+                  value={batchNamesText}
+                  onChange={(e) => setBatchNamesText(e.target.value)}
+                  placeholder="Nhập hoặc dán danh sách học sinh (Nguyễn Văn A&#10;Trần Thị B...)"
+                  className="w-full px-3.5 py-2.5 text-xs rounded-2xl border border-slate-300 font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed"
+                />
+              </div>
+
+              {/* Xem trước mẫu (Preview) */}
+              <div className="bg-indigo-50/50 p-3.5 rounded-2xl border border-indigo-100">
+                <div className="font-bold text-indigo-900 mb-2 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Xem trước danh sách tài khoản sẽ được cấp:</span>
+                </div>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {batchNamesText
+                    .split("\n")
+                    .map((l) => l.trim())
+                    .filter(Boolean)
+                    .slice(0, 5)
+                    .map((name, i) => {
+                      const email = generateEmailFromName(name, batchDomain, []);
+                      return (
+                        <div key={i} className="flex items-center justify-between text-[11px] bg-white p-2 rounded-xl border border-indigo-100">
+                          <span className="font-bold text-slate-900">{name}</span>
+                          <span className="text-indigo-600 font-mono">{email}</span>
+                          <span className="text-slate-500 font-mono font-bold">
+                            PW: {batchPasswordRule === "default" ? "123456" : batchPasswordRule === "random" ? "••••••" : batchCustomPass}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <span className="text-xs text-slate-600">
+                Sẵn sàng cấp cho{" "}
+                <strong className="text-indigo-600">
+                  {batchNamesText.split("\n").filter((l) => l.trim().length > 0).length}
+                </strong>{" "}
+                tài khoản
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowBatchModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold transition text-xs"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteBatchProvision}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition shadow-sm flex items-center gap-1.5 text-xs"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Xác nhận Cấp tài khoản</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: XUẤT PHIẾU CẤP TÀI KHOẢN & TẢI FILE CSV */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Printer className="w-5 h-5 text-indigo-400" />
+                <div>
+                  <h3 className="font-bold text-base">Xuất phiếu cấp tài khoản & Danh sách đăng nhập</h3>
+                  <p className="text-xs text-slate-400">In phiếu phát cho học sinh hoặc xuất file Excel CSV</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Filter toolbar */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-700">Lọc theo lớp/nhóm:</span>
+                <select
+                  value={exportClassFilter}
+                  onChange={(e) => setExportClassFilter(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="all">Tất cả ({users.length} tài khoản)</option>
+                  <option value="12A1">Lớp 12A1</option>
+                  <option value="12A2">Lớp 12A2</option>
+                  <option value="teacher">Chỉ Giáo viên</option>
+                  <option value="student">Chỉ Học sinh</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const list = users.filter((u) => {
+                      if (exportClassFilter === "all") return true;
+                      if (exportClassFilter === "teacher") return u.role === "teacher";
+                      if (exportClassFilter === "student") return u.role === "student";
+                      return u.schoolClass === exportClassFilter;
+                    });
+                    const fullText = list
+                      .map(
+                        (u, i) =>
+                          `${i + 1}. Họ tên: ${u.name} | Email: ${u.email} | Mật khẩu: ${u.password || "123456"} | Vai trò: ${ROLE_LABELS[u.role].title}${u.schoolClass ? ` | Lớp: ${u.schoolClass}` : ""}`
+                      )
+                      .join("\n");
+                    navigator.clipboard.writeText(fullText);
+                    toast.success("Đã sao chép!", `Đã sao chép thông tin ${list.length} tài khoản.`);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold transition flex items-center gap-1"
+                >
+                  <Copy className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Sao chép toàn bộ</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const list = users.filter((u) => {
+                      if (exportClassFilter === "all") return true;
+                      if (exportClassFilter === "teacher") return u.role === "teacher";
+                      if (exportClassFilter === "student") return u.role === "student";
+                      return u.schoolClass === exportClassFilter;
+                    });
+                    handleExportCSV(list);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition flex items-center gap-1 shadow-2xs"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Tải file Excel (CSV)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition flex items-center gap-1 shadow-2xs"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>In phiếu ngay</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Cards Grid Preview */}
+            <div className="p-6 overflow-y-auto flex-1 bg-slate-100/70">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                {users
+                  .filter((u) => {
+                    if (exportClassFilter === "all") return true;
+                    if (exportClassFilter === "teacher") return u.role === "teacher";
+                    if (exportClassFilter === "student") return u.role === "student";
+                    return u.schoolClass === exportClassFilter;
+                  })
+                  .map((u) => (
+                    <div
+                      key={u.id}
+                      className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs hover:shadow-md transition space-y-3 relative overflow-hidden"
+                    >
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <img src={u.avatar} alt="" className="w-8 h-8 rounded-xl object-cover border border-slate-200" />
+                          <div>
+                            <div className="font-bold text-slate-900 text-xs">{u.name}</div>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold">
+                              {ROLE_LABELS[u.role].title} {u.schoolClass ? `• Lớp ${u.schoolClass}` : ""}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCredentials(u)}
+                          className="p-1.5 rounded-lg bg-slate-50 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition"
+                          title="Sao chép"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5 text-[11px] bg-slate-50 p-2.5 rounded-xl border border-slate-100 font-mono">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 font-sans">Tài khoản:</span>
+                          <span className="font-bold text-slate-800">{u.email}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 font-sans">Mật khẩu:</span>
+                          <span className="font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                            {u.password || "123456"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            <div className="px-6 py-3 bg-white border-t border-slate-200 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition text-xs"
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}

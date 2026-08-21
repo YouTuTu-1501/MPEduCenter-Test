@@ -4,6 +4,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  password?: string;
   role: UserRole;
   avatar: string;
   schoolClass?: string; // Ví dụ: "12A1", "12A2", "11B1" dành cho Học sinh
@@ -177,6 +178,7 @@ export const INITIAL_USERS: User[] = [
     id: "usr_admin_01",
     name: "Nguyễn Quản Trị",
     email: "admin@edulink.vn",
+    password: "password" in { password: "" } ? "123456" : "123456",
     role: "admin",
     avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
     phone: "0901 234 567",
@@ -189,6 +191,7 @@ export const INITIAL_USERS: User[] = [
     id: "usr_teacher_01",
     name: "ThS. Trần Văn Toán",
     email: "toan.tran@edulink.vn",
+    password: "password" in { password: "" } ? "123456" : "123456",
     role: "teacher",
     avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
     subject: "Toán học THPT (Lớp 12 & 11)",
@@ -202,6 +205,7 @@ export const INITIAL_USERS: User[] = [
     id: "usr_teacher_02",
     name: "Cô Lê Thị Mai",
     email: "mai.le@edulink.vn",
+    password: "password" in { password: "" } ? "123456" : "123456",
     role: "teacher",
     avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
     subject: "Toán học (Lớp 10 & 11)",
@@ -215,6 +219,7 @@ export const INITIAL_USERS: User[] = [
     id: "usr_student_01",
     name: "Nguyễn Hoàng Nam",
     email: "nam.nh@student.vn",
+    password: "password" in { password: "" } ? "123456" : "123456",
     role: "student",
     avatar: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80",
     schoolClass: "12A1",
@@ -228,6 +233,7 @@ export const INITIAL_USERS: User[] = [
     id: "usr_student_02",
     name: "Trần Bảo Ngọc",
     email: "ngoc.tb@student.vn",
+    password: "password" in { password: "" } ? "123456" : "123456",
     role: "student",
     avatar: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80",
     schoolClass: "12A1",
@@ -241,6 +247,7 @@ export const INITIAL_USERS: User[] = [
     id: "usr_student_03",
     name: "Lê Minh Quân",
     email: "quan.lm@student.vn",
+    password: "password" in { password: "" } ? "123456" : "123456",
     role: "student",
     avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
     schoolClass: "12A2",

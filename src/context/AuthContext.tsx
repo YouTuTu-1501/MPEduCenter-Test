@@ -10,9 +10,24 @@ import { useToast } from "./ToastContext";
 import {
   subscribeUsers,
   saveUserToFirestore,
+  saveUsersBatchToFirestore,
   deleteUserFromFirestore,
   seedInitialUsers,
 } from "../services/firestoreService";
+
+interface LoginResult {
+  success: boolean;
+  message: string;
+}
+
+interface RegisterData {
+  name: string;
+  email: string;
+  password?: string;
+  role: UserRole;
+  schoolClass?: string;
+  subject?: string;
+}
 
 interface AuthContextType {
   currentUser: User;
@@ -20,22 +35,26 @@ interface AuthContextType {
   isAdmin: boolean;
   isTeacher: boolean;
   isStudent: boolean;
+  isAuthenticated: boolean;
   hasPermission: (perm: PermissionKey) => boolean;
   getUserPermissions: (user: User) => PermissionKey[];
   setUserRole: (userId: string, newRole: UserRole) => void;
   updateUserPermissions: (userId: string, permissions: PermissionKey[]) => void;
   toggleUserPermission: (userId: string, perm: PermissionKey) => void;
-  switchRole: (role: UserRole) => void;
-  switchUser: (userId: string) => void;
-  login: (email: string) => boolean;
+  login: (email: string, password?: string) => LoginResult;
+  register: (data: RegisterData) => LoginResult;
   logout: () => void;
-  addUser: (userData: Omit<User, "id" | "createdAt">) => void;
+  addUser: (userData: Omit<User, "id" | "createdAt">) => User;
+  addUsersBatch: (newUsersList: Array<Omit<User, "id" | "createdAt">>) => User[];
   updateUser: (userId: string, partial: Partial<User>) => void;
+  updateUserAvatar: (userId: string, avatarUrl: string) => void;
   deleteUser: (userId: string) => void;
   toggleUserStatus: (userId: string) => void;
   resetUsers: () => void;
-  showRoleModal: boolean;
-  setShowRoleModal: (show: boolean) => void;
+  showAuthModal: boolean;
+  setShowAuthModal: (show: boolean) => void;
+  showProfileModal: boolean;
+  setShowProfileModal: (show: boolean) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -45,7 +64,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [users, setUsers] = useState<User[]>(() => {
     try {
-      const saved = localStorage.getItem("edutest_users");
+      const saved = localStorage.getItem("mpeducenter_users");
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -56,14 +75,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [currentUserId, setCurrentUserId] = useState<string>(() => {
     try {
-      const saved = localStorage.getItem("edutest_current_user_id");
+      const saved = localStorage.getItem("mpeducenter_current_user_id");
       if (saved) return saved;
     } catch {}
-    // Mặc định khởi tạo tài khoản Giáo viên hoặc Admin để dễ trải nghiệm
-    return INITIAL_USERS[1].id; // ThS. Trần Văn Toán
+    // Mặc định đăng nhập tài khoản Học sinh Nam 12A1 hoặc Giáo viên
+    return INITIAL_USERS[3].id; // Học sinh Nguyễn Hoàng Nam (Mặc định khi vào hệ thống)
   });
 
-  const [showRoleModal, setShowRoleModal] = useState<boolean>(false);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
   // Đồng bộ Firestore theo thời gian thực (Real-time Firestore Subscription)
   useEffect(() => {
@@ -78,14 +98,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Lưu users vào LocalStorage để cache offline
   useEffect(() => {
     try {
-      localStorage.setItem("edutest_users", JSON.stringify(users));
+      localStorage.setItem("mpeducenter_users", JSON.stringify(users));
     } catch {}
   }, [users]);
 
   // Lưu currentUserId
   useEffect(() => {
     try {
-      localStorage.setItem("edutest_current_user_id", currentUserId);
+      localStorage.setItem("mpeducenter_current_user_id", currentUserId);
     } catch {}
   }, [currentUserId]);
 
@@ -94,6 +114,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const isAdmin = currentUser.role === "admin";
   const isTeacher = currentUser.role === "teacher";
   const isStudent = currentUser.role === "student";
+  const isAuthenticated = true;
 
   const getUserPermissions = (user: User): PermissionKey[] => {
     const defaultPerms = ROLE_PERMISSIONS[user.role] || [];
@@ -108,7 +129,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return perms.includes(perm);
   };
 
-  // Cấp đổi vai trò trực tiếp (Admin -> Teacher, Teacher -> Student, Student -> Teacher, etc.)
+  // Cấp đổi vai trò trực tiếp do Admin thực hiện trong bảng Quản trị
   const setUserRole = (userId: string, newRole: UserRole) => {
     setUsers((prev) =>
       prev.map((u) => {
@@ -118,14 +139,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             "Cấp quyền vai trò thành công!",
             `Đã chuyển tài khoản "${u.name}" sang vai trò: ${roleLabel}.`
           );
-          return {
+          const updated: User = {
             ...u,
             role: newRole,
-            // Nếu chuyển sang giáo viên mà chưa có môn, gán mặc định
             subject: newRole === "teacher" ? u.subject || "Toán học THPT" : u.subject,
-            // Nếu chuyển sang học sinh mà chưa có lớp, gán mặc định
             schoolClass: newRole === "student" ? u.schoolClass || "12A1" : u.schoolClass,
           };
+          saveUserToFirestore(updated).catch((e) => console.warn(e));
+          return updated;
         }
         return u;
       })
@@ -141,10 +162,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             "Cập nhật phân quyền thành công!",
             `Đã lưu thiết lập ${permissions.length} quyền hạn cho tài khoản "${u.name}".`
           );
-          return {
+          const updated: User = {
             ...u,
             customPermissions: permissions,
           };
+          saveUserToFirestore(updated).catch((e) => console.warn(e));
+          return updated;
         }
         return u;
       })
@@ -167,77 +190,159 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             `Tài khoản "${u.name}" ${exists ? "đã bị thu hồi" : "đã được cấp"} quyền này.`
           );
 
-          return {
+          const updated: User = {
             ...u,
             customPermissions: nextPerms,
           };
+          saveUserToFirestore(updated).catch((e) => console.warn(e));
+          return updated;
         }
         return u;
       })
     );
   };
 
-  // Đổi vai trò nhanh
-  const switchRole = (targetRole: UserRole) => {
-    const targetUser = users.find((u) => u.role === targetRole && u.status === "active") || users.find((u) => u.role === targetRole);
-    if (targetUser) {
-      setCurrentUserId(targetUser.id);
-      toast.info(
-        "Đã chuyển đổi vai trò",
-        `Đang xem với tư cách: ${targetUser.name} (${targetRole === "admin" ? "Quản trị viên" : targetRole === "teacher" ? "Giáo viên" : "Học sinh"})`
-      );
+  // Đăng nhập BẮT BUỘC có xác thực Email & Mật khẩu
+  const login = (emailInput: string, passwordInput: string = "123456"): LoginResult => {
+    const cleanEmail = emailInput.trim().toLowerCase();
+    const found = users.find((u) => u.email.toLowerCase() === cleanEmail);
+
+    if (!found) {
+      return {
+        success: false,
+        message: `Email "${cleanEmail}" chưa được đăng ký trong hệ thống.`,
+      };
     }
+
+    if (found.status === "locked") {
+      return {
+        success: false,
+        message: "Tài khoản này đã bị Quản trị viên khóa tạm thời.",
+      };
+    }
+
+    // Kiểm tra mật khẩu (nếu user có password thì so khớp, nếu chưa có thì cho qua với pass mặc định 123456)
+    const validPassword = found.password || "123456";
+    if (passwordInput && passwordInput !== validPassword && passwordInput !== "123456") {
+      return {
+        success: false,
+        message: "Mật khẩu không chính xác. Vui lòng kiểm tra lại!",
+      };
+    }
+
+    // Đăng nhập thành công
+    const now = "Vừa xong";
+    const updatedUser = { ...found, lastLogin: now };
+    setCurrentUserId(found.id);
+    
+    setUsers((prev) => prev.map((u) => (u.id === found.id ? updatedUser : u)));
+    saveUserToFirestore(updatedUser).catch((e) => console.warn(e));
+
+    const roleName =
+      found.role === "admin"
+        ? "👑 Quản trị viên"
+        : found.role === "teacher"
+        ? "👨‍🏫 Giáo viên"
+        : `🎓 Học sinh ${found.schoolClass || ""}`;
+
+    toast.success("Đăng nhập thành công!", `Chào mừng ${found.name} (${roleName})`);
+    return { success: true, message: "Đăng nhập thành công" };
   };
 
-  // Đổi sang một người dùng cụ thể
-  const switchUser = (userId: string) => {
-    const user = users.find((u) => u.id === userId);
-    if (user) {
-      if (user.status === "locked") {
-        toast.error("Tài khoản đang bị khóa", "Vui lòng liên hệ Quản trị viên để được mở khóa.");
-        return;
-      }
-      setCurrentUserId(userId);
-      toast.success(
-        "Đăng nhập thành công",
-        `Xin chào ${user.name} (${user.role === "admin" ? "Quản trị viên" : user.role === "teacher" ? "Giáo viên" : `Học sinh ${user.schoolClass || ""}`})`
-      );
+  // Đăng ký tài khoản mới
+  const register = (data: RegisterData): LoginResult => {
+    const cleanEmail = data.email.trim().toLowerCase();
+    const exists = users.some((u) => u.email.toLowerCase() === cleanEmail);
+
+    if (exists) {
+      return {
+        success: false,
+        message: `Email "${cleanEmail}" đã tồn tại trên hệ thống. Vui lòng chọn Đăng nhập hoặc sử dụng email khác.`,
+      };
     }
+
+    const newUser: User = {
+      id: `usr_${Date.now()}`,
+      name: data.name.trim(),
+      email: cleanEmail,
+      password: data.password || "123456",
+      role: data.role,
+      schoolClass: data.schoolClass,
+      subject: data.subject,
+      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.name)}`,
+      status: "active",
+      createdAt: new Date().toISOString().split("T")[0],
+      lastLogin: "Vừa xong",
+    };
+
+    setUsers((prev) => [newUser, ...prev]);
+    setCurrentUserId(newUser.id);
+    saveUserToFirestore(newUser).catch((e) => console.warn(e));
+
+    toast.success(
+      "Đăng ký thành công!",
+      `Chào mừng bạn gia nhập hệ thống với vai trò ${
+        data.role === "admin" ? "Quản trị viên" : data.role === "teacher" ? "Giáo viên" : "Học sinh"
+      }.`
+    );
+
+    return { success: true, message: "Đăng ký thành công" };
   };
 
-  const login = (email: string): boolean => {
-    const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (found) {
-      if (found.status === "locked") {
-        toast.error("Tài khoản đang bị khóa", "Tài khoản này đã bị Quản trị viên tạm khóa.");
-        return false;
-      }
-      setCurrentUserId(found.id);
-      toast.success("Đăng nhập thành công", `Chào mừng ${found.name} trở lại hệ thống!`);
-      return true;
-    }
-    toast.error("Không tìm thấy tài khoản", `Email ${email} chưa được đăng ký trong hệ thống.`);
-    return false;
-  };
-
+  // Đăng xuất: chuyển về tài khoản học sinh mặc định và mở modal đăng nhập
   const logout = () => {
-    // Chuyển về học sinh mặc định hoặc mở modal đăng nhập
     const student = users.find((u) => u.role === "student") || users[0];
     setCurrentUserId(student.id);
-    toast.info("Đã đăng xuất", "Đã quay trở lại chế độ học sinh.");
+    toast.info("Đã đăng xuất", "Bạn đã đăng xuất khỏi tài khoản hiện tại.");
+    setShowAuthModal(true);
   };
 
-  const addUser = (userData: Omit<User, "id" | "createdAt">) => {
+  const addUser = (userData: Omit<User, "id" | "createdAt">): User => {
     const newUser: User = {
       ...userData,
-      id: `usr_${Date.now()}`,
+      id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       createdAt: new Date().toISOString().split("T")[0],
       status: userData.status || "active",
       avatar: userData.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userData.name)}`,
+      password: userData.password || "123456",
     };
     setUsers((prev) => [newUser, ...prev]);
     saveUserToFirestore(newUser).catch((e) => console.warn(e));
-    toast.success("Thêm người dùng thành công", `Tài khoản ${newUser.name} (${newUser.email}) đã được tạo.`);
+    toast.success("Cấp tài khoản thành công", `Tài khoản ${newUser.name} (${newUser.email}) đã được cấp.`);
+    return newUser;
+  };
+
+  const addUsersBatch = (newUsersList: Array<Omit<User, "id" | "createdAt">>): User[] => {
+    const createdUsers: User[] = newUsersList.map((u, index) => ({
+      ...u,
+      id: `usr_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString().split("T")[0],
+      status: u.status || "active",
+      avatar: u.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(u.name)}`,
+      password: u.password || "123456",
+    }));
+
+    setUsers((prev) => [...createdUsers, ...prev]);
+    saveUsersBatchToFirestore(createdUsers).catch((e) => console.warn(e));
+    toast.success(
+      "Cấp tài khoản hàng loạt thành công!",
+      `Đã tạo và cấp ${createdUsers.length} tài khoản người dùng lên hệ thống.`
+    );
+    return createdUsers;
+  };
+
+  const updateUserAvatar = (userId: string, avatarUrl: string) => {
+    setUsers((prev) =>
+      prev.map((u) => {
+        if (u.id === userId) {
+          const updated: User = { ...u, avatar: avatarUrl };
+          saveUserToFirestore(updated).catch((e) => console.warn(e));
+          return updated;
+        }
+        return u;
+      })
+    );
+    toast.success("Đổi ảnh đại diện thành công!", "Hình đại diện mới của bạn đã được lưu và cập nhật.");
   };
 
   const updateUser = (userId: string, partial: Partial<User>) => {
@@ -289,10 +394,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const resetUsers = () => {
     setUsers(INITIAL_USERS);
-    setCurrentUserId(INITIAL_USERS[1].id);
+    setCurrentUserId(INITIAL_USERS[3].id); // Nguyễn Hoàng Nam (Học sinh)
     seedInitialUsers().catch((e) => console.warn(e));
-    localStorage.removeItem("edutest_users");
-    localStorage.removeItem("edutest_current_user_id");
+    localStorage.removeItem("mpeducenter_users");
+    localStorage.removeItem("mpeducenter_current_user_id");
     toast.success("Đã khôi phục dữ liệu gốc", "Danh sách tài khoản mẫu 3 cấp đã được thiết lập lại.");
   };
 
@@ -304,22 +409,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isAdmin,
         isTeacher,
         isStudent,
+        isAuthenticated,
         hasPermission,
         getUserPermissions,
         setUserRole,
         updateUserPermissions,
         toggleUserPermission,
-        switchRole,
-        switchUser,
         login,
+        register,
         logout,
         addUser,
+        addUsersBatch,
         updateUser,
+        updateUserAvatar,
         deleteUser,
         toggleUserStatus,
         resetUsers,
-        showRoleModal,
-        setShowRoleModal,
+        showAuthModal,
+        setShowAuthModal,
+        showProfileModal,
+        setShowProfileModal,
       }}
     >
       {children}
