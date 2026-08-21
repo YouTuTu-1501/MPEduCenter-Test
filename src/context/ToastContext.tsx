@@ -85,31 +85,27 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [dismissToast]
   );
 
-  const toast = {
-    success: useCallback(
-      (title: string, message?: string, duration?: number) =>
+  const toast = React.useMemo(
+    () => ({
+      success: (title: string, message?: string, duration?: number) =>
         showToast({ type: "success", title, message, duration }),
-      [showToast]
-    ),
-    error: useCallback(
-      (title: string, message?: string, duration?: number) =>
+      error: (title: string, message?: string, duration?: number) =>
         showToast({ type: "error", title, message, duration }),
-      [showToast]
-    ),
-    warning: useCallback(
-      (title: string, message?: string, duration?: number) =>
+      warning: (title: string, message?: string, duration?: number) =>
         showToast({ type: "warning", title, message, duration }),
-      [showToast]
-    ),
-    info: useCallback(
-      (title: string, message?: string, duration?: number) =>
+      info: (title: string, message?: string, duration?: number) =>
         showToast({ type: "info", title, message, duration }),
-      [showToast]
-    ),
-  };
+    }),
+    [showToast]
+  );
+
+  const contextValue = React.useMemo(
+    () => ({ showToast, toast, dismissToast }),
+    [showToast, toast, dismissToast]
+  );
 
   return (
-    <ToastContext.Provider value={{ showToast, toast, dismissToast }}>
+    <ToastContext.Provider value={contextValue}>
       {children}
 
       {/* Toast Container Stack */}

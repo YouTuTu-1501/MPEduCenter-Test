@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Exam, StudentSubmission } from "../types/exam";
+import { Exam, StudentSubmission, STANDARD_CLASSES } from "../types/exam";
 import { MathRenderer } from "./MathRenderer";
 import {
   BarChart,
@@ -27,27 +27,60 @@ import {
   Download,
   Paperclip,
   X,
+  GraduationCap,
+  Filter,
 } from "lucide-react";
 
 interface TeacherAnalyticsViewProps {
   exam: Exam;
   submissions: StudentSubmission[];
   onBack: () => void;
+  selectedClassFilter?: string;
+  onSelectClassFilter?: (cls: string) => void;
+  allExams?: Exam[];
+  onSelectExam?: (exam: Exam) => void;
 }
 
 export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
   exam,
   submissions,
   onBack,
+  selectedClassFilter = "all",
+  onSelectClassFilter,
+  allExams = [],
+  onSelectExam,
 }) => {
+  const [internalClassFilter, setInternalClassFilter] = useState<string>(selectedClassFilter);
+  const activeClass = selectedClassFilter !== "all" ? selectedClassFilter : internalClassFilter;
+
+  const handleClassChange = (cls: string) => {
+    setInternalClassFilter(cls);
+    if (onSelectClassFilter) {
+      onSelectClassFilter(cls);
+    }
+  };
+
   const [activeTab, setActiveTab] = useState<"overview" | "items" | "students">("overview");
   const [searchKeyword, setSearchKeyword] = useState<string>("");
   const [selectedSubmission, setSelectedSubmission] = useState<StudentSubmission | null>(null);
   const [teacherPreviewImage, setTeacherPreviewImage] = useState<string | null>(null);
 
-  // Thống kê tổng quan
+  // Lọc bài nộp theo Lớp được Admin/Giáo viên chọn
+  const filteredSubmissionsByClass = useMemo(() => {
+    if (activeClass === "all") return submissions;
+    return submissions.filter((sub) => {
+      if (!sub.studentClass) return true;
+      if (sub.studentClass === activeClass) return true;
+      if (activeClass === "Lớp 12" && sub.studentClass.startsWith("12")) return true;
+      if (activeClass === "Lớp 11" && sub.studentClass.startsWith("11")) return true;
+      if (activeClass === "Lớp 10" && sub.studentClass.startsWith("10")) return true;
+      return false;
+    });
+  }, [submissions, activeClass]);
+
+  // Thống kê tổng quan dựa trên Lớp được lọc
   const stats = useMemo(() => {
-    const count = submissions.length;
+    const count = filteredSubmissionsByClass.length;
     if (count === 0) {
       return {
         total: 0,
@@ -55,11 +88,17 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
         maxScore: 0,
         minScore: 0,
         passRate: 0,
-        distribution: [],
+        distribution: [
+          { range: "0 - 2đ", count: 0 },
+          { range: "2 - 4đ", count: 0 },
+          { range: "4 - 6đ", count: 0 },
+          { range: "6 - 8đ", count: 0 },
+          { range: "8 - 10đ", count: 0 },
+        ],
       };
     }
 
-    const scores = submissions.map((s) => s.score);
+    const scores = filteredSubmissionsByClass.map((s) => s.score);
     const sum = scores.reduce((a, b) => a + b, 0);
     const avg = Number((sum / count).toFixed(2));
     const max = Math.max(...scores);
@@ -84,15 +123,15 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
       passRate,
       distribution,
     };
-  }, [submissions]);
+  }, [filteredSubmissionsByClass]);
 
-  // Phân tích câu hỏi (Item Analysis): Tỷ lệ đúng/sai từng câu
+  // Phân tích câu hỏi (Item Analysis): Tỷ lệ đúng/sai từng câu theo lớp
   const itemAnalysis = useMemo(() => {
     return exam.questions.map((q, idx) => {
       let correctCount = 0;
-      let totalAttempts = submissions.length;
+      let totalAttempts = filteredSubmissionsByClass.length;
 
-      submissions.forEach((sub) => {
+      filteredSubmissionsByClass.forEach((sub) => {
         const detail = sub.details[q.id];
         if (detail && detail.isCorrect) {
           correctCount++;
@@ -118,36 +157,38 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
         isHard: correctRate < 50,
       };
     });
-  }, [exam.questions, submissions]);
+  }, [exam.questions, filteredSubmissionsByClass]);
 
   // Danh sách học sinh lọc theo từ khóa tìm kiếm
   const filteredStudents = useMemo(() => {
-    if (!searchKeyword) return submissions;
+    if (!searchKeyword) return filteredSubmissionsByClass;
     const kw = searchKeyword.toLowerCase();
-    return submissions.filter(
+    return filteredSubmissionsByClass.filter(
       (s) =>
         s.studentName.toLowerCase().includes(kw) ||
-        s.studentId.toLowerCase().includes(kw)
+        s.studentId.toLowerCase().includes(kw) ||
+        (s.studentClass && s.studentClass.toLowerCase().includes(kw))
     );
-  }, [submissions, searchKeyword]);
+  }, [filteredSubmissionsByClass, searchKeyword]);
 
   // In bảng điểm
   const handlePrint = () => {
     window.print();
   };
 
-  // Xuất CSV bảng điểm
+  // Xuất CSV bảng điểm có thông tin Lớp
   const handleExportCSV = () => {
-    let csv = "\uFEFFSBD,Họ và tên,Điểm tổng,Phần I,Phần II,Phần III,Phần IV,Thời gian nộp\n";
-    submissions.forEach((s) => {
-      csv += `"${s.studentId}","${s.studentName}",${s.score},${s.partScores.part_1.earned},${s.partScores.part_2.earned},${s.partScores.part_3.earned},${s.partScores.part_4.earned},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
+    let csv = "\uFEFFSBD,Họ và tên,Lớp,Điểm tổng,Phần I,Phần II,Phần III,Phần IV,Thời gian nộp\n";
+    filteredSubmissionsByClass.forEach((s) => {
+      csv += `"${s.studentId}","${s.studentName}","${s.studentClass || "12A1"}",${s.score},${s.partScores.part_1.earned},${s.partScores.part_2.earned},${s.partScores.part_3.earned},${s.partScores.part_4.earned},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `bang_diem_${exam.code}_${Date.now()}.csv`);
+    const classTag = activeClass !== "all" ? `_Lop_${activeClass}` : "_Tat_ca_lop";
+    link.setAttribute("download", `bang_diem_${exam.code}${classTag}_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -209,6 +250,81 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
             >
               Quay lại
             </button>
+          </div>
+        </div>
+
+        {/* ================= THANH CHỌN LỚP DÀNH CHO ADMIN & GIÁO VIÊN ================= */}
+        <div className="bg-white rounded-3xl p-4 sm:p-5 shadow-xs border border-slate-200 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5 shrink-0 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+              <GraduationCap className="w-4 h-4 text-indigo-600" />
+              Chọn Lớp xem dữ liệu:
+            </span>
+
+            {/* Quick Class Selector Chips */}
+            <button
+              type="button"
+              onClick={() => handleClassChange("all")}
+              className={`px-3.5 py-1.5 rounded-xl font-bold text-xs shrink-0 transition ${
+                activeClass === "all"
+                  ? "bg-slate-900 text-white shadow-xs font-extrabold"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+              }`}
+            >
+              Tất cả các lớp ({submissions.length})
+            </button>
+
+            {["12A1", "12A2", "11A1", "10A1"].map((cls) => {
+              const count = submissions.filter((s) => s.studentClass === cls).length;
+              const isSelected = activeClass === cls;
+              return (
+                <button
+                  key={cls}
+                  type="button"
+                  onClick={() => handleClassChange(cls)}
+                  className={`px-3 py-1.5 rounded-xl font-bold text-xs shrink-0 flex items-center gap-1.5 transition ${
+                    isSelected
+                      ? "bg-amber-500 text-slate-950 shadow-xs font-extrabold"
+                      : "bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200/60"
+                  }`}
+                >
+                  <span>Lớp {cls}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                      isSelected ? "bg-black/20 text-slate-950" : "bg-amber-200/80 text-amber-950"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-400 shrink-0">Bộ lọc chi tiết:</span>
+            <select
+              value={activeClass}
+              onChange={(e) => handleClassChange(e.target.value)}
+              className="py-1.5 px-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-xs text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition"
+            >
+              <option value="all">🏫 Tất cả các lớp ({submissions.length} bài)</option>
+              <optgroup label="Danh sách Lớp học">
+                {STANDARD_CLASSES.map((cls) => {
+                  const cnt = submissions.filter((s) => s.studentClass === cls).length;
+                  return (
+                    <option key={cls} value={cls}>
+                      Lớp {cls} ({cnt} bài nộp)
+                    </option>
+                  );
+                })}
+              </optgroup>
+              <optgroup label="Theo Khối">
+                <option value="Lớp 12">Khối 12 ({submissions.filter((s) => s.studentClass?.startsWith("12")).length} bài)</option>
+                <option value="Lớp 11">Khối 11 ({submissions.filter((s) => s.studentClass?.startsWith("11")).length} bài)</option>
+                <option value="Lớp 10">Khối 10 ({submissions.filter((s) => s.studentClass?.startsWith("10")).length} bài)</option>
+              </optgroup>
+            </select>
           </div>
         </div>
 
@@ -414,6 +530,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                     <tr className="border-b border-slate-200 text-slate-500 font-extrabold uppercase bg-slate-50">
                       <th className="p-3">SBD</th>
                       <th className="p-3">Học sinh</th>
+                      <th className="p-3 text-center">Lớp</th>
                       <th className="p-3 text-center">Phần I</th>
                       <th className="p-3 text-center">Phần II</th>
                       <th className="p-3 text-center">Phần III</th>
@@ -427,6 +544,11 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                       <tr key={sub.id} className="hover:bg-slate-50">
                         <td className="p-3 font-extrabold text-slate-500">{sub.studentId}</td>
                         <td className="p-3 font-black text-slate-900">{sub.studentName}</td>
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-xs border border-amber-200">
+                            {sub.studentClass || "12A1"}
+                          </span>
+                        </td>
                         <td className="p-3 text-center">{sub.partScores.part_1.earned}đ</td>
                         <td className="p-3 text-center">{sub.partScores.part_2.earned}đ</td>
                         <td className="p-3 text-center">{sub.partScores.part_3.earned}đ</td>

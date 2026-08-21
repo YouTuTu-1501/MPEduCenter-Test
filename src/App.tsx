@@ -112,6 +112,7 @@ function MainApp() {
   const [activeView, setActiveView] = useState<ActiveView>(() => {
     return isStudent ? "student_portal" : "bank";
   });
+  const [selectedClassFilter, setSelectedClassFilter] = useState<string>("all");
   const [submissions, setSubmissions] = useState<StudentSubmission[]>(() =>
     getLocalSubmissions()
   );
@@ -156,22 +157,16 @@ function MainApp() {
 
   // Lưu đề thi vào danh sách & đẩy lên Firestore
   const handleSaveExam = (newExam: Exam) => {
+    let isExisting = false;
     setExams((prev) => {
       const idx = prev.findIndex((e) => e.id === newExam.id);
       let updated: Exam[];
       if (idx >= 0) {
+        isExisting = true;
         updated = [...prev];
         updated[idx] = newExam;
-        toast.success(
-          "Cập nhật đề thi thành công!",
-          `Đề thi "${newExam.title}" (Mã: ${newExam.code}) đã được đồng bộ lên Firebase.`
-        );
       } else {
         updated = [newExam, ...prev];
-        toast.success(
-          "Thêm đề thi mới thành công!",
-          `Đã nạp đề "${newExam.title}" gồm ${newExam.questions.length} câu hỏi lên Firebase.`
-        );
       }
       try {
         localStorage.setItem("edutest_exams", JSON.stringify(updated));
@@ -180,26 +175,41 @@ function MainApp() {
     });
     setSelectedExam(newExam);
     saveExamToFirestore(newExam).catch((e) => console.warn(e));
+
+    if (isExisting) {
+      toast.success(
+        "Cập nhật đề thi thành công!",
+        `Đề thi "${newExam.title}" (Mã: ${newExam.code}) đã được đồng bộ lên Firebase.`
+      );
+    } else {
+      toast.success(
+        "Thêm đề thi mới thành công!",
+        `Đã nạp đề "${newExam.title}" gồm ${newExam.questions.length} câu hỏi lên Firebase.`
+      );
+    }
   };
 
   // Xóa đề thi khỏi Firestore
   const handleDeleteExam = (examId: string) => {
+    const target = exams.find((e) => e.id === examId);
     setExams((prev) => {
-      const target = prev.find((e) => e.id === examId);
       const updated = prev.filter((e) => e.id !== examId);
       try {
         localStorage.setItem("edutest_exams", JSON.stringify(updated));
       } catch {}
-      if (safeSelectedExam.id === examId && updated.length > 0) {
-        setSelectedExam(updated[0]);
-      }
-      toast.info(
-        "Đã xóa đề thi khỏi hệ thống",
-        target ? `Đề thi "${target.title}" đã được gỡ bỏ khỏi Firebase.` : undefined
-      );
       return updated;
     });
+    if (safeSelectedExam.id === examId) {
+      const remaining = exams.filter((e) => e.id !== examId);
+      if (remaining.length > 0) {
+        setSelectedExam(remaining[0]);
+      }
+    }
     deleteExamFromFirestore(examId).catch((e) => console.warn(e));
+    toast.info(
+      "Đã xóa đề thi khỏi hệ thống",
+      target ? `Đề thi "${target.title}" đã được gỡ bỏ khỏi Firebase.` : undefined
+    );
   };
 
   // Chọn đề và chuyển thẳng vào phân hệ mong muốn
@@ -239,6 +249,8 @@ function MainApp() {
           setActiveView={setActiveView}
           examTitle={safeSelectedExam.title}
           examCode={safeSelectedExam.code}
+          selectedClassFilter={selectedClassFilter}
+          onSelectClassFilter={setSelectedClassFilter}
         />
       )}
 
@@ -249,6 +261,8 @@ function MainApp() {
           onSelectExam={handleSelectExam}
           onSaveExam={handleSaveExam}
           onDeleteExam={handleDeleteExam}
+          selectedClassFilter={selectedClassFilter}
+          onSelectClassFilter={setSelectedClassFilter}
         />
       )}
 
@@ -275,6 +289,10 @@ function MainApp() {
           exam={safeSelectedExam}
           submissions={submissions.filter((s) => s.examId === safeSelectedExam.id)}
           onBack={() => setActiveView(isStudent ? "student_portal" : "bank")}
+          selectedClassFilter={selectedClassFilter}
+          onSelectClassFilter={setSelectedClassFilter}
+          allExams={exams}
+          onSelectExam={(exam) => handleSelectExam(exam, "analytics")}
         />
       )}
 
@@ -294,6 +312,8 @@ function MainApp() {
           onSelectExam={handleSelectExam}
           onDeleteExam={handleDeleteExam}
           onSaveExam={handleSaveExam}
+          selectedClassFilter={selectedClassFilter}
+          onSelectClassFilter={setSelectedClassFilter}
         />
       )}
 

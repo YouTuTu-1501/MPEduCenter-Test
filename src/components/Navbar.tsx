@@ -36,6 +36,8 @@ interface NavbarProps {
   setActiveView: (view: ActiveView) => void;
   examTitle?: string;
   examCode?: string;
+  selectedClassFilter?: string;
+  onSelectClassFilter?: (cls: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -43,6 +45,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveView,
   examTitle,
   examCode,
+  selectedClassFilter = "all",
+  onSelectClassFilter,
 }) => {
   const {
     currentUser,
@@ -157,6 +161,41 @@ export const Navbar: React.FC<NavbarProps> = ({
             );
           })}
         </nav>
+
+        {/* Global Class Selector cho Admin & Giáo viên */}
+        {(isAdmin || isTeacher) && onSelectClassFilter && (
+          <div className="flex items-center gap-1.5 bg-amber-50/90 hover:bg-amber-100/80 border border-amber-200 py-1 px-2.5 rounded-2xl shadow-2xs transition order-2 md:order-2">
+            <GraduationCap className="w-4 h-4 text-amber-700 shrink-0" />
+            <span className="text-[11px] font-extrabold text-amber-800 hidden sm:inline">Lớp:</span>
+            <select
+              value={selectedClassFilter}
+              onChange={(e) => onSelectClassFilter(e.target.value)}
+              className="bg-transparent text-xs font-black text-amber-950 focus:outline-none cursor-pointer pr-1 py-0.5"
+              title="Chọn lớp để lọc dữ liệu toàn hệ thống"
+            >
+              <option value="all">🏫 Tất cả các lớp</option>
+              <optgroup label="Khối 12">
+                <option value="12A1">Lớp 12A1</option>
+                <option value="12A2">Lớp 12A2</option>
+                <option value="12A3">Lớp 12A3</option>
+                <option value="12D1">Lớp 12D1</option>
+                <option value="Lớp 12">Toàn khối 12</option>
+              </optgroup>
+              <optgroup label="Khối 11">
+                <option value="11A1">Lớp 11A1</option>
+                <option value="11A2">Lớp 11A2</option>
+                <option value="11B1">Lớp 11B1</option>
+                <option value="Lớp 11">Toàn khối 11</option>
+              </optgroup>
+              <optgroup label="Khối 10">
+                <option value="10A1">Lớp 10A1</option>
+                <option value="10A2">Lớp 10A2</option>
+                <option value="10D1">Lớp 10D1</option>
+                <option value="Lớp 10">Toàn khối 10</option>
+              </optgroup>
+            </select>
+          </div>
+        )}
 
         {/* User Account & Login Menu */}
         <div className="flex items-center gap-2 order-2 md:order-3 relative" ref={dropdownRef}>

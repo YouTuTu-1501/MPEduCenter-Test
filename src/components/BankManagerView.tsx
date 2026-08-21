@@ -3,6 +3,7 @@ import {
   Exam,
   Question,
   STANDARD_GRADES,
+  STANDARD_CLASSES,
   STANDARD_CHAPTERS_BY_GRADE,
 } from "../types/exam";
 import {
@@ -57,6 +58,8 @@ interface BankManagerViewProps {
   ) => void;
   onSaveExam: (exam: Exam) => void;
   onDeleteExam: (examId: string) => void;
+  selectedClassFilter?: string;
+  onSelectClassFilter?: (cls: string) => void;
 }
 
 export const BankManagerView: React.FC<BankManagerViewProps> = ({
@@ -64,11 +67,22 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   onSelectExam,
   onSaveExam,
   onDeleteExam,
+  selectedClassFilter = "all",
+  onSelectClassFilter,
 }) => {
   const { toast } = useToast();
 
   // Bộ lọc Lớp & Chương & Tìm kiếm
-  const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>("all");
+  const [internalClassFilter, setInternalClassFilter] = useState<string>(selectedClassFilter);
+  const activeClassFilter = selectedClassFilter !== "all" ? selectedClassFilter : internalClassFilter;
+
+  const handleClassChange = (cls: string) => {
+    setInternalClassFilter(cls);
+    if (onSelectClassFilter) {
+      onSelectClassFilter(cls);
+    }
+  };
+
   const [selectedChapterFilter, setSelectedChapterFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [viewGrouping, setViewGrouping] = useState<"grid" | "by_chapter">("grid");
@@ -79,6 +93,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   const [latexInputText, setLatexInputText] = useState<string>("");
   const [importTitle, setImportTitle] = useState<string>("Đề kiểm tra Toán học THPT");
   const [importGrade, setImportGrade] = useState<string>("Lớp 12");
+  const [importTargetClass, setImportTargetClass] = useState<string>("Tất cả các lớp");
   const [importChapter, setImportChapter] = useState<string>(
     STANDARD_CHAPTERS_BY_GRADE["Lớp 12"]?.[0] || ""
   );
@@ -89,6 +104,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   // Modal Chỉnh sửa nhanh Lớp & Chương cho đề thi hiện có
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [editGrade, setEditGrade] = useState<string>("Lớp 12");
+  const [editTargetClass, setEditTargetClass] = useState<string>("Tất cả các lớp");
   const [editChapter, setEditChapter] = useState<string>("");
   const [editCustomChapter, setEditCustomChapter] = useState<string>("");
   const [isEditCustomChapter, setIsEditCustomChapter] = useState<boolean>(false);
@@ -102,18 +118,38 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     return Array.from(gradesSet);
   }, [exams]);
 
+  // Kiểm tra đề thi có phù hợp với bộ lọc Lớp được chọn không
+  const isExamMatchClassFilter = (exam: Exam, filter: string) => {
+    if (filter === "all") return true;
+    if (filter === exam.grade) return true;
+    if (exam.targetClass && (exam.targetClass === filter || exam.targetClass === "Tất cả các lớp")) return true;
+    // Nếu filter là "12A1", "12A2", "12A3", "12D1" và đề là "Lớp 12"
+    if (filter.startsWith("12") && exam.grade === "Lớp 12") return true;
+    if (filter.startsWith("11") && exam.grade === "Lớp 11") return true;
+    if (filter.startsWith("10") && exam.grade === "Lớp 10") return true;
+    return exam.grade === filter;
+  };
+
   // Danh sách các Chương theo Lớp được chọn
   const availableChaptersForSelectedGrade = useMemo(() => {
     const chaptersSet = new Set<string>();
 
-    if (selectedGradeFilter !== "all") {
+    if (activeClassFilter !== "all") {
+      const gradeKey = activeClassFilter.startsWith("12")
+        ? "Lớp 12"
+        : activeClassFilter.startsWith("11")
+        ? "Lớp 11"
+        : activeClassFilter.startsWith("10")
+        ? "Lớp 10"
+        : activeClassFilter;
+
       // Thêm chương chuẩn của lớp đó
-      const standards = STANDARD_CHAPTERS_BY_GRADE[selectedGradeFilter] || [];
+      const standards = STANDARD_CHAPTERS_BY_GRADE[gradeKey] || [];
       standards.forEach((ch) => chaptersSet.add(ch));
 
       // Thêm chương thực tế có trong đề thi của lớp đó
       exams
-        .filter((e) => e.grade === selectedGradeFilter && e.chapter)
+        .filter((e) => isExamMatchClassFilter(e, activeClassFilter) && e.chapter)
         .forEach((e) => {
           if (e.chapter) chaptersSet.add(e.chapter);
         });
@@ -125,13 +161,13 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     }
 
     return Array.from(chaptersSet);
-  }, [exams, selectedGradeFilter]);
+  }, [exams, activeClassFilter]);
 
   // Lọc danh sách đề thi theo Lớp, Chương và Từ khóa tìm kiếm
   const filteredExams = useMemo(() => {
     return exams.filter((exam) => {
       // Lọc theo Lớp
-      if (selectedGradeFilter !== "all" && exam.grade !== selectedGradeFilter) {
+      if (!isExamMatchClassFilter(exam, activeClassFilter)) {
         return false;
       }
       // Lọc theo Chương
@@ -154,7 +190,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
       }
       return true;
     });
-  }, [exams, selectedGradeFilter, selectedChapterFilter, searchQuery]);
+  }, [exams, activeClassFilter, selectedChapterFilter, searchQuery]);
 
   // Gom nhóm đề thi theo từng Chương
   const examsGroupedByChapter = useMemo(() => {
@@ -274,6 +310,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
       ...importPreview,
       title: importTitle || importPreview.title,
       grade: importGrade,
+      targetClass: importTargetClass,
       chapter: finalChapter || importPreview.chapter,
     };
     onSaveExam(examToSave);
@@ -286,6 +323,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   const handleOpenEditMetadata = (exam: Exam) => {
     setEditingExam(exam);
     setEditGrade(exam.grade || "Lớp 12");
+    setEditTargetClass(exam.targetClass || "Tất cả các lớp");
     const stdChapters = STANDARD_CHAPTERS_BY_GRADE[exam.grade || "Lớp 12"] || [];
     if (exam.chapter && stdChapters.includes(exam.chapter)) {
       setEditChapter(exam.chapter);
@@ -309,6 +347,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     const updatedExam: Exam = {
       ...editingExam,
       grade: editGrade,
+      targetClass: editTargetClass,
       chapter: finalChapter || undefined,
       updatedAt: new Date().toISOString(),
     };
@@ -316,7 +355,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     setEditingExam(null);
     toast.success(
       "Cập nhật phân loại thành công",
-      `Đề "${updatedExam.title}" đã được chuyển sang ${updatedExam.grade} - ${updatedExam.chapter || "Chưa gắn chương"}.`
+      `Đề "${updatedExam.title}" đã được chuyển sang ${updatedExam.grade} (${updatedExam.targetClass || "Tất cả các lớp"}) - ${updatedExam.chapter || "Chưa gắn chương"}.`
     );
   };
 
@@ -506,26 +545,51 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 </span>
               </div>
 
-              {/* Phân loại theo 3 khối Lớp */}
-              <div className="grid grid-cols-3 gap-2 mb-4">
+              {/* Phân loại theo Khối & Lớp chi tiết */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
                 {["Lớp 12", "Lớp 11", "Lớp 10"].map((gr) => {
                   const count = exams.filter((e) => e.grade === gr).length;
+                  const isSelected = activeClassFilter === gr;
                   return (
                     <button
                       key={gr}
                       type="button"
                       onClick={() => {
-                        setSelectedGradeFilter(gr);
+                        handleClassChange(gr);
                         setSelectedChapterFilter("all");
                       }}
                       className={`p-2.5 rounded-2xl border text-center transition ${
-                        selectedGradeFilter === gr
+                        isSelected
                           ? "bg-indigo-600 border-indigo-400 text-white shadow-xs"
                           : "bg-slate-800/90 border-slate-700 text-slate-300 hover:bg-slate-700"
                       }`}
                     >
-                      <div className="text-lg font-black tracking-tight">{count} đề</div>
+                      <div className="text-base font-black tracking-tight">{count} đề</div>
                       <div className="text-[10px] font-bold opacity-80 mt-0.5">{gr}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Quick Class Chips trong sidebar */}
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {["12A1", "12A2", "11A1", "10A1"].map((cls) => {
+                  const isSel = activeClassFilter === cls;
+                  return (
+                    <button
+                      key={cls}
+                      type="button"
+                      onClick={() => {
+                        handleClassChange(cls);
+                        setSelectedChapterFilter("all");
+                      }}
+                      className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition ${
+                        isSel
+                          ? "bg-amber-400 border-amber-300 text-slate-900 shadow-xs"
+                          : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      Lớp {cls}
                     </button>
                   );
                 })}
@@ -700,9 +764,9 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
         <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-4">
           {/* Hàng 1: Tabs lọc theo Lớp + Ô tìm kiếm + Toggle Chế độ xem */}
           <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-4">
-            {/* Tabs Lớp (Grade Pills) */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-              <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mr-1 flex items-center gap-1 shrink-0">
+            {/* Tabs Lớp & Chọn Lớp (Class & Grade Selector) */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none flex-wrap">
+              <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider mr-1 flex items-center gap-1 shrink-0">
                 <GraduationCap className="w-4 h-4 text-indigo-600" />
                 Lớp:
               </span>
@@ -710,32 +774,63 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedGradeFilter("all");
+                  handleClassChange("all");
                   setSelectedChapterFilter("all");
                 }}
                 className={`px-3.5 py-1.5 rounded-xl font-bold text-xs shrink-0 transition ${
-                  selectedGradeFilter === "all"
-                    ? "bg-slate-900 text-white shadow-xs"
+                  activeClassFilter === "all"
+                    ? "bg-slate-900 text-white shadow-xs font-extrabold"
                     : "bg-slate-100 hover:bg-slate-200 text-slate-700"
                 }`}
               >
                 Tất cả các lớp ({exams.length})
               </button>
 
+              {/* Quick Class Chips */}
+              {["12A1", "12A2", "11A1", "10A1"].map((cls) => {
+                const count = exams.filter((e) => isExamMatchClassFilter(e, cls)).length;
+                const isSelected = activeClassFilter === cls;
+                return (
+                  <button
+                    key={cls}
+                    type="button"
+                    onClick={() => {
+                      handleClassChange(cls);
+                      setSelectedChapterFilter("all");
+                    }}
+                    className={`px-3 py-1.5 rounded-xl font-bold text-xs shrink-0 flex items-center gap-1.5 transition ${
+                      isSelected
+                        ? "bg-amber-500 text-slate-950 shadow-xs font-extrabold"
+                        : "bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200/60"
+                    }`}
+                  >
+                    <span>Lớp {cls}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                        isSelected ? "bg-black/20 text-slate-950" : "bg-amber-200/80 text-amber-950"
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+
+              {/* Khối lớp */}
               {allAvailableGrades.map((gr) => {
                 const count = exams.filter((e) => e.grade === gr).length;
-                const isSelected = selectedGradeFilter === gr;
+                const isSelected = activeClassFilter === gr;
                 return (
                   <button
                     key={gr}
                     type="button"
                     onClick={() => {
-                      setSelectedGradeFilter(gr);
+                      handleClassChange(gr);
                       setSelectedChapterFilter("all");
                     }}
                     className={`px-3.5 py-1.5 rounded-xl font-bold text-xs shrink-0 flex items-center gap-1.5 transition ${
                       isSelected
-                        ? "bg-indigo-600 text-white shadow-xs"
+                        ? "bg-indigo-600 text-white shadow-xs font-extrabold"
                         : "bg-slate-100 hover:bg-slate-200 text-slate-700"
                     }`}
                   >
@@ -839,7 +934,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
             {availableChaptersForSelectedGrade.map((chap) => {
               const countInChapter = exams.filter(
                 (e) =>
-                  (selectedGradeFilter === "all" || e.grade === selectedGradeFilter) &&
+                  (activeClassFilter === "all" || isExamMatchClassFilter(e, activeClassFilter)) &&
                   e.chapter === chap
               ).length;
               const isSelected = selectedChapterFilter === chap;
@@ -881,13 +976,13 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
               Không tìm thấy đề thi phù hợp
             </h3>
             <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Không có đề thi nào khớp với bộ lọc Lớp: <b>{selectedGradeFilter}</b> và Chương: <b>{selectedChapterFilter}</b>. Hãy thử đổi bộ lọc hoặc thêm đề thi mới.
+              Không có đề thi nào khớp với bộ lọc Lớp: <b>{activeClassFilter}</b> và Chương: <b>{selectedChapterFilter}</b>. Hãy thử đổi bộ lọc hoặc thêm đề thi mới.
             </p>
             <div className="pt-2 flex justify-center gap-3">
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedGradeFilter("all");
+                  handleClassChange("all");
                   setSelectedChapterFilter("all");
                   setSearchQuery("");
                 }}
@@ -1036,10 +1131,29 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 </div>
               </div>
 
+              {/* Chọn Lớp cụ thể */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1.5">
+                  2. Áp dụng cho Lớp:
+                </label>
+                <select
+                  value={editTargetClass}
+                  onChange={(e) => setEditTargetClass(e.target.value)}
+                  className="w-full py-2.5 px-3 rounded-xl border border-slate-300 font-bold bg-white text-slate-800 outline-none focus:border-indigo-500"
+                >
+                  <option value="Tất cả các lớp">🏫 Tất cả các lớp trong khối</option>
+                  {STANDARD_CLASSES.map((cls) => (
+                    <option key={cls} value={cls}>
+                      Lớp {cls}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Chọn Chương */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1.5">
-                  2. Chọn Chương / Chủ đề:
+                  3. Chọn Chương / Chủ đề:
                 </label>
                 <select
                   value={isEditCustomChapter ? "__custom__" : editChapter}
@@ -1133,8 +1247,8 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 <span>Thiết lập Phân loại Lớp & Chương mục:</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                {/* Lớp */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                {/* Khối Lớp */}
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
                     Khối Lớp:
@@ -1153,6 +1267,25 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                     {STANDARD_GRADES.map((gr) => (
                       <option key={gr} value={gr}>
                         {gr}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Lớp cụ thể */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Áp dụng cho Lớp:
+                  </label>
+                  <select
+                    value={importTargetClass}
+                    onChange={(e) => setImportTargetClass(e.target.value)}
+                    className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500"
+                  >
+                    <option value="Tất cả các lớp">🏫 Tất cả các lớp</option>
+                    {STANDARD_CLASSES.map((cls) => (
+                      <option key={cls} value={cls}>
+                        Lớp {cls}
                       </option>
                     ))}
                   </select>
@@ -1404,6 +1537,11 @@ const ExamCardItem: React.FC<ExamCardItemProps> = ({
             >
               {exam.grade}
             </span>
+            {exam.targetClass && exam.targetClass !== "Tất cả các lớp" && (
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-extrabold text-xs border border-amber-200">
+                Lớp: {exam.targetClass}
+              </span>
+            )}
             <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-bold text-xs border border-slate-200">
               Mã: {exam.code}
             </span>

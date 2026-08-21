@@ -8,7 +8,7 @@ import {
   PERMISSION_DEFINITIONS,
   ROLE_PERMISSIONS,
 } from "../types/auth";
-import { Exam, StudentSubmission } from "../types/exam";
+import { Exam, StudentSubmission, STANDARD_CLASSES } from "../types/exam";
 import { useToast } from "../context/ToastContext";
 import {
   ShieldCheck,
@@ -63,6 +63,8 @@ interface AdminManagementViewProps {
   onSelectExam: (exam: Exam, mode: "presentation" | "exam" | "analytics" | "live") => void;
   onDeleteExam: (examId: string) => void;
   onSaveExam: (exam: Exam) => void;
+  selectedClassFilter?: string;
+  onSelectClassFilter?: (cls: string) => void;
 }
 
 export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
@@ -71,6 +73,8 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   onSelectExam,
   onDeleteExam,
   onSaveExam,
+  selectedClassFilter = "all",
+  onSelectClassFilter,
 }) => {
   const { toast } = useToast();
   const {
@@ -87,6 +91,16 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     updateUserPermissions,
     getUserPermissions,
   } = useAuth();
+
+  const [internalClassFilter, setInternalClassFilter] = useState<string>(selectedClassFilter);
+  const adminClassFilter = selectedClassFilter !== "all" ? selectedClassFilter : internalClassFilter;
+
+  const handleClassChange = (cls: string) => {
+    setInternalClassFilter(cls);
+    if (onSelectClassFilter) {
+      onSelectClassFilter(cls);
+    }
+  };
 
   const [activeTab, setActiveTab] = useState<"users" | "exams" | "settings">("users");
   const [roleFilter, setRoleFilter] = useState<string>("all");
@@ -201,6 +215,12 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     return users.filter((u) => {
       const matchRole = roleFilter === "all" || u.role === roleFilter;
       const matchStatus = statusFilter === "all" || u.status === statusFilter;
+      const matchClass =
+        adminClassFilter === "all" ||
+        (u.schoolClass && u.schoolClass === adminClassFilter) ||
+        (adminClassFilter === "Lớp 12" && u.schoolClass?.startsWith("12")) ||
+        (adminClassFilter === "Lớp 11" && u.schoolClass?.startsWith("11")) ||
+        (adminClassFilter === "Lớp 10" && u.schoolClass?.startsWith("10"));
       const matchSearch =
         searchQuery === "" ||
         u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -208,9 +228,22 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
         (u.schoolClass && u.schoolClass.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (u.subject && u.subject.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (u.phone && u.phone.toLowerCase().includes(searchQuery.toLowerCase()));
-      return matchRole && matchStatus && matchSearch;
+      return matchRole && matchStatus && matchClass && matchSearch;
     });
-  }, [users, roleFilter, statusFilter, searchQuery]);
+  }, [users, roleFilter, statusFilter, adminClassFilter, searchQuery]);
+
+  // Lọc danh sách đề thi theo lớp được Admin chọn
+  const filteredExams = useMemo(() => {
+    if (adminClassFilter === "all") return exams;
+    return exams.filter((e) => {
+      if (e.targetClass && e.targetClass === adminClassFilter) return true;
+      if (e.grade === adminClassFilter) return true;
+      if (adminClassFilter === "Lớp 12" && (e.grade === "Lớp 12" || e.targetClass?.startsWith("12"))) return true;
+      if (adminClassFilter === "Lớp 11" && (e.grade === "Lớp 11" || e.targetClass?.startsWith("11"))) return true;
+      if (adminClassFilter === "Lớp 10" && (e.grade === "Lớp 10" || e.targetClass?.startsWith("10"))) return true;
+      return false;
+    });
+  }, [exams, adminClassFilter]);
 
   // Xử lý chọn tất cả trong bảng
   const handleSelectAll = (checked: boolean) => {
@@ -573,6 +606,82 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
               ĐTB: {metrics.avgScore}/10đ
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ================= THANH CHỌN LỚP DÀNH CHO ADMIN ================= */}
+      <div className="bg-white rounded-3xl p-4 sm:p-5 shadow-xs border border-slate-200 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5 shrink-0 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+            <GraduationCap className="w-4 h-4 text-indigo-600" />
+            Chọn Lớp xem dữ liệu Admin:
+          </span>
+
+          {/* Quick Class Chips */}
+          <button
+            type="button"
+            onClick={() => handleClassChange("all")}
+            className={`px-3.5 py-1.5 rounded-xl font-bold text-xs shrink-0 transition ${
+              adminClassFilter === "all"
+                ? "bg-slate-900 text-white shadow-xs font-extrabold"
+                : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+            }`}
+          >
+            Tất cả các lớp ({users.length} tài khoản)
+          </button>
+
+          {["12A1", "12A2", "11A1", "10A1"].map((cls) => {
+            const userCount = users.filter((u) => u.schoolClass === cls).length;
+            const isSelected = adminClassFilter === cls;
+            return (
+              <button
+                key={cls}
+                type="button"
+                onClick={() => handleClassChange(cls)}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs shrink-0 flex items-center gap-1.5 transition ${
+                  isSelected
+                    ? "bg-amber-500 text-slate-950 shadow-xs font-extrabold"
+                    : "bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200/60"
+                }`}
+              >
+                <span>Lớp {cls}</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                    isSelected ? "bg-black/20 text-slate-950" : "bg-amber-200/80 text-amber-950"
+                  }`}
+                >
+                  {userCount}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-slate-400 shrink-0">Lọc nhanh theo Khối/Lớp:</span>
+          <select
+            value={adminClassFilter}
+            onChange={(e) => handleClassChange(e.target.value)}
+            className="py-1.5 px-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-xs text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition"
+          >
+            <option value="all">🏫 Xem tất cả ({users.length} tài khoản, {exams.length} đề)</option>
+            <optgroup label="Danh sách Lớp học">
+              {STANDARD_CLASSES.map((cls) => {
+                const uCnt = users.filter((u) => u.schoolClass === cls).length;
+                const eCnt = exams.filter((e) => e.targetClass === cls).length;
+                return (
+                  <option key={cls} value={cls}>
+                    Lớp {cls} ({uCnt} user • {eCnt} đề)
+                  </option>
+                );
+              })}
+            </optgroup>
+            <optgroup label="Theo Khối">
+              <option value="Lớp 12">Khối 12 ({users.filter((u) => u.schoolClass?.startsWith("12")).length} user)</option>
+              <option value="Lớp 11">Khối 11 ({users.filter((u) => u.schoolClass?.startsWith("11")).length} user)</option>
+              <option value="Lớp 10">Khối 10 ({users.filter((u) => u.schoolClass?.startsWith("10")).length} user)</option>
+            </optgroup>
+          </select>
         </div>
       </div>
 
@@ -1068,7 +1177,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {exams.map((exam) => {
+            {filteredExams.map((exam) => {
               const questionCount = exam.questions.length;
               return (
                 <div
@@ -1076,10 +1185,17 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                   className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition space-y-4"
                 >
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-extrabold rounded-md border border-indigo-100">
-                        {exam.grade || "Lớp 12"} • Mã: {exam.code}
-                      </span>
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-extrabold rounded-md border border-indigo-100">
+                          {exam.grade || "Lớp 12"} • Mã: {exam.code}
+                        </span>
+                        {exam.targetClass && exam.targetClass !== "Tất cả các lớp" && (
+                          <span className="px-2 py-0.5 bg-amber-100 text-amber-900 text-[10px] font-extrabold rounded-md border border-amber-200">
+                            Lớp: {exam.targetClass}
+                          </span>
+                        )}
+                      </div>
                       <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-md border border-emerald-200 flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3 text-emerald-500" />
                         <span>Đã phê duyệt</span>

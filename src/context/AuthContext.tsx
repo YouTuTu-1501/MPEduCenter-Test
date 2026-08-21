@@ -131,14 +131,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Cấp đổi vai trò trực tiếp do Admin thực hiện trong bảng Quản trị
   const setUserRole = (userId: string, newRole: UserRole) => {
+    const target = users.find((u) => u.id === userId);
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id === userId) {
-          const roleLabel = newRole === "admin" ? "Quản trị viên" : newRole === "teacher" ? "Giáo viên" : "Học sinh";
-          toast.success(
-            "Cấp quyền vai trò thành công!",
-            `Đã chuyển tài khoản "${u.name}" sang vai trò: ${roleLabel}.`
-          );
           const updated: User = {
             ...u,
             role: newRole,
@@ -151,17 +147,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return u;
       })
     );
+    const roleLabel = newRole === "admin" ? "Quản trị viên" : newRole === "teacher" ? "Giáo viên" : "Học sinh";
+    toast.success(
+      "Cấp quyền vai trò thành công!",
+      `Đã chuyển tài khoản "${target?.name || "Người dùng"}" sang vai trò: ${roleLabel}.`
+    );
   };
 
   // Cập nhật danh sách quyền tùy chỉnh chi tiết cho người dùng
   const updateUserPermissions = (userId: string, permissions: PermissionKey[]) => {
+    const target = users.find((u) => u.id === userId);
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id === userId) {
-          toast.success(
-            "Cập nhật phân quyền thành công!",
-            `Đã lưu thiết lập ${permissions.length} quyền hạn cho tài khoản "${u.name}".`
-          );
           const updated: User = {
             ...u,
             customPermissions: permissions,
@@ -172,24 +170,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return u;
       })
     );
+    toast.success(
+      "Cập nhật phân quyền thành công!",
+      `Đã lưu thiết lập ${permissions.length} quyền hạn cho tài khoản "${target?.name || "Người dùng"}".`
+    );
   };
 
   // Bật/tắt một quyền cụ thể cho một người dùng
   const toggleUserPermission = (userId: string, perm: PermissionKey) => {
+    const target = users.find((u) => u.id === userId);
+    const currentCustom = target?.customPermissions || (target ? ROLE_PERMISSIONS[target.role] : []) || [];
+    const exists = currentCustom.includes(perm);
+    const nextPerms = exists
+      ? currentCustom.filter((p) => p !== perm)
+      : [...currentCustom, perm];
+
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id === userId) {
-          const currentCustom = u.customPermissions || ROLE_PERMISSIONS[u.role] || [];
-          const exists = currentCustom.includes(perm);
-          const nextPerms = exists
-            ? currentCustom.filter((p) => p !== perm)
-            : [...currentCustom, perm];
-          
-          toast.info(
-            exists ? "Đã thu hồi quyền" : "Đã cấp thêm quyền",
-            `Tài khoản "${u.name}" ${exists ? "đã bị thu hồi" : "đã được cấp"} quyền này.`
-          );
-
           const updated: User = {
             ...u,
             customPermissions: nextPerms,
@@ -199,6 +197,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         return u;
       })
+    );
+
+    toast.info(
+      exists ? "Đã thu hồi quyền" : "Đã cấp thêm quyền",
+      `Tài khoản "${target?.name || "Người dùng"}" ${exists ? "đã bị thu hồi" : "đã được cấp"} quyền này.`
     );
   };
 
@@ -375,20 +378,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       toast.error("Không thể khóa", "Bạn không thể tự khóa tài khoản của chính mình.");
       return;
     }
+    const target = users.find((u) => u.id === userId);
+    const newStatus: "active" | "locked" = target?.status === "active" ? "locked" : "active";
+
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id === userId) {
-          const newStatus: "active" | "locked" = u.status === "active" ? "locked" : "active";
           const updated: User = { ...u, status: newStatus };
           saveUserToFirestore(updated).catch((e) => console.warn(e));
-          toast.info(
-            newStatus === "locked" ? "Đã khóa tài khoản" : "Đã mở khóa tài khoản",
-            `Tài khoản ${u.name} hiện ${newStatus === "locked" ? "bị tạm dừng" : "đang hoạt động"}.`
-          );
           return updated;
         }
         return u;
       })
+    );
+
+    toast.info(
+      newStatus === "locked" ? "Đã khóa tài khoản" : "Đã mở khóa tài khoản",
+      `Tài khoản ${target?.name || "Người dùng"} hiện ${newStatus === "locked" ? "bị tạm dừng" : "đang hoạt động"}.`
     );
   };
 
