@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Hàm trợ giúp kiểm tra xác thực
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Bộ sưu tập Người dùng (users)
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Bộ sưu tập Ngân hàng Đề thi (exams)
+    match /exams/{examId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Bộ sưu tập Bài nộp & Kết quả thi của học sinh (submissions)
+    match /submissions/{submissionId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isAuthenticated();
+    }
+
+    // Bộ sưu tập Phòng thi trực tuyến thời gian thực (liveRooms)
+    match /liveRooms/{roomId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Cho phép tất cả các tài liệu khác phục vụ học tập & thi cử
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "MPEduCenter-Test",
+  "description": "Hệ thống kiểm tra và thi trực tuyến MPEduCenter-Test chuyên sâu Toán học với phân quyền 3 cấp (Admin, Giáo viên, Học sinh), 4 dạng thức câu hỏi, trình chiếu tương tác, quản lý ngân hàng đề, phân tích báo cáo và đồng bộ thời gian thực.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
