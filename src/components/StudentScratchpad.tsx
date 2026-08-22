@@ -55,7 +55,7 @@ const HIGHLIGHTER_COLORS = [
   { color: "#38bdf8", name: "Xanh ngọc" },
 ];
 
-// Lưu trữ bộ nét vẽ theo từng câu hỏi trong session
+// Lưu trữ bộ nét vẽ theo từng câu hỏi trong session an toàn
 const questionStrokesMemory: Record<string, Stroke[]> = {};
 
 export const StudentScratchpad: React.FC<StudentScratchpadProps> = ({
@@ -85,83 +85,120 @@ export const StudentScratchpad: React.FC<StudentScratchpadProps> = ({
 
   // Tải nét vẽ của câu hỏi khi đổi questionId
   useEffect(() => {
-    const savedStrokes = questionStrokesMemory[questionId] || [];
-    setStrokes(savedStrokes);
-    setRedoHistory([]);
+    try {
+      const savedStrokes = questionStrokesMemory[questionId] || [];
+      setStrokes(Array.isArray(savedStrokes) ? savedStrokes : []);
+      setRedoHistory([]);
+    } catch {
+      setStrokes([]);
+    }
   }, [questionId]);
 
   // Lưu nét vẽ vào bộ nhớ khi strokes thay đổi
   useEffect(() => {
-    questionStrokesMemory[questionId] = strokes;
+    try {
+      questionStrokesMemory[questionId] = strokes;
+    } catch {}
   }, [strokes, questionId]);
 
-  // Vẽ lại toàn bộ strokes lên canvas
+  // Vẽ lại toàn bộ strokes lên canvas với kiểm tra an toàn tối đa
   const redrawCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    try {
+      const canvas = canvasRef.current;
+      if (!canvas || canvas.width <= 0 || canvas.height <= 0) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (!isScratchpadVisible) return;
+      if (!isScratchpadVisible || !Array.isArray(strokes) || strokes.length === 0) return;
 
-    strokes.forEach((stroke) => {
-      if (stroke.points.length < 2) return;
+      strokes.forEach((stroke) => {
+        if (!stroke || !Array.isArray(stroke.points) || stroke.points.length === 0) return;
 
-      ctx.save();
-      ctx.beginPath();
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
+        ctx.save();
+        ctx.beginPath();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
 
-      if (stroke.tool === "pen") {
-        ctx.globalCompositeOperation = "source-over";
-        ctx.strokeStyle = stroke.color;
-        ctx.lineWidth = stroke.lineWidth;
-        ctx.globalAlpha = stroke.opacity || 1;
-      } else if (stroke.tool === "highlighter") {
-        ctx.globalCompositeOperation = "multiply";
-        ctx.strokeStyle = stroke.color;
-        ctx.lineWidth = stroke.lineWidth * 4;
-        ctx.globalAlpha = stroke.opacity || 0.4;
-      } else if (stroke.tool === "eraser") {
-        ctx.globalCompositeOperation = "destination-out";
-        ctx.lineWidth = stroke.lineWidth * 6;
-        ctx.globalAlpha = 1;
-      }
+        if (stroke.tool === "pen") {
+          ctx.globalCompositeOperation = "source-over";
+          ctx.strokeStyle = stroke.color || "#2563eb";
+          ctx.lineWidth = stroke.lineWidth || 3;
+          ctx.globalAlpha = stroke.opacity || 1;
+        } else if (stroke.tool === "highlighter") {
+          ctx.globalCompositeOperation = "multiply";
+          ctx.strokeStyle = stroke.color || "#facc15";
+          ctx.lineWidth = (stroke.lineWidth || 3) * 4;
+          ctx.globalAlpha = stroke.opacity || 0.4;
+        } else if (stroke.tool === "eraser") {
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.lineWidth = (stroke.lineWidth || 3) * 6;
+          ctx.globalAlpha = 1;
+        }
 
-      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-      for (let i = 1; i < stroke.points.length; i++) {
-        ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
-      }
-      ctx.stroke();
-      ctx.restore();
-    });
+        const p0 = stroke.points[0];
+        if (p0 && typeof p0.x === "number" && typeof p0.y === "number" && !isNaN(p0.x) && !isNaN(p0.y)) {
+          if (stroke.points.length === 1) {
+            // Điểm đơn lẻ (chấm bút)
+            ctx.arc(p0.x, p0.y, (stroke.lineWidth || 3) / 2, 0, Math.PI * 2);
+            ctx.fillStyle = stroke.color || "#2563eb";
+            ctx.fill();
+          } else {
+            ctx.moveTo(p0.x, p0.y);
+            for (let i = 1; i < stroke.points.length; i++) {
+              const pt = stroke.points[i];
+              if (pt && typeof pt.x === "number" && typeof pt.y === "number" && !isNaN(pt.x) && !isNaN(pt.y)) {
+                ctx.lineTo(pt.x, pt.y);
+              }
+            }
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      });
+    } catch (err) {
+      console.warn("Lỗi vẽ canvas an toàn:", err);
+    }
   }, [strokes, isScratchpadVisible]);
 
-  // Resize canvas theo kích thước thẻ cha
+  // Resize canvas an toàn theo kích thước thẻ cha
   const handleResize = useCallback(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current?.parentElement;
-    if (!canvas || !container) return;
+    try {
+      const canvas = canvasRef.current;
+      const container = containerRef.current?.parentElement;
+      if (!canvas || !container) return;
 
-    const rect = container.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      if (canvas.width !== rect.width || canvas.height !== rect.height) {
-        canvas.width = rect.width;
-        canvas.height = rect.height;
-        redrawCanvas();
+      const rect = container.getBoundingClientRect();
+      const targetW = Math.floor(rect.width);
+      const targetH = Math.floor(rect.height);
+
+      if (targetW > 0 && targetH > 0) {
+        if (canvas.width !== targetW || canvas.height !== targetH) {
+          canvas.width = targetW;
+          canvas.height = targetH;
+          redrawCanvas();
+        }
       }
+    } catch (err) {
+      console.warn("Lỗi resize canvas:", err);
     }
   }, [redrawCanvas]);
 
   useEffect(() => {
     handleResize();
+    const ro = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => handleResize())
+      : null;
+
+    if (containerRef.current?.parentElement && ro) {
+      ro.observe(containerRef.current.parentElement);
+    }
     window.addEventListener("resize", handleResize);
-    const interval = setInterval(handleResize, 1000);
+
     return () => {
       window.removeEventListener("resize", handleResize);
-      clearInterval(interval);
+      if (ro) ro.disconnect();
     };
   }, [handleResize]);
 
@@ -169,142 +206,173 @@ export const StudentScratchpad: React.FC<StudentScratchpadProps> = ({
     redrawCanvas();
   }, [redrawCanvas]);
 
+  // Tính tọa độ điểm trên canvas an toàn cho cả chuột và cảm ứng touch
   const getCanvasCoords = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
   ): StrokePoint => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    let clientX = 0;
-    let clientY = 0;
+    try {
+      const rect = canvas.getBoundingClientRect();
+      let clientX = 0;
+      let clientY = 0;
 
-    if ("touches" in e) {
-      if (e.touches.length > 0) {
-        clientX = e.touches[0].clientX;
-        clientY = e.touches[0].clientY;
+      if ("touches" in e) {
+        if (e.touches && e.touches.length > 0) {
+          clientX = e.touches[0].clientX;
+          clientY = e.touches[0].clientY;
+        } else if ("changedTouches" in e && (e as any).changedTouches && (e as any).changedTouches.length > 0) {
+          clientX = (e as any).changedTouches[0].clientX;
+          clientY = (e as any).changedTouches[0].clientY;
+        }
+      } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
       }
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
-    }
 
-    return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
-    };
+      const x = Math.max(0, Math.min(canvas.width, clientX - rect.left));
+      const y = Math.max(0, Math.min(canvas.height, clientY - rect.top));
+
+      return {
+        x: isNaN(x) ? 0 : x,
+        y: isNaN(y) ? 0 : y,
+      };
+    } catch {
+      return { x: 0, y: 0 };
+    }
   };
 
   const startDrawing = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
   ) => {
-    if (!isDrawingActive || activeTool === "none" || !isScratchpadVisible) return;
-    isDrawingRef.current = true;
-    const startPoint = getCanvasCoords(e);
+    try {
+      if ("touches" in e && e.cancelable) {
+        e.preventDefault();
+      }
+      if (!isDrawingActive || activeTool === "none" || !isScratchpadVisible) return;
+      isDrawingRef.current = true;
+      const startPoint = getCanvasCoords(e);
 
-    const newStroke: Stroke = {
-      tool: activeTool,
-      color: activeTool === "highlighter" ? highlighterColor : penColor,
-      lineWidth: strokeWidth,
-      opacity: activeTool === "highlighter" ? 0.4 : 1,
-      points: [startPoint],
-    };
+      const newStroke: Stroke = {
+        tool: activeTool,
+        color: activeTool === "highlighter" ? highlighterColor : penColor,
+        lineWidth: strokeWidth,
+        opacity: activeTool === "highlighter" ? 0.4 : 1,
+        points: [startPoint],
+      };
 
-    currentStrokeRef.current = newStroke;
+      currentStrokeRef.current = newStroke;
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+      ctx.save();
+      ctx.beginPath();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
 
-    if (activeTool === "pen") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = penColor;
-      ctx.lineWidth = strokeWidth;
-      ctx.globalAlpha = 1;
-    } else if (activeTool === "highlighter") {
-      ctx.globalCompositeOperation = "multiply";
-      ctx.strokeStyle = highlighterColor;
-      ctx.lineWidth = strokeWidth * 4;
-      ctx.globalAlpha = 0.4;
-    } else if (activeTool === "eraser") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.lineWidth = strokeWidth * 6;
-      ctx.globalAlpha = 1;
+      if (activeTool === "pen") {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = penColor;
+        ctx.lineWidth = strokeWidth;
+        ctx.globalAlpha = 1;
+      } else if (activeTool === "highlighter") {
+        ctx.globalCompositeOperation = "multiply";
+        ctx.strokeStyle = highlighterColor;
+        ctx.lineWidth = strokeWidth * 4;
+        ctx.globalAlpha = 0.4;
+      } else if (activeTool === "eraser") {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = strokeWidth * 6;
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.moveTo(startPoint.x, startPoint.y);
+      ctx.lineTo(startPoint.x + 0.1, startPoint.y + 0.1);
+      ctx.stroke();
+      ctx.restore();
+    } catch (err) {
+      console.warn("Lỗi bắt đầu vẽ:", err);
     }
-
-    ctx.moveTo(startPoint.x, startPoint.y);
-    ctx.lineTo(startPoint.x, startPoint.y);
-    ctx.stroke();
-    ctx.restore();
   };
 
   const draw = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
   ) => {
-    if (
-      !isDrawingRef.current ||
-      !isDrawingActive ||
-      activeTool === "none" ||
-      !currentStrokeRef.current ||
-      !isScratchpadVisible
-    )
-      return;
+    try {
+      if ("touches" in e && e.cancelable) {
+        e.preventDefault();
+      }
+      if (
+        !isDrawingRef.current ||
+        !isDrawingActive ||
+        activeTool === "none" ||
+        !currentStrokeRef.current ||
+        !isScratchpadVisible
+      )
+        return;
 
-    const currentPoint = getCanvasCoords(e);
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+      const currentPoint = getCanvasCoords(e);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-    const points = currentStrokeRef.current.points;
-    const lastPoint = points[points.length - 1];
+      const points = currentStrokeRef.current.points;
+      if (!points || points.length === 0) return;
+      const lastPoint = points[points.length - 1];
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+      ctx.save();
+      ctx.beginPath();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
 
-    if (activeTool === "pen") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = penColor;
-      ctx.lineWidth = strokeWidth;
-      ctx.globalAlpha = 1;
-    } else if (activeTool === "highlighter") {
-      ctx.globalCompositeOperation = "multiply";
-      ctx.strokeStyle = highlighterColor;
-      ctx.lineWidth = strokeWidth * 4;
-      ctx.globalAlpha = 0.4;
-    } else if (activeTool === "eraser") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.lineWidth = strokeWidth * 6;
-      ctx.globalAlpha = 1;
+      if (activeTool === "pen") {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = penColor;
+        ctx.lineWidth = strokeWidth;
+        ctx.globalAlpha = 1;
+      } else if (activeTool === "highlighter") {
+        ctx.globalCompositeOperation = "multiply";
+        ctx.strokeStyle = highlighterColor;
+        ctx.lineWidth = strokeWidth * 4;
+        ctx.globalAlpha = 0.4;
+      } else if (activeTool === "eraser") {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = strokeWidth * 6;
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.moveTo(lastPoint.x, lastPoint.y);
+      ctx.lineTo(currentPoint.x, currentPoint.y);
+      ctx.stroke();
+      ctx.restore();
+
+      currentStrokeRef.current.points.push(currentPoint);
+    } catch (err) {
+      console.warn("Lỗi khi vẽ:", err);
     }
-
-    ctx.moveTo(lastPoint.x, lastPoint.y);
-    ctx.lineTo(currentPoint.x, currentPoint.y);
-    ctx.stroke();
-    ctx.restore();
-
-    currentStrokeRef.current.points.push(currentPoint);
   };
 
   const stopDrawing = () => {
-    if (!isDrawingRef.current || !currentStrokeRef.current) {
+    try {
+      if (!isDrawingRef.current || !currentStrokeRef.current) {
+        isDrawingRef.current = false;
+        return;
+      }
       isDrawingRef.current = false;
-      return;
-    }
-    isDrawingRef.current = false;
 
-    if (currentStrokeRef.current.points.length > 0) {
-      setStrokes((prev) => [...prev, currentStrokeRef.current!]);
-      setRedoHistory([]);
+      if (currentStrokeRef.current.points.length > 0) {
+        setStrokes((prev) => [...prev, currentStrokeRef.current!]);
+        setRedoHistory([]);
+      }
+      currentStrokeRef.current = null;
+    } catch (err) {
+      isDrawingRef.current = false;
+      currentStrokeRef.current = null;
     }
-    currentStrokeRef.current = null;
   };
 
   const handleUndo = () => {
@@ -355,6 +423,7 @@ export const StudentScratchpad: React.FC<StudentScratchpadProps> = ({
       {/* Lớp Canvas vẽ */}
       <canvas
         ref={canvasRef}
+        style={{ touchAction: "none" }}
         className={`absolute inset-0 w-full h-full ${
           isDrawingActive && isScratchpadVisible
             ? activeTool === "eraser"
@@ -368,9 +437,25 @@ export const StudentScratchpad: React.FC<StudentScratchpadProps> = ({
         onMouseMove={draw}
         onMouseUp={stopDrawing}
         onMouseLeave={stopDrawing}
-        onTouchStart={startDrawing}
-        onTouchMove={draw}
-        onTouchEnd={stopDrawing}
+        onTouchStart={(e) => {
+          if (isDrawingActive && isScratchpadVisible && activeTool !== "none") {
+            try { e.stopPropagation(); } catch {}
+          }
+          startDrawing(e);
+        }}
+        onTouchMove={(e) => {
+          if (isDrawingActive && isScratchpadVisible && activeTool !== "none") {
+            try { e.stopPropagation(); } catch {}
+          }
+          draw(e);
+        }}
+        onTouchEnd={(e) => {
+          if (isDrawingActive && isScratchpadVisible && activeTool !== "none") {
+            try { e.stopPropagation(); } catch {}
+          }
+          stopDrawing();
+        }}
+        onTouchCancel={stopDrawing}
       />
 
       {/* THANH CÔNG CỤ VẼ NHÁP NỔI (Floating Floating Bento Toolbar) */}

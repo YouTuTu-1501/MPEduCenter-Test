@@ -142,17 +142,13 @@ export const UserProfileModal: React.FC = () => {
 
   // Lưu toàn bộ thông tin & ảnh đại diện
   const handleSaveAll = () => {
-    if (selectedAvatarUrl && selectedAvatarUrl !== currentUser.avatar) {
-      updateUserAvatar(currentUser.id, selectedAvatarUrl);
-    }
-
     updateUser(currentUser.id, {
       name: nameInput.trim() || currentUser.name,
       phone: phoneInput.trim() || undefined,
       schoolClass: currentUser.role === "student" ? classInput.trim() : currentUser.schoolClass,
       subject: currentUser.role === "teacher" ? subjectInput.trim() : currentUser.subject,
       bio: bioInput.trim() || undefined,
-      avatar: selectedAvatarUrl,
+      avatar: selectedAvatarUrl || currentUser.avatar,
     });
 
     toast.success("Hồ sơ đã cập nhật!", "Thông tin cá nhân và ảnh đại diện đã được lưu thành công.");

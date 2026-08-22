@@ -87,9 +87,19 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
   const autoSubmittedRef = useRef<boolean>(false);
 
   // Tự động khôi phục nháp bài làm nếu có
+  // Tải bản nháp trước đó nếu có (Bảo vệ tiến độ bài thi của học sinh)
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(`edutest_draft_${exam.id}_${studentId}`);
+      // Thử đọc từ key chuẩn theo ID người dùng hoặc mã học sinh
+      const primaryKey = `edutest_draft_${exam.id}_${currentUser.id}`;
+      const legacyKey = `edutest_draft_${exam.id}_${studentId}`;
+      const genericKey = `edutest_draft_${exam.id}`;
+
+      const raw =
+        localStorage.getItem(primaryKey) ||
+        localStorage.getItem(legacyKey) ||
+        localStorage.getItem(genericKey);
+
       if (raw) {
         const draft = JSON.parse(raw);
         if (draft && draft.userAnswers && Object.keys(draft.userAnswers).length > 0) {
@@ -100,14 +110,42 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
             setSecondsRemaining(draft.secondsRemaining);
             targetEndTimeRef.current = Date.now() + draft.secondsRemaining * 1000;
           }
+          if (draft.hasStarted) {
+            setHasStarted(true);
+            setStartTime(draft.startTime || (Date.now() - (totalDurationSeconds - (draft.secondsRemaining || totalDurationSeconds)) * 1000));
+          }
           toast.info(
-            "Đã khôi phục bản nháp",
-            `Đã tải lại ${Object.keys(draft.userAnswers).length} câu trả lời đã lưu trước đó.`
+            "Đã khôi phục bài làm của bạn",
+            `Hệ thống đã tự động nạp lại ${Object.keys(draft.userAnswers).length} câu trả lời đang làm dở.`
           );
         }
       }
+    } catch (e) {
+      console.warn("Lỗi khôi phục nháp:", e);
+    }
+  }, [exam.id, currentUser.id, studentId, totalDurationSeconds]);
+
+  // Tự động lưu tiến độ làm bài liên tục (Auto-save) sau mỗi thay đổi đáp án hoặc chuyển câu
+  useEffect(() => {
+    if (!hasStarted || Object.keys(userAnswers).length === 0) return;
+    try {
+      const draftData = {
+        examId: exam.id,
+        studentName,
+        studentId,
+        userId: currentUser.id,
+        userAnswers,
+        flaggedQuestions,
+        currentIdx,
+        secondsRemaining,
+        hasStarted: true,
+        startTime,
+        savedAt: Date.now(),
+      };
+      localStorage.setItem(`edutest_draft_${exam.id}_${currentUser.id}`, JSON.stringify(draftData));
+      localStorage.setItem(`edutest_draft_${exam.id}_${studentId}`, JSON.stringify(draftData));
     } catch {}
-  }, [exam.id, studentId]);
+  }, [userAnswers, flaggedQuestions, currentIdx, secondsRemaining, hasStarted, startTime, exam.id, currentUser.id, studentId, studentName]);
 
   // Trạng thái nộp bài
   const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
@@ -293,7 +331,23 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
 
     // Xóa bản nháp sau khi đã nộp bài thành công
     try {
+      localStorage.removeItem(`edutest_draft_${exam.id}_${currentUser.id}`);
       localStorage.removeItem(`edutest_draft_${exam.id}_${studentId}`);
+      localStorage.removeItem(`edutest_draft_${exam.id}`);
+      
+      // Đồng thời lưu ngay vào danh sách submissions trong localStorage
+      const existingSubsRaw = localStorage.getItem("edutest_submissions");
+      const existingSubs = existingSubsRaw ? JSON.parse(existingSubsRaw) : [];
+      const updatedSubs = [result, ...existingSubs.filter((s: any) => s.id !== result.id)];
+      localStorage.setItem("edutest_submissions", JSON.stringify(updatedSubs));
+
+      // Ghi nhớ danh sách ID bài thi đã làm của tài khoản này
+      const userSubKey = `edutest_user_${currentUser.id}_subs`;
+      const userSubsRaw = localStorage.getItem(userSubKey);
+      const userSubs = userSubsRaw ? JSON.parse(userSubsRaw) : [];
+      if (!userSubs.includes(result.id)) {
+        localStorage.setItem(userSubKey, JSON.stringify([result.id, ...userSubs]));
+      }
     } catch {}
 
     setSubmission(result);

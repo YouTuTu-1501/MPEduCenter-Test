@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import * as XLSX from "xlsx";
 import { useAuth } from "../context/AuthContext";
 import {
   User,
@@ -124,6 +125,21 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
 
   // Modal Cấp tài khoản hàng loạt (Batch Provisioning)
   const [showBatchModal, setShowBatchModal] = useState<boolean>(false);
+  const [batchInputMode, setBatchInputMode] = useState<"excel" | "text">("excel");
+  const [parsedExcelUsers, setParsedExcelUsers] = useState<
+    Array<{
+      name: string;
+      email: string;
+      password?: string;
+      role: UserRole;
+      schoolClass?: string;
+      subject?: string;
+      phone?: string;
+      status: "active" | "locked";
+    }>
+  >([]);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [isUploadingExcel, setIsUploadingExcel] = useState<boolean>(false);
   const [batchNamesText, setBatchNamesText] = useState<string>(
     "Nguyễn Văn An\nTrần Thị Bích\nLê Hoàng Cường\nPhạm Thị Dung\nHoàng Minh Đức\nĐỗ Hải Đăng"
   );
@@ -322,55 +338,343 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     setShowUserModal(true);
   };
 
+  // Tải file mẫu Excel (.xlsx) để cấp tài khoản hàng loạt
+  const handleDownloadExcelTemplate = () => {
+    // Sheet 1: Dữ liệu mẫu (Data template)
+    const templateData = [
+      {
+        "STT": 1,
+        "Họ và tên (*)": "Nguyễn Văn An",
+        "Lớp": "12A1",
+        "Vai trò": "Học sinh",
+        "Email": "an.nv@student.vn",
+        "Mật khẩu": "123456",
+        "Số điện thoại": "0912345678",
+        "Môn phụ trách (GV)": "",
+        "Ghi chú": "Học sinh lớp 12A1",
+      },
+      {
+        "STT": 2,
+        "Họ và tên (*)": "Trần Thị Bích",
+        "Lớp": "12A1",
+        "Vai trò": "Học sinh",
+        "Email": "",
+        "Mật khẩu": "",
+        "Số điện thoại": "",
+        "Môn phụ trách (GV)": "",
+        "Ghi chú": "Để trống email/pass để hệ thống tự sinh tự động",
+      },
+      {
+        "STT": 3,
+        "Họ và tên (*)": "Lê Hoàng Cường",
+        "Lớp": "12A2",
+        "Vai trò": "Học sinh",
+        "Email": "cuong.lh@student.vn",
+        "Mật khẩu": "123456",
+        "Số điện thoại": "0987654321",
+        "Môn phụ trách (GV)": "",
+        "Ghi chú": "",
+      },
+      {
+        "STT": 4,
+        "Họ và tên (*)": "Phạm Minh Đức",
+        "Lớp": "11B1",
+        "Vai trò": "Học sinh",
+        "Email": "",
+        "Mật khẩu": "654321",
+        "Số điện thoại": "",
+        "Môn phụ trách (GV)": "",
+        "Ghi chú": "",
+      },
+      {
+        "STT": 5,
+        "Họ và tên (*)": "Thầy Trần Đình Phương",
+        "Lớp": "",
+        "Vai trò": "Giáo viên",
+        "Email": "phuong.td@edulink.vn",
+        "Mật khẩu": "123456",
+        "Số điện thoại": "0901234567",
+        "Môn phụ trách (GV)": "Toán học THPT",
+        "Ghi chú": "Giáo viên bộ môn Toán",
+      },
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(templateData);
+
+    // Đặt độ rộng các cột
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 26 },
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 24 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 20 },
+      { wch: 45 },
+    ];
+
+    // Sheet 2: Hướng dẫn chi tiết
+    const guideData = [
+      { "Cột dữ liệu": "STT", "Bắt buộc": "Không", "Mô tả / Hướng dẫn": "Số thứ tự dòng (1, 2, 3...)" },
+      { "Cột dữ liệu": "Họ và tên (*)", "Bắt buộc": "Có", "Mô tả / Hướng dẫn": "Họ và tên đầy đủ của học sinh hoặc giáo viên (Bắt buộc phải có)." },
+      { "Cột dữ liệu": "Lớp", "Bắt buộc": "Tùy chọn", "Mô tả / Hướng dẫn": "Ví dụ: 12A1, 12A2, 11B1... (Nếu để trống sẽ dùng lớp mặc định chọn trên hệ thống)." },
+      { "Cột dữ liệu": "Vai trò", "Bắt buộc": "Tùy chọn", "Mô tả / Hướng dẫn": "Điền: 'Học sinh', 'Giáo viên', 'Quản trị viên' (Mặc định là Học sinh)." },
+      { "Cột dữ liệu": "Email", "Bắt buộc": "Tùy chọn", "Mô tả / Hướng dẫn": "Nếu để trống, hệ thống sẽ tự động tạo email không dấu theo tên (VD: an.nv@student.vn)." },
+      { "Cột dữ liệu": "Mật khẩu", "Bắt buộc": "Tùy chọn", "Mô tả / Hướng dẫn": "Nếu để trống, hệ thống sẽ áp dụng mật khẩu mặc định (123456) hoặc 6 số ngẫu nhiên." },
+      { "Cột dữ liệu": "Số điện thoại", "Bắt buộc": "Tùy chọn", "Mô tả / Hướng dẫn": "Số điện thoại liên lạc của học sinh hoặc phụ huynh." },
+      { "Cột dữ liệu": "Môn phụ trách", "Bắt buộc": "Tùy chọn", "Mô tả / Hướng dẫn": "Dành cho Giáo viên (VD: Toán học THPT, Vật lý 12...)." },
+    ];
+
+    const wsGuide = XLSX.utils.json_to_sheet(guideData);
+    wsGuide["!cols"] = [{ wch: 22 }, { wch: 12 }, { wch: 75 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Danh_Sach_Mau");
+    XLSX.utils.book_append_sheet(wb, wsGuide, "Huong_Dan_Nhap");
+
+    XLSX.writeFile(wb, "Mau_Danh_Sach_Cap_Tai_Khoan_MPEduCenter.xlsx");
+    toast.success("Đã tải file mẫu Excel!", "File Mau_Danh_Sach_Cap_Tai_Khoan_MPEduCenter.xlsx đã được lưu về máy.");
+  };
+
+  // Đọc và phân tích file Excel / CSV tải lên
+  const handleExcelFileUpload = (file: File) => {
+    setIsUploadingExcel(true);
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+        if (!jsonData || jsonData.length === 0) {
+          toast.error("File trống", "Không tìm thấy dòng dữ liệu nào trong file tải lên.");
+          setIsUploadingExcel(false);
+          return;
+        }
+
+        const existingEmails = users.map((u) => u.email.toLowerCase());
+        const parsed: Array<{
+          name: string;
+          email: string;
+          password?: string;
+          role: UserRole;
+          schoolClass?: string;
+          subject?: string;
+          phone?: string;
+          status: "active" | "locked";
+        }> = [];
+
+        for (const row of jsonData) {
+          // Tìm cột Họ tên
+          const nameKey = Object.keys(row).find((k) => {
+            const l = k.toLowerCase().trim();
+            return l.includes("họ") || l.includes("tên") || l.includes("name") || l.includes("fullname");
+          });
+
+          const rawName = nameKey ? String(row[nameKey]).trim() : "";
+          if (!rawName) continue;
+
+          // Tìm cột Lớp
+          const classKey = Object.keys(row).find((k) => {
+            const l = k.toLowerCase().trim();
+            return l === "lớp" || l === "lop" || l === "class" || l.includes("lớp học");
+          });
+          const rawClass = classKey && row[classKey] ? String(row[classKey]).trim() : batchClass;
+
+          // Tìm cột Vai trò
+          const roleKey = Object.keys(row).find((k) => {
+            const l = k.toLowerCase().trim();
+            return l.includes("vai trò") || l.includes("role") || l.includes("loại");
+          });
+          let rawRole: UserRole = batchRole;
+          if (roleKey && row[roleKey]) {
+            const rStr = String(row[roleKey]).toLowerCase();
+            if (rStr.includes("giáo") || rStr.includes("teacher") || rStr.includes("gv")) {
+              rawRole = "teacher";
+            } else if (rStr.includes("admin") || rStr.includes("quản")) {
+              rawRole = "admin";
+            } else {
+              rawRole = "student";
+            }
+          }
+
+          // Tìm cột Email
+          const emailKey = Object.keys(row).find((k) => {
+            const l = k.toLowerCase().trim();
+            return l.includes("email") || l.includes("mail") || l.includes("tài khoản");
+          });
+          let rawEmail = emailKey && row[emailKey] ? String(row[emailKey]).trim() : "";
+          if (!rawEmail || !rawEmail.includes("@")) {
+            rawEmail = generateEmailFromName(rawName, batchDomain, existingEmails);
+          }
+          existingEmails.push(rawEmail.toLowerCase());
+
+          // Tìm cột Mật khẩu
+          const passKey = Object.keys(row).find((k) => {
+            const l = k.toLowerCase().trim();
+            return l.includes("mật khẩu") || l.includes("pass") || l.includes("password");
+          });
+          let rawPass = passKey && row[passKey] ? String(row[passKey]).trim() : "";
+          if (!rawPass) {
+            if (batchPasswordRule === "random") {
+              rawPass = Math.floor(100000 + Math.random() * 900000).toString();
+            } else if (batchPasswordRule === "custom" && batchCustomPass.trim()) {
+              rawPass = batchCustomPass.trim();
+            } else {
+              rawPass = "123456";
+            }
+          }
+
+          // Tìm cột Số điện thoại
+          const phoneKey = Object.keys(row).find((k) => {
+            const l = k.toLowerCase().trim();
+            return l.includes("sđt") || l.includes("phone") || l.includes("điện thoại");
+          });
+          const rawPhone = phoneKey && row[phoneKey] ? String(row[phoneKey]).trim() : "";
+
+          // Tìm cột Môn học
+          const subjectKey = Object.keys(row).find((k) => {
+            const l = k.toLowerCase().trim();
+            return l.includes("môn") || l.includes("subject");
+          });
+          const rawSubject = subjectKey && row[subjectKey] ? String(row[subjectKey]).trim() : (rawRole === "teacher" ? batchSubject : undefined);
+
+          parsed.push({
+            name: rawName,
+            email: rawEmail,
+            password: rawPass,
+            role: rawRole,
+            schoolClass: rawRole === "student" ? rawClass : undefined,
+            subject: rawRole === "teacher" ? rawSubject : undefined,
+            phone: rawPhone || undefined,
+            status: "active",
+          });
+        }
+
+        if (parsed.length === 0) {
+          toast.error("Không trích xuất được", "Không tìm thấy cột Họ và tên hợp lệ trong file.");
+        } else {
+          setParsedExcelUsers(parsed);
+          setUploadedFileName(file.name);
+          toast.success("Đọc file thành công!", `Đã trích xuất ${parsed.length} tài khoản từ file ${file.name}.`);
+        }
+      } catch (err: any) {
+        console.error(err);
+        toast.error("Lỗi đọc file", "Không thể đọc định dạng file này. Vui lòng kiểm tra lại file Excel hoặc CSV.");
+      } finally {
+        setIsUploadingExcel(false);
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  // Xóa 1 hàng khỏi danh sách Excel vừa parse
+  const handleRemoveParsedRow = (index: number) => {
+    setParsedExcelUsers((prev) => prev.filter((_, i) => i !== index));
+  };
+
   // Xử lý cấp tài khoản hàng loạt
   const handleExecuteBatchProvision = () => {
-    const rawNames = batchNamesText
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+    let newUsersToCreate: any[] = [];
 
-    if (rawNames.length === 0) {
-      toast.error("Danh sách trống", "Vui lòng nhập ít nhất một tên người dùng.");
-      return;
-    }
+    if (batchInputMode === "excel") {
+      if (parsedExcelUsers.length === 0) {
+        toast.error("Chưa có dữ liệu", "Vui lòng tải lên file Excel hoặc chuyển sang tab Nhập danh sách văn bản.");
+        return;
+      }
+      newUsersToCreate = parsedExcelUsers.map((u) => ({
+        ...u,
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(u.name)}`,
+      }));
+    } else {
+      const rawNames = batchNamesText
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
 
-    const existingEmails = users.map((u) => u.email.toLowerCase());
-    const newUsersToCreate = rawNames.map((name) => {
-      const generatedEmail = generateEmailFromName(name, batchDomain, existingEmails);
-      existingEmails.push(generatedEmail.toLowerCase());
-
-      let pass = "123456";
-      if (batchPasswordRule === "random") {
-        pass = Math.floor(100000 + Math.random() * 900000).toString();
-      } else if (batchPasswordRule === "custom" && batchCustomPass.trim()) {
-        pass = batchCustomPass.trim();
+      if (rawNames.length === 0) {
+        toast.error("Danh sách trống", "Vui lòng nhập ít nhất một tên người dùng.");
+        return;
       }
 
-      return {
-        name,
-        email: generatedEmail,
-        password: pass,
-        role: batchRole,
-        schoolClass: batchRole === "student" ? batchClass : undefined,
-        subject: batchRole === "teacher" ? batchSubject : undefined,
-        status: "active" as const,
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
-      };
-    });
+      const existingEmails = users.map((u) => u.email.toLowerCase());
+      newUsersToCreate = rawNames.map((name) => {
+        const generatedEmail = generateEmailFromName(name, batchDomain, existingEmails);
+        existingEmails.push(generatedEmail.toLowerCase());
+
+        let pass = "123456";
+        if (batchPasswordRule === "random") {
+          pass = Math.floor(100000 + Math.random() * 900000).toString();
+        } else if (batchPasswordRule === "custom" && batchCustomPass.trim()) {
+          pass = batchCustomPass.trim();
+        }
+
+        return {
+          name,
+          email: generatedEmail,
+          password: pass,
+          role: batchRole,
+          schoolClass: batchRole === "student" ? batchClass : undefined,
+          subject: batchRole === "teacher" ? batchSubject : undefined,
+          status: "active" as const,
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
+        };
+      });
+    }
 
     addUsersBatch(newUsersToCreate);
     setShowBatchModal(false);
+    setParsedExcelUsers([]);
+    setUploadedFileName(null);
+    toast.success("Cấp tài khoản thành công!", `Đã cấp thành công ${newUsersToCreate.length} tài khoản vào hệ thống.`);
+  };
+
+  // Xuất file Excel (.xlsx) danh sách tài khoản
+  const handleExportExcel = (userList: User[]) => {
+    const exportData = userList.map((u, i) => ({
+      "STT": i + 1,
+      "Họ và tên": u.name,
+      "Email / Tên đăng nhập": u.email,
+      "Mật khẩu": u.password || "123456",
+      "Vai trò": ROLE_LABELS[u.role].title,
+      "Lớp / Bộ môn": u.schoolClass || u.subject || "",
+      "Số điện thoại": u.phone || "",
+      "Trạng thái": u.status === "active" ? "Hoạt động" : "Đã khóa",
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 26 },
+      { wch: 28 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 14 },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Danh_Sach_Tai_Khoan");
+    XLSX.writeFile(wb, `Danh_sach_tai_khoan_${new Date().toISOString().split("T")[0]}.xlsx`);
+    toast.success("Đã tải xuống!", "File Excel danh sách tài khoản đã được tải về máy.");
   };
 
   // Xuất file CSV danh sách tài khoản
   const handleExportCSV = (userList: User[]) => {
-    const headers = "STT,Họ và tên,Email / Tên đăng nhập,Mật khẩu,Vai trò,Lớp / Bộ môn,Trạng thái\n";
+    const headers = "STT,Họ và tên,Email / Tên đăng nhập,Mật khẩu,Vai trò,Lớp / Bộ môn,Số điện thoại,Trạng thái\n";
     const rows = userList
       .map((u, i) => {
         const roleLabel = ROLE_LABELS[u.role].title;
         const cls = u.schoolClass || u.subject || "";
+        const phone = u.phone || "";
         const status = u.status === "active" ? "Hoạt động" : "Đã khóa";
-        return `${i + 1},"${u.name}","${u.email}","${u.password || "123456"}","${roleLabel}","${cls}","${status}"`;
+        return `${i + 1},"${u.name}","${u.email}","${u.password || "123456"}","${roleLabel}","${cls}","${phone}","${status}"`;
       })
       .join("\n");
 
@@ -1856,85 +2160,126 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
       {/* MODAL 3: CẤP TÀI KHOẢN HÀNG LOẠT (BATCH PROVISIONING) */}
       {showBatchModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
             <div className="px-6 py-4 bg-indigo-950 text-white flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <Users className="w-5 h-5 text-indigo-400" />
+                <div className="w-9 h-9 rounded-xl bg-indigo-800/80 flex items-center justify-center text-indigo-300">
+                  <FileSpreadsheet className="w-5 h-5 text-indigo-300" />
+                </div>
                 <div>
-                  <h3 className="font-bold text-base">Cấp tài khoản hàng loạt (Batch Provisioning)</h3>
-                  <p className="text-xs text-indigo-300">Tự động sinh email, mật khẩu và đồng bộ tài khoản cho toàn bộ lớp</p>
+                  <h3 className="font-bold text-base">Cấp tài khoản đồng loạt (Batch Provisioning)</h3>
+                  <p className="text-xs text-indigo-300">Tải file mẫu Excel, upload danh sách hoặc dán danh sách họ tên tự động sinh email & mật khẩu</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowBatchModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
               >
                 ✕
               </button>
             </div>
 
+            {/* Mode switcher tabs */}
+            <div className="px-6 pt-3 pb-0 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setBatchInputMode("excel")}
+                className={`px-4 py-2.5 rounded-t-xl font-bold text-xs flex items-center gap-2 border-t border-x transition ${
+                  batchInputMode === "excel"
+                    ? "bg-white text-indigo-700 border-slate-200 shadow-2xs -mb-px pb-3"
+                    : "border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>Upload File Excel / CSV (.xlsx, .csv)</span>
+                {parsedExcelUsers.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-800 font-extrabold">
+                    {parsedExcelUsers.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setBatchInputMode("text")}
+                className={`px-4 py-2.5 rounded-t-xl font-bold text-xs flex items-center gap-2 border-t border-x transition ${
+                  batchInputMode === "text"
+                    ? "bg-white text-indigo-700 border-slate-200 shadow-2xs -mb-px pb-3"
+                    : "border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <FileText className="w-4 h-4 text-indigo-600" />
+                <span>Dán danh sách Họ tên trực tiếp</span>
+              </button>
+            </div>
+
             <div className="p-6 space-y-4 overflow-y-auto text-xs flex-1">
-              {/* Cấu hình vai trò & Lớp */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Vai trò cấp</label>
-                  <select
-                    value={batchRole}
-                    onChange={(e) => setBatchRole(e.target.value as UserRole)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                  >
-                    <option value="student">🎓 Học sinh</option>
-                    <option value="teacher">👨‍🏫 Giáo viên</option>
-                    <option value="admin">👑 Quản trị viên</option>
-                  </select>
+              {/* Default Settings Toolbar */}
+              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-3">
+                <div className="font-bold text-slate-700 flex items-center gap-1.5 text-xs">
+                  <Sliders className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Cấu hình mặc định (Áp dụng khi dữ liệu trong file hoặc danh sách để trống)</span>
                 </div>
 
-                {batchRole === "student" && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Lớp học</label>
-                    <input
-                      type="text"
-                      value={batchClass}
-                      onChange={(e) => setBatchClass(e.target.value)}
-                      placeholder="12A1"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                    />
+                    <label className="block font-bold text-slate-600 mb-1 text-[11px]">Vai trò mặc định</label>
+                    <select
+                      value={batchRole}
+                      onChange={(e) => setBatchRole(e.target.value as UserRole)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none text-xs"
+                    >
+                      <option value="student">🎓 Học sinh</option>
+                      <option value="teacher">👨‍🏫 Giáo viên</option>
+                      <option value="admin">👑 Quản trị viên</option>
+                    </select>
                   </div>
-                )}
 
-                {batchRole === "teacher" && (
+                  {batchRole === "student" && (
+                    <div>
+                      <label className="block font-bold text-slate-600 mb-1 text-[11px]">Lớp học mặc định</label>
+                      <input
+                        type="text"
+                        value={batchClass}
+                        onChange={(e) => setBatchClass(e.target.value)}
+                        placeholder="12A1"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none text-xs"
+                      />
+                    </div>
+                  )}
+
+                  {batchRole === "teacher" && (
+                    <div>
+                      <label className="block font-bold text-slate-600 mb-1 text-[11px]">Môn học phụ trách</label>
+                      <input
+                        type="text"
+                        value={batchSubject}
+                        onChange={(e) => setBatchSubject(e.target.value)}
+                        placeholder="Toán học THPT"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none text-xs"
+                      />
+                    </div>
+                  )}
+
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Môn phụ trách</label>
-                    <input
-                      type="text"
-                      value={batchSubject}
-                      onChange={(e) => setBatchSubject(e.target.value)}
-                      placeholder="Toán học THPT"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                    />
+                    <label className="block font-bold text-slate-600 mb-1 text-[11px]">Tên miền Email tự sinh</label>
+                    <select
+                      value={batchDomain}
+                      onChange={(e) => setBatchDomain(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none text-xs"
+                    >
+                      <option value="@student.vn">@student.vn (Học sinh)</option>
+                      <option value="@edulink.vn">@edulink.vn (Trường học)</option>
+                      <option value="@school.edu.vn">@school.edu.vn (Khối GD)</option>
+                    </select>
                   </div>
-                )}
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Tên miền Email</label>
-                  <select
-                    value={batchDomain}
-                    onChange={(e) => setBatchDomain(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                  >
-                    <option value="@student.vn">@student.vn</option>
-                    <option value="@edulink.vn">@edulink.vn</option>
-                    <option value="@school.edu.vn">@school.edu.vn</option>
-                  </select>
                 </div>
-              </div>
 
-              {/* Quy tắc mật khẩu */}
-              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
-                <label className="block font-bold text-slate-700 mb-1.5">Quy tắc cấp mật khẩu ban đầu</label>
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer font-medium">
+                {/* Password rule */}
+                <div className="pt-2 border-t border-slate-200/80 flex flex-wrap items-center gap-4 text-[11px]">
+                  <span className="font-bold text-slate-600">Mật khẩu ban đầu:</span>
+                  <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-800">
                     <input
                       type="radio"
                       name="batchPassRule"
@@ -1942,10 +2287,10 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                       onChange={() => setBatchPasswordRule("default")}
                       className="text-indigo-600 focus:ring-indigo-500"
                     />
-                    <span>Mặc định: <strong>123456</strong></span>
+                    <span>Mặc định (<strong>123456</strong>)</span>
                   </label>
 
-                  <label className="flex items-center gap-2 cursor-pointer font-medium">
+                  <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-800">
                     <input
                       type="radio"
                       name="batchPassRule"
@@ -1953,10 +2298,10 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                       onChange={() => setBatchPasswordRule("random")}
                       className="text-indigo-600 focus:ring-indigo-500"
                     />
-                    <span>Ngẫu nhiên 6 chữ số (Bảo mật cao)</span>
+                    <span>6 số ngẫu nhiên</span>
                   </label>
 
-                  <label className="flex items-center gap-2 cursor-pointer font-medium">
+                  <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-800">
                     <input
                       type="radio"
                       name="batchPassRule"
@@ -1970,65 +2315,257 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                         type="text"
                         value={batchCustomPass}
                         onChange={(e) => setBatchCustomPass(e.target.value)}
-                        className="px-2 py-1 rounded-lg border border-slate-300 w-24 text-xs font-mono font-bold"
+                        className="px-2 py-0.5 rounded-lg border border-slate-300 w-24 text-xs font-mono font-bold text-indigo-700 ml-1"
                       />
                     )}
                   </label>
                 </div>
               </div>
 
-              {/* Danh sách họ tên */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="font-bold text-slate-700">
-                    Danh sách họ tên (mỗi học sinh 1 dòng)
-                  </label>
-                  <span className="text-[11px] text-indigo-600 font-bold">
-                    {batchNamesText.split("\n").filter((l) => l.trim().length > 0).length} người dùng
-                  </span>
-                </div>
-                <textarea
-                  rows={6}
-                  value={batchNamesText}
-                  onChange={(e) => setBatchNamesText(e.target.value)}
-                  placeholder="Nhập hoặc dán danh sách học sinh (Nguyễn Văn A&#10;Trần Thị B...)"
-                  className="w-full px-3.5 py-2.5 text-xs rounded-2xl border border-slate-300 font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed"
-                />
-              </div>
+              {/* TAB 1: EXCEL / CSV UPLOAD */}
+              {batchInputMode === "excel" && (
+                <div className="space-y-4">
+                  {/* Action Banner: Download Template + Upload Zone */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {/* Card 1: Download Template */}
+                    <div className="bg-emerald-50/70 border border-emerald-200 p-4 rounded-2xl flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-emerald-900 font-bold text-xs mb-1">
+                          <Download className="w-4 h-4 text-emerald-700" />
+                          <span>Bước 1: Tải File Excel mẫu chuẩn</span>
+                        </div>
+                        <p className="text-[11px] text-emerald-800/80 leading-relaxed">
+                          Tải về file Excel mẫu đã chuẩn hóa sẵn các cột: <strong>Họ và tên, Lớp, Vai trò, Email, Mật khẩu, SĐT, Môn</strong> kèm hướng dẫn chi tiết.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDownloadExcelTemplate}
+                        className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-sm text-xs"
+                      >
+                        <FileSpreadsheet className="w-4 h-4" />
+                        <span>Tải File Excel Mẫu (.xlsx)</span>
+                      </button>
+                    </div>
 
-              {/* Xem trước mẫu (Preview) */}
-              <div className="bg-indigo-50/50 p-3.5 rounded-2xl border border-indigo-100">
-                <div className="font-bold text-indigo-900 mb-2 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Xem trước danh sách tài khoản sẽ được cấp:</span>
-                </div>
-                <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {batchNamesText
-                    .split("\n")
-                    .map((l) => l.trim())
-                    .filter(Boolean)
-                    .slice(0, 5)
-                    .map((name, i) => {
-                      const email = generateEmailFromName(name, batchDomain, []);
-                      return (
-                        <div key={i} className="flex items-center justify-between text-[11px] bg-white p-2 rounded-xl border border-indigo-100">
-                          <span className="font-bold text-slate-900">{name}</span>
-                          <span className="text-indigo-600 font-mono">{email}</span>
-                          <span className="text-slate-500 font-mono font-bold">
-                            PW: {batchPasswordRule === "default" ? "123456" : batchPasswordRule === "random" ? "••••••" : batchCustomPass}
+                    {/* Card 2: Upload Zone */}
+                    <div className="bg-indigo-50/70 border border-indigo-200 p-4 rounded-2xl flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-indigo-900 font-bold text-xs mb-1">
+                          <Upload className="w-4 h-4 text-indigo-700" />
+                          <span>Bước 2: Tải lên danh sách học sinh / GV</span>
+                        </div>
+                        <p className="text-[11px] text-indigo-800/80 leading-relaxed">
+                          Chọn hoặc kéo thả file <strong>.xlsx, .xls hoặc .csv</strong> từ máy tính. Hệ thống sẽ tự động đọc dữ liệu và đối soát tài khoản.
+                        </p>
+                      </div>
+
+                      <label className="w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-sm text-xs cursor-pointer">
+                        <Upload className="w-4 h-4" />
+                        <span>{isUploadingExcel ? "Đang xử lý..." : "Chọn File Excel tải lên"}</span>
+                        <input
+                          type="file"
+                          accept=".xlsx, .xls, .csv"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handleExcelFileUpload(file);
+                              e.target.value = "";
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Upload Status / Drag Box */}
+                  <div
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const file = e.dataTransfer.files?.[0];
+                      if (file) {
+                        handleExcelFileUpload(file);
+                      }
+                    }}
+                    className="border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-slate-50 hover:bg-indigo-50/30 rounded-2xl p-4 text-center transition cursor-pointer"
+                  >
+                    <label className="cursor-pointer block">
+                      <FileSpreadsheet className="w-8 h-8 text-indigo-500 mx-auto mb-1.5" />
+                      <div className="font-bold text-slate-800 text-xs">
+                        {uploadedFileName ? (
+                          <span className="text-emerald-700">
+                            ✓ Đã nạp file: <strong>{uploadedFileName}</strong> ({parsedExcelUsers.length} tài khoản)
+                          </span>
+                        ) : (
+                          "Kéo & thả file Excel (.xlsx / .csv) vào đây hoặc bấm để duyệt file"
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Hỗ trợ cả file Excel có dấu hoặc không dấu. Nếu để trống email/mật khẩu, hệ thống sẽ tự sinh tự động.
+                      </p>
+                      <input
+                        type="file"
+                        accept=".xlsx, .xls, .csv"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            handleExcelFileUpload(file);
+                            e.target.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Parsed Users Table Preview */}
+                  {parsedExcelUsers.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>
+                            Danh sách trích xuất ({parsedExcelUsers.length} tài khoản sẵn sàng cấp):
                           </span>
                         </div>
-                      );
-                    })}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setParsedExcelUsers([]);
+                            setUploadedFileName(null);
+                          }}
+                          className="text-[11px] text-rose-600 hover:underline font-bold"
+                        >
+                          Xóa và tải lại file khác
+                        </button>
+                      </div>
+
+                      <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs max-h-60 overflow-y-auto">
+                        <table className="w-full text-left text-[11px]">
+                          <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 border-b border-slate-200">
+                            <tr>
+                              <th className="py-2 px-3">STT</th>
+                              <th className="py-2 px-3">Họ và tên</th>
+                              <th className="py-2 px-3">Vai trò</th>
+                              <th className="py-2 px-3">Lớp / Môn</th>
+                              <th className="py-2 px-3">Email (Tên đăng nhập)</th>
+                              <th className="py-2 px-3">Mật khẩu</th>
+                              <th className="py-2 px-3 text-center">Xóa</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white font-medium">
+                            {parsedExcelUsers.map((u, idx) => (
+                              <tr key={idx} className="hover:bg-indigo-50/30 transition">
+                                <td className="py-2 px-3 text-slate-400 font-mono">{idx + 1}</td>
+                                <td className="py-2 px-3 font-bold text-slate-900">{u.name}</td>
+                                <td className="py-2 px-3">
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                      u.role === "teacher"
+                                        ? "bg-indigo-100 text-indigo-800"
+                                        : u.role === "admin"
+                                        ? "bg-rose-100 text-rose-800"
+                                        : "bg-emerald-100 text-emerald-800"
+                                    }`}
+                                  >
+                                    {ROLE_LABELS[u.role].title}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 text-slate-600 font-bold">
+                                  {u.schoolClass || u.subject || "-"}
+                                </td>
+                                <td className="py-2 px-3 font-mono text-indigo-600">{u.email}</td>
+                                <td className="py-2 px-3 font-mono font-bold text-slate-700">
+                                  {u.password || "123456"}
+                                </td>
+                                <td className="py-2 px-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveParsedRow(idx)}
+                                    className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                                    title="Xóa dòng này"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-amber-50/70 border border-amber-200 p-3 rounded-2xl flex items-start gap-2 text-amber-900 text-[11px]">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Mẹo nhập danh sách:</strong> Bạn có thể tải file Excel mẫu ở nút trên, điền danh sách học sinh của lớp và tải lên. Cột <strong>Họ và tên</strong> là bắt buộc, các cột khác hệ thống sẽ tự động bù đắp theo cấu hình.
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
+
+              {/* TAB 2: TEXT LIST */}
+              {batchInputMode === "text" && (
+                <div className="space-y-4">
+                  {/* Danh sách họ tên */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="font-bold text-slate-700">
+                        Danh sách họ tên (mỗi học sinh 1 dòng)
+                      </label>
+                      <span className="text-[11px] text-indigo-600 font-bold">
+                        {batchNamesText.split("\n").filter((l) => l.trim().length > 0).length} người dùng
+                      </span>
+                    </div>
+                    <textarea
+                      rows={6}
+                      value={batchNamesText}
+                      onChange={(e) => setBatchNamesText(e.target.value)}
+                      placeholder="Nhập hoặc dán danh sách học sinh (Nguyễn Văn A&#10;Trần Thị B...)"
+                      className="w-full px-3.5 py-2.5 text-xs rounded-2xl border border-slate-300 font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed"
+                    />
+                  </div>
+
+                  {/* Xem trước mẫu (Preview) */}
+                  <div className="bg-indigo-50/50 p-3.5 rounded-2xl border border-indigo-100">
+                    <div className="font-bold text-indigo-900 mb-2 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Xem trước danh sách tài khoản sẽ được cấp:</span>
+                    </div>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {batchNamesText
+                        .split("\n")
+                        .map((l) => l.trim())
+                        .filter(Boolean)
+                        .slice(0, 5)
+                        .map((name, i) => {
+                          const email = generateEmailFromName(name, batchDomain, []);
+                          return (
+                            <div key={i} className="flex items-center justify-between text-[11px] bg-white p-2 rounded-xl border border-indigo-100">
+                              <span className="font-bold text-slate-900">{name}</span>
+                              <span className="text-indigo-600 font-mono">{email}</span>
+                              <span className="text-slate-500 font-mono font-bold">
+                                PW: {batchPasswordRule === "default" ? "123456" : batchPasswordRule === "random" ? "••••••" : batchCustomPass}
+                              </span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
               <span className="text-xs text-slate-600">
                 Sẵn sàng cấp cho{" "}
                 <strong className="text-indigo-600">
-                  {batchNamesText.split("\n").filter((l) => l.trim().length > 0).length}
+                  {batchInputMode === "excel"
+                    ? parsedExcelUsers.length
+                    : batchNamesText.split("\n").filter((l) => l.trim().length > 0).length}
                 </strong>{" "}
                 tài khoản
               </span>
@@ -2043,7 +2580,12 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 <button
                   type="button"
                   onClick={handleExecuteBatchProvision}
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition shadow-sm flex items-center gap-1.5 text-xs"
+                  disabled={batchInputMode === "excel" && parsedExcelUsers.length === 0}
+                  className={`px-5 py-2 rounded-xl font-bold transition shadow-sm flex items-center gap-1.5 text-xs ${
+                    batchInputMode === "excel" && parsedExcelUsers.length === 0
+                      ? "bg-slate-300 text-slate-500 cursor-not-allowed"
+                      : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                  }`}
                 >
                   <UserPlus className="w-4 h-4" />
                   <span>Xác nhận Cấp tài khoản</span>
@@ -2054,7 +2596,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
         </div>
       )}
 
-      {/* MODAL 4: XUẤT PHIẾU CẤP TÀI KHOẢN & TẢI FILE CSV */}
+      {/* MODAL 4: XUẤT PHIẾU CẤP TÀI KHOẢN & TẢI FILE CSV / EXCEL */}
       {showExportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
           <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
@@ -2063,7 +2605,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 <Printer className="w-5 h-5 text-indigo-400" />
                 <div>
                   <h3 className="font-bold text-base">Xuất phiếu cấp tài khoản & Danh sách đăng nhập</h3>
-                  <p className="text-xs text-slate-400">In phiếu phát cho học sinh hoặc xuất file Excel CSV</p>
+                  <p className="text-xs text-slate-400">In phiếu phát cho học sinh hoặc xuất file Excel (.xlsx) / CSV</p>
                 </div>
               </div>
               <button
@@ -2092,7 +2634,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 </select>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -2126,12 +2668,29 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                       if (exportClassFilter === "student") return u.role === "student";
                       return u.schoolClass === exportClassFilter;
                     });
-                    handleExportCSV(list);
+                    handleExportExcel(list);
                   }}
                   className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition flex items-center gap-1 shadow-2xs"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Tải file Excel (CSV)</span>
+                  <span>Tải File Excel (.xlsx)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const list = users.filter((u) => {
+                      if (exportClassFilter === "all") return true;
+                      if (exportClassFilter === "teacher") return u.role === "teacher";
+                      if (exportClassFilter === "student") return u.role === "student";
+                      return u.schoolClass === exportClassFilter;
+                    });
+                    handleExportCSV(list);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-bold transition flex items-center gap-1 shadow-2xs"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Tải CSV</span>
                 </button>
 
                 <button

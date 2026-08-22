@@ -23,6 +23,7 @@ import {
   Calendar,
   KeyRound,
   FileCheck,
+  Trophy,
 } from "lucide-react";
 
 interface StudentPortalViewProps {
@@ -30,6 +31,8 @@ interface StudentPortalViewProps {
   submissions: StudentSubmission[];
   onStartExam: (exam: Exam) => void;
   onJoinLiveRoom: () => void;
+  onOpenLeaderboard?: () => void;
+  onOpenHistory?: () => void;
 }
 
 export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
@@ -37,6 +40,8 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   submissions,
   onStartExam,
   onJoinLiveRoom,
+  onOpenLeaderboard,
+  onOpenHistory,
 }) => {
   const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<"exams" | "history" | "analytics">("exams");
@@ -44,13 +49,30 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedSubmissionReview, setSelectedSubmissionReview] = useState<StudentSubmission | null>(null);
 
-  // Lọc các bài nộp của riêng học sinh hiện tại (hoặc nếu chưa có bài cá nhân thì hiển thị các bài thi mẫu)
+  // Lọc các bài nộp của riêng học sinh hiện tại (Bảo đảm bài làm của học sinh luôn hiển thị đầy đủ)
   const mySubmissions = useMemo(() => {
-    const directMatches = submissions.filter(
-      (s) => s.studentName.toLowerCase().includes(currentUser.name.toLowerCase()) || s.studentId === currentUser.id
-    );
-    if (directMatches.length > 0) return directMatches;
-    return submissions; // Hiển thị các bài thi gần đây để học sinh tham khảo nếu chưa làm
+    let userRecordedSubIds: string[] = [];
+    try {
+      const raw = localStorage.getItem(`edutest_user_${currentUser.id}_subs`);
+      if (raw) userRecordedSubIds = JSON.parse(raw);
+    } catch {}
+
+    const directMatches = submissions.filter((s) => {
+      if (!s) return false;
+      if (s.studentId === currentUser.id) return true;
+      if (s.studentEmail && currentUser.email && s.studentEmail.toLowerCase() === currentUser.email.toLowerCase()) return true;
+      if (userRecordedSubIds.includes(s.id)) return true;
+      
+      const currentNameClean = currentUser.name.toLowerCase().trim();
+      const subNameClean = (s.studentName || "").toLowerCase().trim();
+      if (subNameClean && currentNameClean) {
+        if (subNameClean === currentNameClean) return true;
+        if (subNameClean.includes(currentNameClean) || currentNameClean.includes(subNameClean)) return true;
+      }
+      return false;
+    });
+
+    return directMatches;
   }, [submissions, currentUser]);
 
   // Thống kê cá nhân
@@ -131,6 +153,28 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {onOpenLeaderboard && (
+              <button
+                type="button"
+                onClick={onOpenLeaderboard}
+                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs sm:text-sm font-black shadow-md transition flex items-center gap-2"
+              >
+                <Trophy className="w-4 h-4 text-slate-950" />
+                <span>Bảng Xếp Hạng Điểm Lớp</span>
+              </button>
+            )}
+
+            {onOpenHistory && (
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs sm:text-sm font-bold border border-white/20 shadow-md transition flex items-center gap-2"
+              >
+                <History className="w-4 h-4 text-emerald-300" />
+                <span>Xem Kết Quả ({mySubmissions.length})</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onJoinLiveRoom}

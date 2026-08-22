@@ -69,43 +69,61 @@ export const MathScratchpadModal: React.FC<MathScratchpadModalProps> = ({
 
   // Redraw canvas
   const redraw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    try {
+      const canvas = canvasRef.current;
+      if (!canvas || canvas.width <= 0 || canvas.height <= 0) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    strokes.forEach((st) => {
-      if (st.points.length < 2) return;
-      ctx.save();
-      ctx.beginPath();
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
+      if (!Array.isArray(strokes) || strokes.length === 0) return;
 
-      if (st.tool === "pen") {
-        ctx.globalCompositeOperation = "source-over";
-        ctx.strokeStyle = st.color;
-        ctx.lineWidth = st.lineWidth;
-        ctx.globalAlpha = st.opacity || 1;
-      } else if (st.tool === "highlighter") {
-        ctx.globalCompositeOperation = "source-over";
-        ctx.strokeStyle = st.color;
-        ctx.lineWidth = st.lineWidth * 4;
-        ctx.globalAlpha = 0.35;
-      } else if (st.tool === "eraser") {
-        ctx.globalCompositeOperation = "destination-out";
-        ctx.lineWidth = st.lineWidth * 7;
-        ctx.globalAlpha = 1;
-      }
+      strokes.forEach((st) => {
+        if (!st || !Array.isArray(st.points) || st.points.length === 0) return;
+        ctx.save();
+        ctx.beginPath();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
 
-      ctx.moveTo(st.points[0].x, st.points[0].y);
-      for (let i = 1; i < st.points.length; i++) {
-        ctx.lineTo(st.points[i].x, st.points[i].y);
-      }
-      ctx.stroke();
-      ctx.restore();
-    });
+        if (st.tool === "pen") {
+          ctx.globalCompositeOperation = "source-over";
+          ctx.strokeStyle = st.color || "#2563eb";
+          ctx.lineWidth = st.lineWidth || 3;
+          ctx.globalAlpha = st.opacity || 1;
+        } else if (st.tool === "highlighter") {
+          ctx.globalCompositeOperation = "source-over";
+          ctx.strokeStyle = st.color || "#facc15";
+          ctx.lineWidth = (st.lineWidth || 3) * 4;
+          ctx.globalAlpha = 0.35;
+        } else if (st.tool === "eraser") {
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.lineWidth = (st.lineWidth || 3) * 7;
+          ctx.globalAlpha = 1;
+        }
+
+        const p0 = st.points[0];
+        if (p0 && typeof p0.x === "number" && typeof p0.y === "number" && !isNaN(p0.x) && !isNaN(p0.y)) {
+          if (st.points.length === 1) {
+            ctx.arc(p0.x, p0.y, (st.lineWidth || 3) / 2, 0, Math.PI * 2);
+            ctx.fillStyle = st.color || "#2563eb";
+            ctx.fill();
+          } else {
+            ctx.moveTo(p0.x, p0.y);
+            for (let i = 1; i < st.points.length; i++) {
+              const pt = st.points[i];
+              if (pt && typeof pt.x === "number" && typeof pt.y === "number" && !isNaN(pt.x) && !isNaN(pt.y)) {
+                ctx.lineTo(pt.x, pt.y);
+              }
+            }
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      });
+    } catch (err) {
+      console.warn("Lỗi redraw:", err);
+    }
   }, [strokes]);
 
   // Resize canvas when modal opens or window resizes
@@ -152,125 +170,155 @@ export const MathScratchpadModal: React.FC<MathScratchpadModalProps> = ({
   ): ScratchPoint => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    let cx = 0;
-    let cy = 0;
+    try {
+      const rect = canvas.getBoundingClientRect();
+      let cx = 0;
+      let cy = 0;
 
-    if ("touches" in e) {
-      if (e.touches.length > 0) {
-        cx = e.touches[0].clientX;
-        cy = e.touches[0].clientY;
+      if ("touches" in e) {
+        if (e.touches && e.touches.length > 0) {
+          cx = e.touches[0].clientX;
+          cy = e.touches[0].clientY;
+        } else if ("changedTouches" in e && (e as any).changedTouches && (e as any).changedTouches.length > 0) {
+          cx = (e as any).changedTouches[0].clientX;
+          cy = (e as any).changedTouches[0].clientY;
+        }
+      } else {
+        cx = e.clientX;
+        cy = e.clientY;
       }
-    } else {
-      cx = e.clientX;
-      cy = e.clientY;
-    }
 
-    return {
-      x: cx - rect.left,
-      y: cy - rect.top,
-    };
+      const x = Math.max(0, Math.min(canvas.width, cx - rect.left));
+      const y = Math.max(0, Math.min(canvas.height, cy - rect.top));
+
+      return {
+        x: isNaN(x) ? 0 : x,
+        y: isNaN(y) ? 0 : y,
+      };
+    } catch {
+      return { x: 0, y: 0 };
+    }
   };
 
   const handleStart = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
   ) => {
-    isDrawing.current = true;
-    const pt = getCoords(e);
-    const newSt: FullStroke = {
-      tool,
-      color,
-      lineWidth: strokeWidth,
-      opacity: tool === "highlighter" ? 0.35 : 1,
-      points: [pt],
-    };
-    currentStroke.current = newSt;
+    try {
+      if ("touches" in e && e.cancelable) {
+        e.preventDefault();
+      }
+      isDrawing.current = true;
+      const pt = getCoords(e);
+      const newSt: FullStroke = {
+        tool,
+        color,
+        lineWidth: strokeWidth,
+        opacity: tool === "highlighter" ? 0.35 : 1,
+        points: [pt],
+      };
+      currentStroke.current = newSt;
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+      ctx.save();
+      ctx.beginPath();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
 
-    if (tool === "pen") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = color;
-      ctx.lineWidth = strokeWidth;
-      ctx.globalAlpha = 1;
-    } else if (tool === "highlighter") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = color;
-      ctx.lineWidth = strokeWidth * 4;
-      ctx.globalAlpha = 0.35;
-    } else if (tool === "eraser") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.lineWidth = strokeWidth * 7;
-      ctx.globalAlpha = 1;
+      if (tool === "pen") {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = strokeWidth;
+        ctx.globalAlpha = 1;
+      } else if (tool === "highlighter") {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = strokeWidth * 4;
+        ctx.globalAlpha = 0.35;
+      } else if (tool === "eraser") {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = strokeWidth * 7;
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.moveTo(pt.x, pt.y);
+      ctx.lineTo(pt.x + 0.1, pt.y + 0.1);
+      ctx.stroke();
+      ctx.restore();
+    } catch (err) {
+      console.warn("Lỗi handleStart:", err);
     }
-
-    ctx.moveTo(pt.x, pt.y);
-    ctx.lineTo(pt.x, pt.y);
-    ctx.stroke();
-    ctx.restore();
   };
 
   const handleDraw = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
   ) => {
-    if (!isDrawing.current || !currentStroke.current) return;
-    const pt = getCoords(e);
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    try {
+      if ("touches" in e && e.cancelable) {
+        e.preventDefault();
+      }
+      if (!isDrawing.current || !currentStroke.current) return;
+      const pt = getCoords(e);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-    const points = currentStroke.current.points;
-    const last = points[points.length - 1];
+      const points = currentStroke.current.points;
+      if (!points || points.length === 0) return;
+      const last = points[points.length - 1];
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+      ctx.save();
+      ctx.beginPath();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
 
-    if (tool === "pen") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = color;
-      ctx.lineWidth = strokeWidth;
-      ctx.globalAlpha = 1;
-    } else if (tool === "highlighter") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = color;
-      ctx.lineWidth = strokeWidth * 4;
-      ctx.globalAlpha = 0.35;
-    } else if (tool === "eraser") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.lineWidth = strokeWidth * 7;
-      ctx.globalAlpha = 1;
+      if (tool === "pen") {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = strokeWidth;
+        ctx.globalAlpha = 1;
+      } else if (tool === "highlighter") {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = strokeWidth * 4;
+        ctx.globalAlpha = 0.35;
+      } else if (tool === "eraser") {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = strokeWidth * 7;
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(pt.x, pt.y);
+      ctx.stroke();
+      ctx.restore();
+
+      currentStroke.current.points.push(pt);
+    } catch (err) {
+      console.warn("Lỗi handleDraw:", err);
     }
-
-    ctx.moveTo(last.x, last.y);
-    ctx.lineTo(pt.x, pt.y);
-    ctx.stroke();
-    ctx.restore();
-
-    currentStroke.current.points.push(pt);
   };
 
   const handleStop = () => {
-    if (!isDrawing.current || !currentStroke.current) {
+    try {
+      if (!isDrawing.current || !currentStroke.current) {
+        isDrawing.current = false;
+        return;
+      }
       isDrawing.current = false;
-      return;
+      if (currentStroke.current.points.length > 0) {
+        setStrokes((prev) => [...prev, currentStroke.current!]);
+        setRedoStack([]);
+      }
+      currentStroke.current = null;
+    } catch {
+      isDrawing.current = false;
+      currentStroke.current = null;
     }
-    isDrawing.current = false;
-    if (currentStroke.current.points.length > 0) {
-      setStrokes((prev) => [...prev, currentStroke.current!]);
-      setRedoStack([]);
-    }
-    currentStroke.current = null;
   };
 
   const handleUndo = () => {
@@ -538,14 +586,25 @@ export const MathScratchpadModal: React.FC<MathScratchpadModalProps> = ({
         >
           <canvas
             ref={canvasRef}
+            style={{ touchAction: "none" }}
             className="absolute inset-0 w-full h-full"
             onMouseDown={handleStart}
             onMouseMove={handleDraw}
             onMouseUp={handleStop}
             onMouseLeave={handleStop}
-            onTouchStart={handleStart}
-            onTouchMove={handleDraw}
-            onTouchEnd={handleStop}
+            onTouchStart={(e) => {
+              try { e.stopPropagation(); } catch {}
+              handleStart(e);
+            }}
+            onTouchMove={(e) => {
+              try { e.stopPropagation(); } catch {}
+              handleDraw(e);
+            }}
+            onTouchEnd={(e) => {
+              try { e.stopPropagation(); } catch {}
+              handleStop();
+            }}
+            onTouchCancel={handleStop}
           />
         </div>
       </div>

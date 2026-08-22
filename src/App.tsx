@@ -1,5 +1,6 @@
 import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from "react";
 import { Exam, StudentSubmission } from "./types/exam";
+import { User } from "./types/auth";
 import { defaultExam001, initialSampleExams } from "./data/defaultExam";
 import { Navbar, ActiveView } from "./components/Navbar";
 import { BankManagerView } from "./components/BankManagerView";
@@ -11,6 +12,8 @@ import { AdminManagementView } from "./components/AdminManagementView";
 import { StudentPortalView } from "./components/StudentPortalView";
 import { AuthModal } from "./components/AuthModal";
 import { UserProfileModal } from "./components/UserProfileModal";
+import { StudentResultHistoryModal } from "./components/StudentResultHistoryModal";
+import { ClassLeaderboardModal } from "./components/ClassLeaderboardModal";
 import { ToastProvider, useToast } from "./context/ToastContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import {
@@ -106,7 +109,7 @@ export default function App() {
 
 function MainApp() {
   const { toast } = useToast();
-  const { currentUser, isAdmin, isTeacher, isStudent } = useAuth();
+  const { currentUser, users, isAdmin, isTeacher, isStudent } = useAuth();
   const [exams, setExams] = useState<Exam[]>(initialSampleExams);
   const [selectedExam, setSelectedExam] = useState<Exam>(defaultExam001);
   const [activeView, setActiveView] = useState<ActiveView>(() => {
@@ -116,6 +119,11 @@ function MainApp() {
   const [submissions, setSubmissions] = useState<StudentSubmission[]>(() =>
     getLocalSubmissions()
   );
+
+  // Trạng thái mở Modal Bảng xếp hạng và Modal Lịch sử kết quả học sinh
+  const [showLeaderboard, setShowLeaderboard] = useState<boolean>(false);
+  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
+  const [historyTargetUser, setHistoryTargetUser] = useState<User | null>(null);
 
   // Tự động điều chỉnh tab điều hướng khi đổi vai trò (RBAC Route Guard)
   useEffect(() => {
@@ -240,6 +248,40 @@ function MainApp() {
     saveSubmissionToFirestore(sub).catch((e) => console.warn(e));
   };
 
+  // Mở lịch sử thi của một học sinh cụ thể
+  const handleOpenStudentHistory = (studentId: string, studentName: string) => {
+    // Tìm trong danh sách users trước
+    const existingUser = users.find(
+      (u) =>
+        (u.id && u.id.trim() === studentId.trim()) ||
+        (u.name && u.name.toLowerCase().trim() === studentName.toLowerCase().trim())
+    );
+
+    // Tìm bài nộp liên quan để trích xuất thêm avatar và lớp chuẩn
+    const matchingSub = submissions.find(
+      (s) =>
+        s.studentId === studentId ||
+        s.studentName.toLowerCase().includes(studentName.toLowerCase()) ||
+        studentName.toLowerCase().includes(s.studentName.toLowerCase())
+    );
+
+    const target: User = existingUser || {
+      id: studentId,
+      name: studentName,
+      email: matchingSub?.studentEmail || `${studentId}@edutest.local`,
+      role: "student" as const,
+      avatar:
+        matchingSub?.studentAvatar ||
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(studentName)}`,
+      schoolClass: matchingSub?.studentClass || "12A1",
+      status: "active" as const,
+      createdAt: "2026-01-01",
+    };
+
+    setHistoryTargetUser(target);
+    setShowHistoryModal(true);
+  };
+
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col text-slate-800 font-sans">
       {/* Ẩn Navbar khi đang ở chế độ Trình chiếu toàn màn hình để tối đa không gian */}
@@ -251,6 +293,11 @@ function MainApp() {
           examCode={safeSelectedExam.code}
           selectedClassFilter={selectedClassFilter}
           onSelectClassFilter={setSelectedClassFilter}
+          onOpenLeaderboard={() => setShowLeaderboard(true)}
+          onOpenHistory={() => {
+            setHistoryTargetUser(currentUser);
+            setShowHistoryModal(true);
+          }}
         />
       )}
 
@@ -293,6 +340,8 @@ function MainApp() {
           onSelectClassFilter={setSelectedClassFilter}
           allExams={exams}
           onSelectExam={(exam) => handleSelectExam(exam, "analytics")}
+          onOpenLeaderboard={() => setShowLeaderboard(true)}
+          onOpenStudentHistory={handleOpenStudentHistory}
         />
       )}
 
@@ -324,8 +373,35 @@ function MainApp() {
           submissions={submissions}
           onStartExam={handleStudentStartExam}
           onJoinLiveRoom={() => setActiveView("live")}
+          onOpenLeaderboard={() => setShowLeaderboard(true)}
+          onOpenHistory={() => {
+            setHistoryTargetUser(currentUser);
+            setShowHistoryModal(true);
+          }}
         />
       )}
+
+      {/* Modal 1: Lịch sử & Bảng điểm tất cả các lần làm bài thi của học sinh */}
+      <StudentResultHistoryModal
+        user={historyTargetUser || currentUser}
+        isOpen={showHistoryModal}
+        onClose={() => {
+          setShowHistoryModal(false);
+          setHistoryTargetUser(null);
+        }}
+        submissions={submissions}
+      />
+
+      {/* Modal 2: Bảng Xếp Hạng Điểm Số Học Sinh Theo Lớp & Theo Từng Đề Thi */}
+      <ClassLeaderboardModal
+        isOpen={showLeaderboard}
+        onClose={() => setShowLeaderboard(false)}
+        exams={exams}
+        submissions={submissions}
+        users={users}
+        defaultClassFilter={selectedClassFilter}
+        onViewStudentHistory={handleOpenStudentHistory}
+      />
     </div>
   );
 }

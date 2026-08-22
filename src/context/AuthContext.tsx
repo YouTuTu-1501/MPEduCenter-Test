@@ -59,6 +59,33 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Tạo tài khoản học sinh khách riêng biệt cho từng thiết bị để không bị ghi đè lẫn nhau
+function getOrCreateDeviceStudent(): User {
+  let guestId = "";
+  try {
+    guestId = localStorage.getItem("mpeducenter_device_student_id") || "";
+  } catch {}
+
+  if (!guestId) {
+    guestId = `usr_stu_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    try {
+      localStorage.setItem("mpeducenter_device_student_id", guestId);
+    } catch {}
+  }
+
+  return {
+    id: guestId,
+    name: "Học sinh mới",
+    email: `hocsinh_${guestId.slice(-4)}@student.edutest.vn`,
+    role: "student",
+    schoolClass: "12A1",
+    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(guestId)}`,
+    status: "active",
+    createdAt: new Date().toISOString().split("T")[0],
+    lastLogin: "Vừa xong",
+  };
+}
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { toast } = useToast();
 
@@ -70,7 +97,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
-    return INITIAL_USERS;
+    const defaultStudent = getOrCreateDeviceStudent();
+    return [defaultStudent, ...INITIAL_USERS];
   });
 
   const [currentUserId, setCurrentUserId] = useState<string>(() => {
@@ -78,18 +106,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const saved = localStorage.getItem("mpeducenter_current_user_id");
       if (saved) return saved;
     } catch {}
-    // Mặc định đăng nhập tài khoản Học sinh Nam 12A1 hoặc Giáo viên
-    return INITIAL_USERS[3].id; // Học sinh Nguyễn Hoàng Nam (Mặc định khi vào hệ thống)
+    // Mặc định tài khoản học sinh riêng của thiết bị này
+    const defaultStudent = getOrCreateDeviceStudent();
+    return defaultStudent.id;
   });
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
-  // Đồng bộ Firestore theo thời gian thực (Real-time Firestore Subscription)
+  // Đồng bộ Firestore theo thời gian thực (Real-time Firestore Subscription) với cơ chế merge bảo vệ tài khoản cục bộ
   useEffect(() => {
     const unsubscribe = subscribeUsers((firestoreUsers) => {
       if (firestoreUsers && firestoreUsers.length > 0) {
-        setUsers(firestoreUsers);
+        setUsers((prev) => {
+          // Bảo vệ các tài khoản đã được tạo/chỉnh sửa trên máy hiện tại
+          const map = new Map<string, User>();
+          // Thêm các user từ Firestore
+          firestoreUsers.forEach((u) => map.set(u.id, u));
+          // Giữ lại hoặc ưu tiên tài khoản local nếu chưa có trên Firestore
+          prev.forEach((localUser) => {
+            if (!map.has(localUser.id)) {
+              map.set(localUser.id, localUser);
+            }
+          });
+          return Array.from(map.values());
+        });
       }
     });
     return () => unsubscribe();
@@ -109,7 +150,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch {}
   }, [currentUserId]);
 
-  const currentUser = users.find((u) => u.id === currentUserId) || users[0] || INITIAL_USERS[0];
+  const currentUser =
+    users.find((u) => u.id === currentUserId) ||
+    users.find((u) => u.role === "student") ||
+    users[0] ||
+    INITIAL_USERS[0];
 
   const isAdmin = currentUser.role === "admin";
   const isTeacher = currentUser.role === "teacher";
