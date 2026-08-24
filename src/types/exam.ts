@@ -56,6 +56,7 @@ export interface Exam {
   subject: string;
   grade: string; // "Lớp 10" | "Lớp 11" | "Lớp 12" | ...
   targetClass?: string; // Lớp áp dụng: "Tất cả các lớp" | "12A1" | "12A2" | "11A1" | "10A1"...
+  assignedClasses?: string[]; // Danh sách các lớp được phân công
   chapter?: string; // "Chương 1: ...", "Chương 2: ...", v.v.
   durationMinutes: number;
   description: string;
@@ -64,7 +65,142 @@ export interface Exam {
   questions: Question[];
   createdAt: string;
   updatedAt: string;
+
+  // Tính năng Khóa / Mở & Hẹn giờ & Giao đề theo mã
+  isLocked?: boolean; // true = Đã khóa (không cho học sinh vào thi), false = Đang mở
+  scheduleEnabled?: boolean; // Bật chế độ hẹn giờ mở/đóng
+  scheduledOpenTime?: string; // Thời gian mở đề (ISO string hoặc YYYY-MM-DDTHH:mm)
+  scheduledCloseTime?: string; // Thời gian đóng đề (ISO string hoặc YYYY-MM-DDTHH:mm)
+  password?: string; // Mật khẩu truy cập đề (tùy chọn)
+  allowReview?: boolean; // Cho phép xem lại đáp án sau khi nộp
 }
+
+export type ExamAccessStatusType = "open" | "locked" | "upcoming" | "ended";
+
+export interface ExamAccessStatus {
+  status: ExamAccessStatusType;
+  canEnter: boolean;
+  badgeLabel: string;
+  badgeColor: string;
+  message: string;
+  timeRemainingText?: string;
+  openDateFormatted?: string;
+  closeDateFormatted?: string;
+}
+
+/**
+ * Kiểm tra trạng thái truy cập của đề thi (Đang mở, Bị khóa, Chưa đến giờ, Hết hạn)
+ */
+export const checkExamAccessStatus = (exam: Exam): ExamAccessStatus => {
+  // 1. Kiểm tra khóa thủ công
+  if (exam.isLocked) {
+    return {
+      status: "locked",
+      canEnter: false,
+      badgeLabel: "ĐÃ KHÓA",
+      badgeColor: "bg-rose-50 text-rose-700 border-rose-200",
+      message: "Đề thi hiện đang bị khóa bởi giáo viên. Vui lòng liên hệ giáo viên để được mở quyền làm bài.",
+    };
+  }
+
+  // 2. Nếu không bật hẹn giờ -> Đang mở tự do
+  if (!exam.scheduleEnabled) {
+    return {
+      status: "open",
+      canEnter: true,
+      badgeLabel: "ĐANG MỞ",
+      badgeColor: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      message: "Đề thi đang mở. Bạn có thể bắt đầu làm bài ngay bây giờ.",
+    };
+  }
+
+  const now = new Date().getTime();
+
+  // 3. Kiểm tra hẹn giờ mở
+  if (exam.scheduledOpenTime) {
+    const openTime = new Date(exam.scheduledOpenTime).getTime();
+    if (!isNaN(openTime) && now < openTime) {
+      const diffMs = openTime - now;
+      const diffMinutes = Math.ceil(diffMs / (1000 * 60));
+      const diffHours = Math.floor(diffMinutes / 60);
+      const remainingMin = diffMinutes % 60;
+
+      let remainingText = "";
+      if (diffHours > 24) {
+        const days = Math.floor(diffHours / 24);
+        remainingText = `sau ${days} ngày nữa`;
+      } else if (diffHours > 0) {
+        remainingText = `sau ${diffHours} giờ ${remainingMin} phút nữa`;
+      } else {
+        remainingText = `sau ${diffMinutes} phút nữa`;
+      }
+
+      const openDateFormatted = new Date(openTime).toLocaleString("vi-VN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      });
+
+      return {
+        status: "upcoming",
+        canEnter: false,
+        badgeLabel: "HẸN GIỜ MỞ",
+        badgeColor: "bg-amber-50 text-amber-700 border-amber-200",
+        message: `Đề thi chưa đến giờ mở. Thời gian mở: ${openDateFormatted} (${remainingText}).`,
+        timeRemainingText: remainingText,
+        openDateFormatted,
+      };
+    }
+  }
+
+  // 4. Kiểm tra hẹn giờ đóng / hết hạn
+  if (exam.scheduledCloseTime) {
+    const closeTime = new Date(exam.scheduledCloseTime).getTime();
+    if (!isNaN(closeTime) && now > closeTime) {
+      const closeDateFormatted = new Date(closeTime).toLocaleString("vi-VN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      });
+
+      return {
+        status: "ended",
+        canEnter: false,
+        badgeLabel: "ĐÃ HẾT HẠN",
+        badgeColor: "bg-slate-100 text-slate-600 border-slate-200",
+        message: `Đề thi đã hết hạn làm bài vào lúc ${closeDateFormatted}.`,
+        closeDateFormatted,
+      };
+    }
+  }
+
+  // 5. Đang trong khung giờ mở thi
+  let closeDateFormatted = "";
+  if (exam.scheduledCloseTime) {
+    closeDateFormatted = new Date(exam.scheduledCloseTime).toLocaleString("vi-VN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  }
+
+  return {
+    status: "open",
+    canEnter: true,
+    badgeLabel: "ĐANG MỞ THI",
+    badgeColor: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    message: closeDateFormatted
+      ? `Đề thi đang mở (Hạn chót: ${closeDateFormatted}).`
+      : "Đề thi đang mở tự do cho học sinh làm bài.",
+    closeDateFormatted,
+  };
+};
 
 // Cấu trúc danh mục Khối Lớp và Lớp học chuẩn
 export const STANDARD_GRADES = ["Lớp 12", "Lớp 11", "Lớp 10"] as const;

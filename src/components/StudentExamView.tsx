@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Exam, Question, StudentSubmission, EssayAnswer } from "../types/exam";
+import { Exam, Question, StudentSubmission, EssayAnswer, checkExamAccessStatus } from "../types/exam";
 import { MathRenderer } from "./MathRenderer";
 import { EssayAnswerInput } from "./EssayAnswerInput";
 import { InteractiveFigureViewer } from "./InteractiveFigureViewer";
@@ -43,6 +43,9 @@ import {
   Pencil,
   Edit3,
   History,
+  Lock,
+  Unlock,
+  KeyRound,
 } from "lucide-react";
 
 interface StudentExamViewProps {
@@ -153,9 +156,42 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
   // Trạng thái nộp bài
   const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
   const [submission, setSubmission] = useState<StudentSubmission | null>(null);
+  const [enteredPassword, setEnteredPassword] = useState<string>("");
 
   // Bắt đầu làm bài thi & khởi tạo đích thời gian chính xác
   const handleStartExam = () => {
+    // 1. Kiểm tra trạng thái khóa & hẹn giờ
+    const accessStatus = checkExamAccessStatus(exam);
+    if (accessStatus.status === "locked") {
+      toast.error(
+        "Đề thi đang bị KHÓA!",
+        "Giáo viên đã khóa quyền truy cập đề thi này. Bạn không thể làm bài vào lúc này."
+      );
+      return;
+    }
+    if (accessStatus.status === "upcoming") {
+      toast.warning(
+        "Chưa đến giờ mở đề thi!",
+        `Đề thi sẽ mở lúc: ${accessStatus.openDateFormatted} (${accessStatus.timeRemainingText}). Vui lòng quay lại sau!`
+      );
+      return;
+    }
+    if (accessStatus.status === "ended") {
+      toast.error(
+        "Đề thi đã HẾT HẠN!",
+        `Hạn chót làm bài đã kết thúc lúc: ${accessStatus.closeDateFormatted}.`
+      );
+      return;
+    }
+
+    // 2. Kiểm tra mật khẩu (nếu có)
+    if (exam.password && exam.password.trim()) {
+      if (enteredPassword.trim() !== exam.password.trim()) {
+        toast.error("Mật khẩu đề thi không đúng!", "Vui lòng nhập chính xác mật khẩu giáo viên cung cấp.");
+        return;
+      }
+    }
+
     const remaining = secondsRemaining > 0 ? secondsRemaining : totalDurationSeconds;
     targetEndTimeRef.current = Date.now() + remaining * 1000;
     setStartTime(Date.now());
@@ -458,21 +494,38 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
 
   // Màn hình khởi động trước khi vào thi Bento Style
   if (!hasStarted) {
+    const accessStatus = checkExamAccessStatus(exam);
+    const isAccessible = accessStatus.canEnter;
+
     return (
       <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
         <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-xl shadow-xs border border-slate-200 text-slate-800">
-          <div className="flex items-center gap-3 mb-5">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xl shadow-xs">
+          <div className="flex items-start gap-4 mb-5">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xl shadow-xs shrink-0">
               <div className="w-6 h-6 border-2 border-white rounded-xs rotate-45 flex items-center justify-center">
                 <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
               </div>
             </div>
-            <div>
-              <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-full uppercase tracking-wider border border-indigo-100">
-                Kỳ thi trực tuyến
-              </span>
-              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 mt-1">{exam.title}</h2>
-              <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-slate-600 font-semibold">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-full uppercase tracking-wider border border-indigo-100">
+                  Mã đề: {exam.code}
+                </span>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border flex items-center gap-1 ${accessStatus.badgeColor}`}
+                >
+                  {accessStatus.status === "locked" ? (
+                    <Lock className="w-3 h-3 text-rose-600" />
+                  ) : accessStatus.status === "upcoming" ? (
+                    <Clock className="w-3 h-3 text-amber-600" />
+                  ) : (
+                    <Unlock className="w-3 h-3 text-emerald-600" />
+                  )}
+                  <span>{accessStatus.badgeLabel}</span>
+                </span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-900">{exam.title}</h2>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600 font-semibold">
                 <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold border border-indigo-100">
                   {exam.grade}
                 </span>
@@ -485,6 +538,22 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Cảnh báo trạng thái nếu đề bị khóa hoặc chưa mở */}
+          {!isAccessible && (
+            <div
+              className={`p-3.5 rounded-2xl border mb-5 text-xs font-bold ${
+                accessStatus.status === "locked"
+                  ? "bg-rose-50 border-rose-200 text-rose-800"
+                  : "bg-amber-50 border-amber-200 text-amber-800"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{accessStatus.message}</span>
+              </div>
+            </div>
+          )}
 
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 mb-6 space-y-2 text-xs sm:text-sm text-slate-700">
             <p className="font-bold text-slate-900">📋 Cấu trúc bài thi gồm 4 phần:</p>
@@ -524,6 +593,24 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
                 className="w-full py-2.5 px-4 rounded-xl border border-slate-300 focus:border-indigo-500 font-bold text-sm outline-none bg-white"
               />
             </div>
+
+            {/* Ô nhập mật khẩu nếu đề thi yêu cầu */}
+            {exam.password && exam.password.trim() && (
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1 flex items-center gap-1">
+                  <KeyRound className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Mật khẩu truy cập đề thi:</span>
+                </label>
+                <input
+                  id="input-exam-password"
+                  type="password"
+                  value={enteredPassword}
+                  onChange={(e) => setEnteredPassword(e.target.value)}
+                  placeholder="Nhập mật khẩu do giáo viên cung cấp..."
+                  className="w-full py-2.5 px-4 rounded-xl border border-amber-300 focus:border-amber-500 font-bold text-sm outline-none bg-white"
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3">
@@ -539,9 +626,14 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
               id="btn-start-exam-now"
               type="button"
               onClick={handleStartExam}
-              className="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-xs transition"
+              disabled={!isAccessible}
+              className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-xs transition flex items-center justify-center gap-1.5 ${
+                !isAccessible
+                  ? "bg-slate-300 text-slate-500 cursor-not-allowed"
+                  : "bg-indigo-600 hover:bg-indigo-700 text-white"
+              }`}
             >
-              Bắt đầu làm bài ➔
+              <span>{isAccessible ? "Bắt đầu làm bài ➔" : "Chưa thể làm bài"}</span>
             </button>
           </div>
         </div>

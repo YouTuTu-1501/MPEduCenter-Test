@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
-import { Exam, StudentSubmission } from "../types/exam";
+import { Exam, StudentSubmission, checkExamAccessStatus } from "../types/exam";
 import { MathRenderer } from "./MathRenderer";
+import { ExamCodeEntryModal } from "./ExamCodeEntryModal";
+import { useToast } from "../context/ToastContext";
 import {
   GraduationCap,
   BookOpen,
@@ -24,6 +26,10 @@ import {
   KeyRound,
   FileCheck,
   Trophy,
+  Lock,
+  Unlock,
+  AlertCircle,
+  Send,
 } from "lucide-react";
 
 interface StudentPortalViewProps {
@@ -44,10 +50,72 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   onOpenHistory,
 }) => {
   const { currentUser } = useAuth();
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<"exams" | "history" | "analytics">("exams");
   const [gradeFilter, setGradeFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedSubmissionReview, setSelectedSubmissionReview] = useState<StudentSubmission | null>(null);
+
+  // Quản lý Modal & Input Nhập mã đề thi nhanh
+  const [showCodeModal, setShowCodeModal] = useState<boolean>(false);
+  const [quickCodeInput, setQuickCodeInput] = useState<string>("");
+  const [initialModalCode, setInitialModalCode] = useState<string>("");
+
+  // Hàm xử lý kiểm tra quyền truy cập trước khi vào thi
+  const handleAttemptExam = (exam: Exam) => {
+    const status = checkExamAccessStatus(exam);
+    if (status.status === "locked") {
+      toast.error(
+        "Đề thi đang bị KHÓA",
+        "Giáo viên đã khóa đề thi này. Vui lòng liên hệ giáo viên để mở quyền truy cập!"
+      );
+      return;
+    }
+    if (status.status === "upcoming") {
+      toast.warning(
+        "Chưa đến giờ mở đề thi",
+        `Đề thi sẽ tự động mở lúc: ${status.openDateFormatted} (${status.timeRemainingText}).`
+      );
+      return;
+    }
+    if (status.status === "ended") {
+      toast.error(
+        "Đề thi đã HẾT HẠN",
+        `Hạn chót làm bài đã kết thúc lúc: ${status.closeDateFormatted}.`
+      );
+      return;
+    }
+    if (exam.password && exam.password.trim()) {
+      setInitialModalCode(exam.code);
+      setShowCodeModal(true);
+      return;
+    }
+    onStartExam(exam);
+  };
+
+  // Hàm xử lý nhập mã trực tiếp từ thanh công cụ nhanh
+  const handleQuickCodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = quickCodeInput.trim().toLowerCase();
+    if (!clean) {
+      toast.warning("Vui lòng nhập Mã đề thi!", "Ví dụ: 001, 102, TOAN12...");
+      return;
+    }
+    const matched = exams.find(
+      (ex) =>
+        ex.code.toLowerCase() === clean ||
+        ex.id.toLowerCase() === clean ||
+        ex.title.toLowerCase().includes(clean)
+    );
+    if (!matched) {
+      toast.error(
+        "Không tìm thấy đề thi!",
+        `Không có đề thi nào khớp với mã "${quickCodeInput}". Vui lòng kiểm tra lại mã giáo viên giao.`
+      );
+      return;
+    }
+    handleAttemptExam(matched);
+  };
 
   // Lọc các bài nộp của riêng học sinh hiện tại (Bảo đảm bài làm của học sinh luôn hiển thị đầy đủ)
   const mySubmissions = useMemo(() => {
@@ -153,14 +221,27 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {/* Nút Nhập mã đề thi nhanh */}
+            <button
+              type="button"
+              onClick={() => {
+                setInitialModalCode("");
+                setShowCodeModal(true);
+              }}
+              className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs sm:text-sm font-black shadow-lg hover:shadow-amber-500/20 transition flex items-center gap-2"
+            >
+              <KeyRound className="w-4 h-4 text-slate-950" />
+              <span>Nhập Mã Đề Thi</span>
+            </button>
+
             {onOpenLeaderboard && (
               <button
                 type="button"
                 onClick={onOpenLeaderboard}
-                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs sm:text-sm font-black shadow-md transition flex items-center gap-2"
+                className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs sm:text-sm font-bold border border-white/20 shadow-md transition flex items-center gap-2"
               >
-                <Trophy className="w-4 h-4 text-slate-950" />
-                <span>Bảng Xếp Hạng Điểm Lớp</span>
+                <Trophy className="w-4 h-4 text-amber-300" />
+                <span>Bảng Xếp Hạng</span>
               </button>
             )}
 
@@ -171,7 +252,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                 className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs sm:text-sm font-bold border border-white/20 shadow-md transition flex items-center gap-2"
               >
                 <History className="w-4 h-4 text-emerald-300" />
-                <span>Xem Kết Quả ({mySubmissions.length})</span>
+                <span>Lịch Sử ({mySubmissions.length})</span>
               </button>
             )}
 
@@ -181,7 +262,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
               className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold shadow-md transition flex items-center gap-2"
             >
               <Layers className="w-4 h-4" />
-              <span>Vào phòng thi Live (Mã PIN)</span>
+              <span>Thi Live (PIN)</span>
             </button>
           </div>
         </div>
@@ -281,6 +362,46 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       {/* TAB 1: EXAMS LIST FOR STUDENT */}
       {activeTab === "exams" && (
         <div className="space-y-4">
+          {/* BENTO BOX: CỔNG NHẬP MÃ ĐỀ THI TRỰC TIẾP */}
+          <div className="bg-gradient-to-r from-emerald-900 via-slate-900 to-indigo-950 rounded-3xl p-5 sm:p-6 text-white shadow-lg border border-emerald-800/60 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-black shadow-md shrink-0">
+                <KeyRound className="w-6 h-6" />
+              </div>
+              <div className="space-y-0.5">
+                <span className="text-[11px] font-extrabold uppercase tracking-widest text-amber-300">
+                  Giao Đề Theo Mã
+                </span>
+                <h3 className="text-base sm:text-lg font-black">
+                  Bạn có Mã Đề do Thầy/Cô giao?
+                </h3>
+                <p className="text-xs text-slate-300">
+                  Nhập mã đề thi (ví dụ: 001, 102, TOAN12...) để vào ngay đề kiểm tra của lớp.
+                </p>
+              </div>
+            </div>
+
+            <form
+              onSubmit={handleQuickCodeSubmit}
+              className="flex items-center gap-2 w-full md:w-auto"
+            >
+              <input
+                type="text"
+                value={quickCodeInput}
+                onChange={(e) => setQuickCodeInput(e.target.value.toUpperCase())}
+                placeholder="Nhập mã đề..."
+                className="px-4 py-2.5 rounded-xl bg-white/10 border border-white/25 text-white placeholder:text-slate-400 font-black tracking-widest uppercase text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:bg-white/20 w-full sm:w-44"
+              />
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs sm:text-sm shadow-md transition flex items-center gap-1.5 shrink-0"
+              >
+                <span>Vào Thi</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+          </div>
+
           {/* Filter & Search */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="relative flex-1 w-full sm:w-80">
@@ -316,19 +437,40 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredExams.map((exam) => {
               const questionCount = exam.questions.length;
-              // Kiểm tra xem học sinh đã làm đề này chưa
               const previousSub = mySubmissions.find((s) => s.examId === exam.id);
+              const accessStatus = checkExamAccessStatus(exam);
 
               return (
                 <div
                   key={exam.id}
-                  className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between hover:shadow-md hover:border-emerald-300 transition group space-y-4"
+                  className={`bg-white rounded-3xl border p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition group space-y-4 ${
+                    accessStatus.status === "locked"
+                      ? "border-rose-200 bg-rose-50/15"
+                      : "border-slate-200 hover:border-emerald-300"
+                  }`}
                 >
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-extrabold rounded-md border border-emerald-200">
-                        {exam.grade || "Lớp 12"} • Mã: {exam.code}
-                      </span>
+                    <div className="flex items-center justify-between flex-wrap gap-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-extrabold rounded-md border border-emerald-200">
+                          {exam.grade || "Lớp 12"} • Mã: <b>{exam.code}</b>
+                        </span>
+
+                        {/* Badge trạng thái Mở / Khóa / Hẹn giờ */}
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border flex items-center gap-1 ${accessStatus.badgeColor}`}
+                        >
+                          {accessStatus.status === "locked" ? (
+                            <Lock className="w-3 h-3 text-rose-600" />
+                          ) : accessStatus.status === "upcoming" ? (
+                            <Clock className="w-3 h-3 text-amber-600" />
+                          ) : (
+                            <Unlock className="w-3 h-3 text-emerald-600" />
+                          )}
+                          <span>{accessStatus.badgeLabel}</span>
+                        </span>
+                      </div>
+
                       {previousSub ? (
                         <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-md border border-indigo-200 flex items-center gap-1">
                           <CheckCircle2 className="w-3 h-3 text-indigo-500" />
@@ -348,6 +490,13 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                     <p className="text-xs text-slate-500 line-clamp-2">
                       {exam.description || exam.chapter || "Đề kiểm tra chuẩn cấu trúc 4 dạng thức GDPT"}
                     </p>
+
+                    {/* Thông điệp thời gian hẹn giờ nếu có */}
+                    {!accessStatus.canEnter && (
+                      <div className="p-2 rounded-xl bg-slate-50 border border-slate-200 text-[11px] font-bold text-slate-600">
+                        {accessStatus.message}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-2xl text-center text-xs">
                       <div>
@@ -372,11 +521,31 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => onStartExam(exam)}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs group-hover:shadow-md"
+                      onClick={() => handleAttemptExam(exam)}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs group-hover:shadow-md ${
+                        accessStatus.status === "locked"
+                          ? "bg-rose-600 hover:bg-rose-700 text-white"
+                          : accessStatus.status === "upcoming"
+                          ? "bg-amber-500 hover:bg-amber-600 text-slate-950"
+                          : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                      }`}
                     >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>{previousSub ? "Làm lại bài" : "Bắt đầu làm bài"}</span>
+                      {accessStatus.status === "locked" ? (
+                        <>
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>Đề Đang Khóa</span>
+                        </>
+                      ) : accessStatus.status === "upcoming" ? (
+                        <>
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>Chưa Mở</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>{previousSub ? "Làm lại bài" : "Bắt đầu làm bài"}</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -695,6 +864,15 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Nhập Mã Đề Thi */}
+      <ExamCodeEntryModal
+        isOpen={showCodeModal}
+        onClose={() => setShowCodeModal(false)}
+        exams={exams}
+        onStartExam={onStartExam}
+        initialCode={initialModalCode}
+      />
     </div>
   );
 };
