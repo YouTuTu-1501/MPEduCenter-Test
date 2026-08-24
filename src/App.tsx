@@ -14,8 +14,11 @@ import { AuthModal } from "./components/AuthModal";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { StudentResultHistoryModal } from "./components/StudentResultHistoryModal";
 import { ClassLeaderboardModal } from "./components/ClassLeaderboardModal";
+import { LeaderboardView } from "./components/LeaderboardView";
 import { ToastProvider, useToast } from "./context/ToastContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { FilterProvider, useFilter } from "./context/FilterContext";
+import { GlobalFilterDrawer } from "./components/GlobalFilterDrawer";
 import {
   subscribeExams,
   saveExamToFirestore,
@@ -98,9 +101,11 @@ export default function App() {
     <ErrorBoundary>
       <ToastProvider>
         <AuthProvider>
-          <MainApp />
-          <AuthModal />
-          <UserProfileModal />
+          <FilterProvider>
+            <MainApp />
+            <AuthModal />
+            <UserProfileModal />
+          </FilterProvider>
         </AuthProvider>
       </ToastProvider>
     </ErrorBoundary>
@@ -110,12 +115,12 @@ export default function App() {
 function MainApp() {
   const { toast } = useToast();
   const { currentUser, users, isAdmin, isTeacher, isStudent } = useAuth();
+  const { selectedClassFilter, setSelectedClassFilter, selectedExamFilter, setSelectedExamFilter } = useFilter();
   const [exams, setExams] = useState<Exam[]>(initialSampleExams);
   const [selectedExam, setSelectedExam] = useState<Exam>(defaultExam001);
   const [activeView, setActiveView] = useState<ActiveView>(() => {
     return isStudent ? "student_portal" : "bank";
   });
-  const [selectedClassFilter, setSelectedClassFilter] = useState<string>("all");
   const [submissions, setSubmissions] = useState<StudentSubmission[]>(() =>
     getLocalSubmissions()
   );
@@ -293,7 +298,7 @@ function MainApp() {
           examCode={safeSelectedExam.code}
           selectedClassFilter={selectedClassFilter}
           onSelectClassFilter={setSelectedClassFilter}
-          onOpenLeaderboard={() => setShowLeaderboard(true)}
+          onOpenLeaderboard={() => setActiveView("leaderboard")}
           onOpenHistory={() => {
             setHistoryTargetUser(currentUser);
             setShowHistoryModal(true);
@@ -334,18 +339,34 @@ function MainApp() {
       {activeView === "analytics" && (
         <TeacherAnalyticsView
           exam={safeSelectedExam}
-          submissions={submissions.filter((s) => s.examId === safeSelectedExam.id)}
+          submissions={submissions}
           onBack={() => setActiveView(isStudent ? "student_portal" : "bank")}
           selectedClassFilter={selectedClassFilter}
           onSelectClassFilter={setSelectedClassFilter}
           allExams={exams}
-          onSelectExam={(exam) => handleSelectExam(exam, "analytics")}
-          onOpenLeaderboard={() => setShowLeaderboard(true)}
+          onSelectExam={(exam) => {
+            handleSelectExam(exam, "analytics");
+            setSelectedExamFilter(exam.id);
+          }}
+          onOpenLeaderboard={() => setActiveView("leaderboard")}
           onOpenStudentHistory={handleOpenStudentHistory}
         />
       )}
 
-      {/* Phân hệ 5: Phòng thi trực tiếp đồng bộ thời gian thực */}
+      {/* Phân hệ 5: Bảng Xếp Hạng Điểm Số Học Sinh (Toàn bộ các lớp / Theo từng khối) */}
+      {activeView === "leaderboard" && (
+        <LeaderboardView
+          exams={exams.length > 0 ? exams : [defaultExam001]}
+          submissions={submissions}
+          users={users}
+          defaultClassFilter={selectedClassFilter}
+          defaultExamId={selectedExamFilter}
+          onViewStudentHistory={handleOpenStudentHistory}
+          onBack={() => setActiveView(isStudent ? "student_portal" : "bank")}
+        />
+      )}
+
+      {/* Phân hệ 6: Phòng thi trực tiếp đồng bộ thời gian thực */}
       {activeView === "live" && (
         <RealtimeLiveRoomView
           exam={safeSelectedExam}
@@ -353,7 +374,7 @@ function MainApp() {
         />
       )}
 
-      {/* Phân hệ 6: Quản trị Toàn diện & Phân quyền Người dùng (Dành riêng cho Admin) */}
+      {/* Phân hệ 7: Quản trị Toàn diện & Phân quyền Người dùng (Dành riêng cho Admin) */}
       {activeView === "admin" && (
         <AdminManagementView
           exams={exams.length > 0 ? exams : [defaultExam001]}
@@ -366,14 +387,14 @@ function MainApp() {
         />
       )}
 
-      {/* Phân hệ 7: Cổng Thông tin & Luyện thi Cá nhân (Dành cho Học sinh) */}
+      {/* Phân hệ 8: Cổng Thông tin & Luyện thi Cá nhân (Dành cho Học sinh) */}
       {activeView === "student_portal" && (
         <StudentPortalView
           exams={exams.length > 0 ? exams : [defaultExam001]}
           submissions={submissions}
           onStartExam={handleStudentStartExam}
           onJoinLiveRoom={() => setActiveView("live")}
-          onOpenLeaderboard={() => setShowLeaderboard(true)}
+          onOpenLeaderboard={() => setActiveView("leaderboard")}
           onOpenHistory={() => {
             setHistoryTargetUser(currentUser);
             setShowHistoryModal(true);
@@ -400,7 +421,14 @@ function MainApp() {
         submissions={submissions}
         users={users}
         defaultClassFilter={selectedClassFilter}
+        defaultExamId={selectedExamFilter}
         onViewStudentHistory={handleOpenStudentHistory}
+      />
+
+      {/* Global Filter Drawer (Sidebar Lọc Dùng Chung Toàn Hệ Thống) */}
+      <GlobalFilterDrawer
+        totalSubmissions={submissions.length}
+        totalUsers={users.length}
       />
     </div>
   );

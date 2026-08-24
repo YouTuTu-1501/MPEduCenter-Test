@@ -1,7 +1,14 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Exam, StudentSubmission, STANDARD_CLASSES, STANDARD_GRADES } from "../types/exam";
 import { User } from "../types/auth";
 import { MathRenderer } from "./MathRenderer";
+import {
+  matchSearchQuery,
+  SCORE_TIERS,
+  ScoreTierKey,
+  isScoreInTier,
+  extractGradeFromClass,
+} from "../utils/filterUtils";
 import {
   Trophy,
   Award,
@@ -22,6 +29,9 @@ import {
   Users,
   ChevronRight,
   Flame,
+  ArrowUpDown,
+  RotateCcw,
+  SlidersHorizontal,
 } from "lucide-react";
 
 interface ClassLeaderboardModalProps {
@@ -45,10 +55,22 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
   defaultExamId = "all",
   onViewStudentHistory,
 }) => {
+  const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const [selectedClass, setSelectedClass] = useState<string>(defaultClassFilter);
   const [selectedExamId, setSelectedExamId] = useState<string>(defaultExamId);
+  const [selectedScoreTier, setSelectedScoreTier] = useState<ScoreTierKey>("all");
+  const [sortBy, setSortBy] = useState<"best_score" | "avg_score" | "attempts" | "fastest" | "latest" | "name_asc">("best_score");
   const [searchKeyword, setSearchKeyword] = useState<string>("");
   const [selectedSubmissionReview, setSelectedSubmissionReview] = useState<StudentSubmission | null>(null);
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState<boolean>(false);
+
+  // Đồng bộ bộ lọc khi modal mở
+  useEffect(() => {
+    if (isOpen) {
+      if (defaultExamId !== undefined) setSelectedExamId(defaultExamId);
+      if (defaultClassFilter !== undefined) setSelectedClass(defaultClassFilter);
+    }
+  }, [isOpen, defaultExamId, defaultClassFilter]);
 
   // Danh sách các lớp thực tế có bài làm hoặc danh mục chuẩn
   const availableClasses = useMemo(() => {
@@ -57,18 +79,124 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
     submissions.forEach((s) => {
       if (s.studentClass) classSet.add(s.studentClass);
     });
-    return Array.from(classSet);
-  }, [submissions]);
+    users.forEach((u) => {
+      if (u.schoolClass) classSet.add(u.schoolClass);
+    });
+
+    const all = Array.from(classSet);
+    if (selectedGrade === "all") return all;
+    return all.filter((c) => extractGradeFromClass(c) === selectedGrade || c.startsWith(selectedGrade.replace("Lớp ", "")));
+  }, [submissions, users, selectedGrade]);
+
+  // Danh sách đề thi được lọc theo Khối
+  const filteredExamsByGrade = useMemo(() => {
+    if (selectedGrade === "all") return exams;
+    return exams.filter((e) => e.grade === selectedGrade || (e.targetClass && extractGradeFromClass(e.targetClass) === selectedGrade));
+  }, [exams, selectedGrade]);
+
+  // Danh sách các bộ lọc đang kích hoạt kèm nhãn và hàm xóa
+  const activeFilterBadges = useMemo(() => {
+    const badges: { id: string; label: string; icon?: string; onRemove: () => void }[] = [];
+
+    if (selectedGrade !== "all") {
+      badges.push({
+        id: "grade",
+        label: `Khối: ${selectedGrade}`,
+        onRemove: () => setSelectedGrade("all"),
+      });
+    }
+
+    if (selectedClass !== "all") {
+      badges.push({
+        id: "class",
+        label: `Lớp: ${selectedClass}`,
+        onRemove: () => setSelectedClass("all"),
+      });
+    }
+
+    if (selectedExamId !== "all") {
+      const ex = exams.find((e) => e.id === selectedExamId);
+      badges.push({
+        id: "exam",
+        label: `Đề: ${ex?.code ? `[${ex.code}] ` : ""}${ex?.title ? (ex.title.length > 20 ? ex.title.slice(0, 20) + "..." : ex.title) : selectedExamId}`,
+        onRemove: () => setSelectedExamId("all"),
+      });
+    }
+
+    if (selectedScoreTier !== "all") {
+      const tier = SCORE_TIERS.find((t) => t.key === selectedScoreTier);
+      badges.push({
+        id: "scoreTier",
+        label: `Điểm: ${tier?.shortLabel || selectedScoreTier}`,
+        onRemove: () => setSelectedScoreTier("all"),
+      });
+    }
+
+    if (searchKeyword.trim() !== "") {
+      badges.push({
+        id: "search",
+        label: `Tìm: "${searchKeyword}"`,
+        onRemove: () => setSearchKeyword(""),
+      });
+    }
+
+    if (sortBy !== "best_score") {
+      const sortMap: Record<string, string> = {
+        avg_score: "Điểm TB cao",
+        attempts: "Lượt thi nhiều",
+        fastest: "Làm nhanh nhất",
+        latest: "Mới nộp",
+        name_asc: "Tên A→Z",
+      };
+      badges.push({
+        id: "sort",
+        label: `Xếp: ${sortMap[sortBy] || sortBy}`,
+        onRemove: () => setSortBy("best_score"),
+      });
+    }
+
+    return badges;
+  }, [selectedGrade, selectedClass, selectedExamId, selectedScoreTier, searchKeyword, sortBy, exams]);
+
+  // Đếm số lượng bộ lọc đang kích hoạt
+  const activeFiltersCount = activeFilterBadges.length;
+
+  // Reset tất cả bộ lọc
+  const handleResetFilters = () => {
+    setSelectedGrade("all");
+    setSelectedClass("all");
+    setSelectedExamId("all");
+    setSelectedScoreTier("all");
+    setSearchKeyword("");
+    setSortBy("best_score");
+  };
 
   // Lọc và tính toán bảng xếp hạng
   const leaderboardData = useMemo(() => {
-    // 1. Lọc theo bài kiểm tra (nếu có chọn đề cụ thể)
+    // 1. Lọc theo Khối lớp
     let filteredSubs = submissions;
-    if (selectedExamId !== "all") {
-      filteredSubs = filteredSubs.filter((s) => s.examId === selectedExamId);
+    if (selectedGrade !== "all") {
+      filteredSubs = filteredSubs.filter((s) => {
+        const gradeFromSubClass = extractGradeFromClass(s.studentClass);
+        const examObj = exams.find((e) => e.id === s.examId);
+        return gradeFromSubClass === selectedGrade || examObj?.grade === selectedGrade;
+      });
     }
 
-    // 2. Lọc theo Lớp
+    // 2. Lọc theo bài kiểm tra (nếu có chọn đề cụ thể)
+    if (selectedExamId !== "all") {
+      const targetExam = exams.find((e) => e.id === selectedExamId || e.code === selectedExamId);
+      filteredSubs = filteredSubs.filter((s) => {
+        if (!targetExam) return s.examId === selectedExamId;
+        return (
+          s.examId === targetExam.id ||
+          s.examId === targetExam.code ||
+          (!!s.examTitle && !!targetExam.title && s.examTitle.trim().toLowerCase() === targetExam.title.trim().toLowerCase())
+        );
+      });
+    }
+
+    // 3. Lọc theo Lớp
     if (selectedClass !== "all") {
       filteredSubs = filteredSubs.filter((s) => {
         if (!s.studentClass) return selectedClass === "12A1";
@@ -80,19 +208,21 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
       });
     }
 
-    // 3. Lọc theo từ khóa tìm kiếm
+    // 4. Lọc theo từ khóa tìm kiếm (Accent-insensitive)
     if (searchKeyword.trim()) {
-      const kw = searchKeyword.toLowerCase().trim();
-      filteredSubs = filteredSubs.filter(
-        (s) =>
-          s.studentName.toLowerCase().includes(kw) ||
-          s.studentId.toLowerCase().includes(kw) ||
-          (s.studentClass && s.studentClass.toLowerCase().includes(kw)) ||
-          s.examTitle.toLowerCase().includes(kw)
+      filteredSubs = filteredSubs.filter((s) =>
+        matchSearchQuery(
+          searchKeyword,
+          s.studentName,
+          s.studentId,
+          s.studentClass,
+          s.studentEmail,
+          s.examTitle
+        )
       );
     }
 
-    // 4. Nếu chọn một đề kiểm tra cụ thể: xếp hạng theo điểm số của lần nộp tốt nhất của học sinh đó ở đề này
+    // 5. Nếu chọn một đề kiểm tra cụ thể: xếp hạng theo điểm số của lần nộp tốt nhất của học sinh đó ở đề này
     if (selectedExamId !== "all") {
       // Nhóm theo từng học sinh để lấy điểm cao nhất của đề đó
       const studentBestMap = new Map<string, StudentSubmission>();
@@ -104,12 +234,30 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
         }
       });
 
-      const list = Array.from(studentBestMap.values());
-      // Sắp xếp: Điểm cao trước, thời gian làm ít hơn trước, ngày nộp mới hơn trước
+      let list = Array.from(studentBestMap.values());
+
+      // Lọc theo mức điểm (Score Tier)
+      if (selectedScoreTier !== "all") {
+        list = list.filter((item) => isScoreInTier(item.score, selectedScoreTier));
+      }
+
+      // Sắp xếp linh hoạt theo tiêu chí
       list.sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        if (a.timeSpentSeconds !== b.timeSpentSeconds) return a.timeSpentSeconds - b.timeSpentSeconds;
-        return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
+        if (sortBy === "best_score" || sortBy === "avg_score") {
+          if (b.score !== a.score) return b.score - a.score;
+          if (a.timeSpentSeconds !== b.timeSpentSeconds) return a.timeSpentSeconds - b.timeSpentSeconds;
+          return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
+        }
+        if (sortBy === "fastest") {
+          return a.timeSpentSeconds - b.timeSpentSeconds;
+        }
+        if (sortBy === "latest") {
+          return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
+        }
+        if (sortBy === "name_asc") {
+          return a.studentName.localeCompare(b.studentName, "vi");
+        }
+        return b.score - a.score;
       });
 
       return list.map((item, idx) => ({
@@ -133,7 +281,7 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
       }));
     }
 
-    // 5. Nếu chọn "Tất cả đề thi": Xếp hạng tổng hợp học sinh theo Điểm Trung Bình hoặc Tổng điểm tích lũy
+    // 6. Nếu chọn "Tất cả đề thi": Xếp hạng tổng hợp học sinh theo Điểm Trung Bình hoặc Tổng điểm tích lũy
     const studentAggMap = new Map<
       string,
       {
@@ -172,7 +320,7 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
       }
     });
 
-    const aggList = Array.from(studentAggMap.values()).map((st) => {
+    let aggList = Array.from(studentAggMap.values()).map((st) => {
       const avgScore = Number((st.scores.reduce((a, b) => a + b, 0) / st.scores.length).toFixed(2));
       const maxScore = Math.max(...st.scores);
       const userObj = users.find((u) => u.id === st.studentId || u.name === st.studentName);
@@ -194,11 +342,35 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
       };
     });
 
-    // Sắp xếp theo điểm trung bình cao nhất, sau đó số bài làm nhiều hơn
+    // Lọc theo mức điểm
+    if (selectedScoreTier !== "all") {
+      aggList = aggList.filter((item) => isScoreInTier(item.avgScore, selectedScoreTier));
+    }
+
+    // Sắp xếp linh hoạt
     aggList.sort((a, b) => {
-      if (b.avgScore !== a.avgScore) return b.avgScore - a.avgScore;
-      if (b.attemptsCount !== a.attemptsCount) return b.attemptsCount - a.attemptsCount;
-      return a.totalTime - b.totalTime;
+      if (sortBy === "best_score") {
+        if (b.maxScore !== a.maxScore) return b.maxScore - a.maxScore;
+        return b.avgScore - a.avgScore;
+      }
+      if (sortBy === "avg_score") {
+        if (b.avgScore !== a.avgScore) return b.avgScore - a.avgScore;
+        return b.attemptsCount - a.attemptsCount;
+      }
+      if (sortBy === "attempts") {
+        if (b.attemptsCount !== a.attemptsCount) return b.attemptsCount - a.attemptsCount;
+        return b.avgScore - a.avgScore;
+      }
+      if (sortBy === "fastest") {
+        return a.totalTime - b.totalTime;
+      }
+      if (sortBy === "latest") {
+        return new Date(b.latestSubmit).getTime() - new Date(a.latestSubmit).getTime();
+      }
+      if (sortBy === "name_asc") {
+        return a.studentName.localeCompare(b.studentName, "vi");
+      }
+      return b.avgScore - a.avgScore;
     });
 
     return aggList.map((item, idx) => ({
@@ -207,15 +379,16 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
       studentName: item.studentName,
       studentClass: item.studentClass,
       studentAvatar: item.studentAvatar,
-      score: item.avgScore,
+      score: sortBy === "best_score" ? item.maxScore : item.avgScore,
       maxScore: 10,
       bestScore: item.maxScore,
+      avgScore: item.avgScore,
       attemptsCount: item.attemptsCount,
       timeSpentSeconds: item.totalTime,
       submittedAt: item.latestSubmit,
       submission: item.lastSubmission,
     }));
-  }, [submissions, selectedClass, selectedExamId, searchKeyword, users]);
+  }, [submissions, selectedGrade, selectedClass, selectedExamId, selectedScoreTier, sortBy, searchKeyword, users, exams]);
 
   // Thống kê nhanh của bảng xếp hạng
   const classStats = useMemo(() => {
@@ -307,107 +480,412 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
           </div>
         </div>
 
-        {/* Filter Controls Bar (Phân loại theo Lớp & theo Đề thi) */}
-        <div className="p-4 sm:p-5 bg-slate-50 border-b border-slate-200 space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* Bộ lọc 1: Phân loại theo Đề kiểm tra */}
-            <div>
-              <label className="block text-[11px] font-extrabold text-slate-700 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Phân loại theo Đề kiểm tra:</span>
-              </label>
-              <select
-                value={selectedExamId}
-                onChange={(e) => setSelectedExamId(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-2xs"
+        {/* ================= FLOATING ACTION & ACTIVE FILTERS BAR ================= */}
+        <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 space-y-2.5">
+          {/* Top Row: Filter Trigger Button, Search & Quick Sort */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Nút mở Bảng điều khiển Lọc (Filter Sidebar Drawer Toggle) */}
+              <button
+                type="button"
+                onClick={() => setIsFilterDrawerOpen(true)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-2xs ${
+                  activeFiltersCount > 0
+                    ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200"
+                    : "bg-white hover:bg-slate-100 text-slate-800 border border-slate-200"
+                }`}
+                title="Mở bảng điều khiển lọc đa chiều"
               >
-                <option value="all">🏆 Tất cả các đề thi (Điểm trung bình tích lũy)</option>
-                <optgroup label="Từng Đề Kiểm Tra Cụ Thể">
-                  {exams.map((exam) => (
-                    <option key={exam.id} value={exam.id}>
-                      {exam.grade || "Lớp 12"} • {exam.title} (Mã: {exam.code})
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
+                <SlidersHorizontal className="w-4 h-4 text-amber-300" />
+                <span>Bảng điều khiển lọc</span>
+                {activeFiltersCount > 0 ? (
+                  <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px]">
+                    {activeFiltersCount}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-slate-400 font-semibold">(Tất cả)</span>
+                )}
+              </button>
+
+              {/* Quick Class Chips */}
+              <div className="hidden md:flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedClass("all")}
+                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 ${
+                    selectedClass === "all"
+                      ? "bg-slate-900 text-white shadow-xs"
+                      : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
+                  }`}
+                >
+                  Tất cả lớp
+                </button>
+                {availableClasses.slice(0, 5).map((c) => {
+                  const isSel = selectedClass === c;
+                  const cnt = submissions.filter((s) => s.studentClass === c).length;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setSelectedClass(c)}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1 ${
+                        isSel
+                          ? "bg-amber-500 text-slate-950 font-black shadow-xs"
+                          : "bg-white text-slate-700 hover:bg-amber-50 border border-slate-200"
+                      }`}
+                    >
+                      <span>Lớp {c}</span>
+                      {cnt > 0 && (
+                        <span className={`text-[10px] px-1 rounded-full ${isSel ? "bg-black/20" : "bg-slate-100 text-slate-600"}`}>
+                          {cnt}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Bộ lọc 2: Phân loại theo Lớp học */}
-            <div>
-              <label className="block text-[11px] font-extrabold text-slate-700 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                <GraduationCap className="w-3.5 h-3.5 text-amber-600" />
-                <span>Phân loại theo Lớp học:</span>
-              </label>
-              <select
-                value={selectedClass}
-                onChange={(e) => setSelectedClass(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-2xs"
-              >
-                <option value="all">🏫 Tất cả các lớp ({submissions.length} lượt thi)</option>
-                <optgroup label="Từng Lớp Học">
-                  {availableClasses.map((cls) => {
-                    const cnt = submissions.filter((s) => s.studentClass === cls).length;
-                    return (
-                      <option key={cls} value={cls}>
-                        Lớp {cls} ({cnt} bài nộp)
-                      </option>
-                    );
-                  })}
-                </optgroup>
-                <optgroup label="Theo Khối">
-                  <option value="Lớp 12">Toàn khối 12</option>
-                  <option value="Lớp 11">Toàn khối 11</option>
-                  <option value="Lớp 10">Toàn khối 10</option>
-                </optgroup>
-              </select>
-            </div>
+            {/* Right: Search + Sort selector */}
+            <div className="flex items-center gap-2">
+              {/* Search Box */}
+              <div className="relative flex-1 sm:w-60">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchKeyword}
+                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  placeholder="Tìm tên, SBD, lớp..."
+                  className="w-full pl-8 pr-7 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium shadow-2xs"
+                />
+                {searchKeyword && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchKeyword("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
 
-            {/* Tìm kiếm học sinh */}
-            <div>
-              <label className="block text-[11px] font-extrabold text-slate-700 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                <Search className="w-3.5 h-3.5 text-slate-500" />
-                <span>Tìm kiếm học sinh / SBD:</span>
-              </label>
-              <input
-                type="text"
-                value={searchKeyword}
-                onChange={(e) => setSearchKeyword(e.target.value)}
-                placeholder="Nhập tên học sinh, số báo danh..."
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-2xs font-medium"
-              />
+              {/* Sắp xếp nhanh */}
+              <div className="flex items-center gap-1 bg-white border border-slate-200 px-2 py-1 rounded-xl shadow-2xs shrink-0">
+                <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as any)}
+                  className="bg-transparent font-bold text-xs text-slate-800 outline-none cursor-pointer"
+                >
+                  <option value="best_score">Thủ khoa (Điểm cao)</option>
+                  <option value="avg_score">Điểm TB cao</option>
+                  <option value="attempts">Lượt thi nhiều</option>
+                  <option value="fastest">Làm nhanh nhất</option>
+                  <option value="latest">Mới nộp</option>
+                  <option value="name_asc">Tên (A → Z)</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          {/* Quick Select Class Chips */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pt-1">
-            <span className="text-[11px] font-bold text-slate-500 shrink-0">Chọn nhanh:</span>
-            <button
-              type="button"
-              onClick={() => setSelectedClass("all")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition shrink-0 ${
-                selectedClass === "all"
-                  ? "bg-slate-900 text-white shadow-xs"
-                  : "bg-white text-slate-600 hover:bg-slate-200 border border-slate-200"
-              }`}
-            >
-              Tất cả các lớp
-            </button>
-            {["12A1", "12A2", "12A3", "11A1", "10A1"].map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setSelectedClass(c)}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition shrink-0 ${
-                  selectedClass === c
-                    ? "bg-amber-500 text-slate-950 font-black shadow-xs"
-                    : "bg-white text-amber-900 hover:bg-amber-100 border border-amber-200"
-                }`}
-              >
-                Lớp {c}
-              </button>
-            ))}
+          {/* Bottom Row: Active Filter Badges Strip (Hiển thị các bộ lọc đang kích hoạt) */}
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60 flex-wrap">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-extrabold text-slate-500 flex items-center gap-1 shrink-0">
+                <Filter className="w-3 h-3 text-indigo-600" />
+                Bộ lọc đang áp dụng:
+              </span>
+
+              {activeFilterBadges.length === 0 ? (
+                <span className="text-[11px] text-slate-400 italic bg-white px-2 py-0.5 rounded-lg border border-slate-200">
+                  Đang hiển thị toàn bộ ({submissions.length} bài nộp)
+                </span>
+              ) : (
+                activeFilterBadges.map((b) => (
+                  <span
+                    key={b.id}
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold animate-fadeIn"
+                  >
+                    <span>{b.label}</span>
+                    <button
+                      type="button"
+                      onClick={b.onRemove}
+                      className="w-3.5 h-3.5 rounded-full hover:bg-indigo-200 flex items-center justify-center text-indigo-900 transition"
+                      title="Xóa bộ lọc này"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </span>
+                ))
+              )}
+
+              {activeFiltersCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold transition flex items-center gap-1"
+                  title="Xóa tất cả các bộ lọc đang kích hoạt"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Xóa tất cả ({activeFiltersCount})</span>
+                </button>
+              )}
+            </div>
+
+            <div className="text-[11px] font-bold text-slate-600 shrink-0">
+              Kết quả: <strong className="text-indigo-600 font-black">{leaderboardData.length}</strong> học sinh
+            </div>
           </div>
         </div>
+
+        {/* ================= SIDEBAR FILTER DRAWER (SLIDE-OVER PANEL) ================= */}
+        {isFilterDrawerOpen && (
+          <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex justify-end animate-fadeIn">
+            {/* Backdrop click to close */}
+            <div
+              className="absolute inset-0 cursor-pointer"
+              onClick={() => setIsFilterDrawerOpen(false)}
+            />
+
+            {/* Sidebar Content Panel */}
+            <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col z-10 animate-slideInRight overflow-hidden">
+              {/* Drawer Header */}
+              <div className="p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between border-b border-white/10 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-amber-300">
+                    <SlidersHorizontal className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-base text-white flex items-center gap-2">
+                      <span>Bảng Điều Khiển Lọc</span>
+                    </h3>
+                    <p className="text-xs text-slate-300">
+                      {activeFiltersCount > 0
+                        ? `${activeFiltersCount} tiêu chí đang được áp dụng`
+                        : "Tùy chỉnh phân loại bảng xếp hạng"}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsFilterDrawerOpen(false)}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Drawer Body - Scrollable */}
+              <div className="p-5 overflow-y-auto flex-1 space-y-6">
+                {/* 1. Khối & Lớp học */}
+                <div className="space-y-3">
+                  <label className="block text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                    <GraduationCap className="w-4 h-4 text-indigo-600" />
+                    <span>1. Khối & Lớp học</span>
+                  </label>
+
+                  {/* Khối */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { id: "all", label: "Tất cả khối" },
+                      { id: "Lớp 12", label: "Khối 12" },
+                      { id: "Lớp 11", label: "Khối 11" },
+                      { id: "Lớp 10", label: "Khối 10" },
+                    ].map((gr) => {
+                      const isSel = selectedGrade === gr.id;
+                      return (
+                        <button
+                          key={gr.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedGrade(gr.id);
+                            setSelectedClass("all");
+                            setSelectedExamId("all");
+                          }}
+                          className={`p-2.5 rounded-xl border text-xs font-bold text-left transition flex items-center justify-between ${
+                            isSel
+                              ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                              : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                          }`}
+                        >
+                          <span>{gr.label}</span>
+                          {isSel && <span className="text-amber-300 font-black">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Lớp học */}
+                  <div className="pt-2">
+                    <span className="text-[11px] font-bold text-slate-500 mb-1.5 block">Chọn lớp cụ thể:</span>
+                    <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-1 bg-slate-50 rounded-xl border border-slate-200">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedClass("all")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                          selectedClass === "all"
+                            ? "bg-slate-900 text-white shadow-xs"
+                            : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
+                        }`}
+                      >
+                        Tất cả các lớp ({submissions.length})
+                      </button>
+                      {availableClasses.map((cls) => {
+                        const count = submissions.filter((s) => s.studentClass === cls).length;
+                        const isSel = selectedClass === cls;
+                        return (
+                          <button
+                            key={cls}
+                            type="button"
+                            onClick={() => setSelectedClass(cls)}
+                            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                              isSel
+                                ? "bg-amber-500 text-slate-950 font-black shadow-xs"
+                                : "bg-white text-slate-700 hover:bg-amber-50 border border-slate-200"
+                            }`}
+                          >
+                            <span>Lớp {cls}</span>
+                            {count > 0 && (
+                              <span className={`text-[10px] px-1.5 rounded-full ${isSel ? "bg-black/20" : "bg-slate-100 text-slate-600"}`}>
+                                {count}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Đề kiểm tra */}
+                <div className="space-y-2.5 pt-4 border-t border-slate-100">
+                  <label className="block text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-indigo-600" />
+                    <span>2. Đề kiểm tra</span>
+                  </label>
+
+                  <select
+                    value={selectedExamId}
+                    onChange={(e) => setSelectedExamId(e.target.value)}
+                    className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-slate-50 font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-2xs"
+                  >
+                    <option value="all">🏆 Tất cả đề thi (Tổng hợp thành tích)</option>
+                    <optgroup label={selectedGrade === "all" ? "Danh sách đề kiểm tra" : `Đề thi ${selectedGrade}`}>
+                      {filteredExamsByGrade.map((exam) => (
+                        <option key={exam.id} value={exam.id}>
+                          {exam.grade || "Lớp 12"} • {exam.title} ({exam.code})
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* 3. Phân loại mức điểm số */}
+                <div className="space-y-2.5 pt-4 border-t border-slate-100">
+                  <label className="block text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                    <Award className="w-4 h-4 text-emerald-600" />
+                    <span>3. Phân loại mức điểm số</span>
+                  </label>
+
+                  <div className="grid grid-cols-1 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedScoreTier("all")}
+                      className={`p-2.5 rounded-xl border text-xs font-bold text-left transition flex items-center justify-between ${
+                        selectedScoreTier === "all"
+                          ? "bg-slate-900 text-white border-slate-900 shadow-sm"
+                          : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                      }`}
+                    >
+                      <span>🎯 Tất cả mức điểm (0 - 10đ)</span>
+                      {selectedScoreTier === "all" && <span className="text-amber-300">✓</span>}
+                    </button>
+
+                    {SCORE_TIERS.map((tier) => {
+                      const isSel = selectedScoreTier === tier.key;
+                      return (
+                        <button
+                          key={tier.key}
+                          type="button"
+                          onClick={() => setSelectedScoreTier(tier.key)}
+                          className={`p-2.5 rounded-xl border text-xs font-bold text-left transition flex items-center justify-between ${
+                            isSel
+                              ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                              : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span>{tier.label}</span>
+                          </div>
+                          {isSel && <span className="text-amber-300 font-black">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 4. Tiêu chí xếp hạng */}
+                <div className="space-y-2.5 pt-4 border-t border-slate-100">
+                  <label className="block text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                    <ArrowUpDown className="w-4 h-4 text-amber-600" />
+                    <span>4. Tiêu chí xếp hạng & Sắp xếp</span>
+                  </label>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { key: "best_score", label: "Thủ khoa (Điểm cao)" },
+                      { key: "avg_score", label: "Điểm TB cao" },
+                      { key: "attempts", label: "Số lượt thi nhiều" },
+                      { key: "fastest", label: "Làm nhanh nhất" },
+                      { key: "latest", label: "Nộp mới nhất" },
+                      { key: "name_asc", label: "Họ tên (A → Z)" },
+                    ].map((item) => {
+                      const isSel = sortBy === item.key;
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => setSortBy(item.key as any)}
+                          className={`p-2 rounded-xl border text-xs font-bold text-left transition flex items-center justify-between ${
+                            isSel
+                              ? "bg-amber-500 text-slate-950 font-black border-amber-500 shadow-xs"
+                              : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                          }`}
+                        >
+                          <span>{item.label}</span>
+                          {isSel && <span>✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Drawer Footer Actions */}
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center gap-3 shrink-0">
+                {activeFiltersCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="px-4 py-2.5 rounded-xl bg-white hover:bg-rose-50 text-rose-700 border border-slate-200 font-bold text-xs transition flex items-center gap-1.5"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Đặt lại</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setIsFilterDrawerOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition shadow-sm flex items-center justify-center gap-2"
+                >
+                  <span>Áp dụng ({leaderboardData.length} học sinh)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Quick Stats Bento */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-6 py-3 bg-white border-b border-slate-100">

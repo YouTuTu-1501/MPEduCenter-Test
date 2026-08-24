@@ -11,6 +11,7 @@ import {
 } from "../types/auth";
 import { Exam, StudentSubmission, STANDARD_CLASSES } from "../types/exam";
 import { useToast } from "../context/ToastContext";
+import { useFilter } from "../context/FilterContext";
 import {
   ShieldCheck,
   Users,
@@ -41,6 +42,7 @@ import {
   KeyRound,
   Check,
   Sliders,
+  SlidersHorizontal,
   CheckSquare,
   Square,
   UserCheck,
@@ -56,6 +58,7 @@ import {
   Camera,
   Smile,
   Share2,
+  X,
 } from "lucide-react";
 
 interface AdminManagementViewProps {
@@ -74,7 +77,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   onSelectExam,
   onDeleteExam,
   onSaveExam,
-  selectedClassFilter = "all",
+  selectedClassFilter: propClassFilter,
   onSelectClassFilter,
 }) => {
   const { toast } = useToast();
@@ -93,20 +96,35 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     getUserPermissions,
   } = useAuth();
 
-  const [internalClassFilter, setInternalClassFilter] = useState<string>(selectedClassFilter);
-  const adminClassFilter = selectedClassFilter !== "all" ? selectedClassFilter : internalClassFilter;
+  const {
+    selectedClassFilter,
+    setSelectedClassFilter,
+    userRoleFilter,
+    setUserRoleFilter,
+    userStatusFilter,
+    setUserStatusFilter,
+    searchQuery,
+    setSearchQuery,
+    openFilterDrawer,
+    activeFilterBadges,
+    activeFiltersCount,
+    resetAllFilters,
+  } = useFilter();
+
+  const adminClassFilter = selectedClassFilter;
+  const roleFilter = userRoleFilter;
+  const setRoleFilter = setUserRoleFilter;
+  const statusFilter = userStatusFilter;
+  const setStatusFilter = setUserStatusFilter;
 
   const handleClassChange = (cls: string) => {
-    setInternalClassFilter(cls);
+    setSelectedClassFilter(cls);
     if (onSelectClassFilter) {
       onSelectClassFilter(cls);
     }
   };
 
   const [activeTab, setActiveTab] = useState<"users" | "exams" | "settings">("users");
-  const [roleFilter, setRoleFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState<string>("");
 
   // Chọn người dùng hàng loạt (Batch Selection)
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -247,6 +265,65 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
       return matchRole && matchStatus && matchClass && matchSearch;
     });
   }, [users, roleFilter, statusFilter, adminClassFilter, searchQuery]);
+
+  // Danh sách các lớp thực tế từ người dùng và chuẩn
+  const userClasses = useMemo(() => {
+    const set = new Set<string>();
+    STANDARD_CLASSES.forEach((c) => set.add(c));
+    users.forEach((u) => {
+      if (u.schoolClass && u.schoolClass.trim()) {
+        set.add(u.schoolClass.trim());
+      }
+    });
+    return Array.from(set);
+  }, [users]);
+
+  // Badges bộ lọc đang áp dụng cho bảng Người dùng
+  const activeUserFilterBadges = useMemo(() => {
+    const badges: { id: string; label: string; onRemove: () => void }[] = [];
+
+    if (adminClassFilter !== "all") {
+      badges.push({
+        id: "class",
+        label: `Lớp: ${adminClassFilter}`,
+        onRemove: () => handleClassChange("all"),
+      });
+    }
+
+    if (roleFilter !== "all") {
+      const rLabel = ROLE_LABELS[roleFilter as UserRole]?.title || roleFilter;
+      badges.push({
+        id: "role",
+        label: `Vai trò: ${rLabel}`,
+        onRemove: () => setRoleFilter("all"),
+      });
+    }
+
+    if (statusFilter !== "all") {
+      badges.push({
+        id: "status",
+        label: `Trạng thái: ${statusFilter === "active" ? "Hoạt động" : "Đã khóa"}`,
+        onRemove: () => setStatusFilter("all"),
+      });
+    }
+
+    if (searchQuery.trim() !== "") {
+      badges.push({
+        id: "search",
+        label: `Tìm: "${searchQuery}"`,
+        onRemove: () => setSearchQuery(""),
+      });
+    }
+
+    return badges;
+  }, [adminClassFilter, roleFilter, statusFilter, searchQuery]);
+
+  const handleResetUserFilters = () => {
+    handleClassChange("all");
+    setRoleFilter("all");
+    setStatusFilter("all");
+    setSearchQuery("");
+  };
 
   // Lọc danh sách đề thi theo lớp được Admin chọn
   const filteredExams = useMemo(() => {
@@ -913,82 +990,6 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
         </div>
       </div>
 
-      {/* ================= THANH CHỌN LỚP DÀNH CHO ADMIN ================= */}
-      <div className="bg-white rounded-3xl p-4 sm:p-5 shadow-xs border border-slate-200 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5 shrink-0 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
-            <GraduationCap className="w-4 h-4 text-indigo-600" />
-            Chọn Lớp xem dữ liệu Admin:
-          </span>
-
-          {/* Quick Class Chips */}
-          <button
-            type="button"
-            onClick={() => handleClassChange("all")}
-            className={`px-3.5 py-1.5 rounded-xl font-bold text-xs shrink-0 transition ${
-              adminClassFilter === "all"
-                ? "bg-slate-900 text-white shadow-xs font-extrabold"
-                : "bg-slate-100 hover:bg-slate-200 text-slate-700"
-            }`}
-          >
-            Tất cả các lớp ({users.length} tài khoản)
-          </button>
-
-          {["12A1", "12A2", "11A1", "10A1"].map((cls) => {
-            const userCount = users.filter((u) => u.schoolClass === cls).length;
-            const isSelected = adminClassFilter === cls;
-            return (
-              <button
-                key={cls}
-                type="button"
-                onClick={() => handleClassChange(cls)}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs shrink-0 flex items-center gap-1.5 transition ${
-                  isSelected
-                    ? "bg-amber-500 text-slate-950 shadow-xs font-extrabold"
-                    : "bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200/60"
-                }`}
-              >
-                <span>Lớp {cls}</span>
-                <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
-                    isSelected ? "bg-black/20 text-slate-950" : "bg-amber-200/80 text-amber-950"
-                  }`}
-                >
-                  {userCount}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-400 shrink-0">Lọc nhanh theo Khối/Lớp:</span>
-          <select
-            value={adminClassFilter}
-            onChange={(e) => handleClassChange(e.target.value)}
-            className="py-1.5 px-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-xs text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition"
-          >
-            <option value="all">🏫 Xem tất cả ({users.length} tài khoản, {exams.length} đề)</option>
-            <optgroup label="Danh sách Lớp học">
-              {STANDARD_CLASSES.map((cls) => {
-                const uCnt = users.filter((u) => u.schoolClass === cls).length;
-                const eCnt = exams.filter((e) => e.targetClass === cls).length;
-                return (
-                  <option key={cls} value={cls}>
-                    Lớp {cls} ({uCnt} user • {eCnt} đề)
-                  </option>
-                );
-              })}
-            </optgroup>
-            <optgroup label="Theo Khối">
-              <option value="Lớp 12">Khối 12 ({users.filter((u) => u.schoolClass?.startsWith("12")).length} user)</option>
-              <option value="Lớp 11">Khối 11 ({users.filter((u) => u.schoolClass?.startsWith("11")).length} user)</option>
-              <option value="Lớp 10">Khối 10 ({users.filter((u) => u.schoolClass?.startsWith("10")).length} user)</option>
-            </optgroup>
-          </select>
-        </div>
-      </div>
-
       {/* Admin Tabs */}
       <div className="flex border-b border-slate-200 bg-white p-2 rounded-2xl shadow-xs gap-2">
         <button
@@ -1032,114 +1033,222 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
       {/* TAB 1: USERS MANAGEMENT TABLE WITH DIRECT PERMISSION GRANTING */}
       {activeTab === "users" && (
         <div className="space-y-4">
-          {/* Controls bar with Filter & Search */}
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-              <div className="relative flex-1 sm:w-72">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Tìm theo tên, email, lớp, môn học, SĐT..."
-                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+          {/* Controls bar with Integrated Class Filter & Search */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-xs space-y-3.5">
+            {/* Hàng 1: Tìm kiếm + Lọc Lớp + Lọc Vai trò + Lọc Trạng thái + Nút Thao tác */}
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                {/* Nút mở Sidebar Bộ lọc Dùng chung (Global Drawer Trigger) */}
+                <button
+                  type="button"
+                  onClick={openFilterDrawer}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs ${
+                    activeFiltersCount > 0
+                      ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200"
+                      : "bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200"
+                  }`}
+                  title="Mở bảng điều khiển lọc dữ liệu đa chiều"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Bộ lọc</span>
+                  {activeFiltersCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-black text-[10px]">
+                      {activeFiltersCount}
+                    </span>
+                  )}
+                </button>
+
+                {/* 1. Tìm kiếm */}
+                <div className="relative flex-1 min-w-[200px] sm:max-w-xs">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Tìm theo tên, email, lớp, môn, SĐT..."
+                    className="w-full pl-9 pr-7 py-2 text-xs font-medium rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* 2. Lọc Lớp / Khối (Tích hợp trực tiếp tại đây) */}
+                <div className="flex items-center gap-1.5 bg-amber-50/90 border border-amber-200/90 rounded-xl px-3 py-1.5 text-xs font-bold shadow-2xs">
+                  <GraduationCap className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span className="text-amber-900 shrink-0">Lớp:</span>
+                  <select
+                    value={adminClassFilter}
+                    onChange={(e) => handleClassChange(e.target.value)}
+                    className="bg-transparent text-amber-950 font-black text-xs outline-none cursor-pointer pr-1"
+                  >
+                    <option value="all">🏫 Tất cả các lớp ({users.length})</option>
+                    <optgroup label="Theo Khối">
+                      <option value="Lớp 12">Khối 12 ({users.filter((u) => u.schoolClass?.startsWith("12")).length} hs)</option>
+                      <option value="Lớp 11">Khối 11 ({users.filter((u) => u.schoolClass?.startsWith("11")).length} hs)</option>
+                      <option value="Lớp 10">Khối 10 ({users.filter((u) => u.schoolClass?.startsWith("10")).length} hs)</option>
+                    </optgroup>
+                    <optgroup label="Danh sách Lớp học">
+                      {userClasses.map((cls) => {
+                        const cnt = users.filter((u) => u.schoolClass === cls).length;
+                        return (
+                          <option key={cls} value={cls}>
+                            Lớp {cls} {cnt > 0 ? `(${cnt} tài khoản)` : ""}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* 3. Lọc Vai trò */}
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold overflow-x-auto">
+                  <button
+                    type="button"
+                    onClick={() => setRoleFilter("all")}
+                    className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
+                      roleFilter === "all" ? "bg-white text-indigo-600 shadow-xs font-extrabold" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Tất cả ({users.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRoleFilter("teacher")}
+                    className={`px-2.5 py-1.5 rounded-lg transition whitespace-nowrap ${
+                      roleFilter === "teacher" ? "bg-white text-indigo-600 shadow-xs font-extrabold" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    👨‍🏫 Giáo viên ({users.filter((u) => u.role === "teacher").length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRoleFilter("student")}
+                    className={`px-2.5 py-1.5 rounded-lg transition whitespace-nowrap ${
+                      roleFilter === "student" ? "bg-white text-emerald-600 shadow-xs font-extrabold" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    🎓 Học sinh ({users.filter((u) => u.role === "student").length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRoleFilter("admin")}
+                    className={`px-2.5 py-1.5 rounded-lg transition whitespace-nowrap ${
+                      roleFilter === "admin" ? "bg-white text-rose-600 shadow-xs font-extrabold" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    👑 Admin ({users.filter((u) => u.role === "admin").length})
+                  </button>
+                </div>
+
+                {/* 4. Lọc Trạng thái */}
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs"
+                >
+                  <option value="all">Mọi trạng thái</option>
+                  <option value="active">Đang hoạt động</option>
+                  <option value="locked">Đang bị khóa</option>
+                </select>
               </div>
 
-              {/* Lọc vai trò */}
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold overflow-x-auto">
+              {/* Nhóm nút hành động */}
+              <div className="flex flex-wrap items-center gap-2 justify-end shrink-0">
                 <button
                   type="button"
-                  onClick={() => setRoleFilter("all")}
-                  className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
-                    roleFilter === "all" ? "bg-white text-indigo-600 shadow-xs font-extrabold" : "text-slate-600 hover:text-slate-900"
-                  }`}
+                  onClick={handleOpenAddUser}
+                  className="px-3.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition flex items-center gap-1.5 shadow-sm"
+                  title="Cấp tài khoản mới cho học sinh, giáo viên hoặc quản trị"
                 >
-                  Tất cả ({users.length})
+                  <UserPlus className="w-4 h-4" />
+                  <span>Cấp tài khoản mới</span>
                 </button>
+
                 <button
                   type="button"
-                  onClick={() => setRoleFilter("teacher")}
-                  className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
-                    roleFilter === "teacher" ? "bg-white text-indigo-600 shadow-xs font-extrabold" : "text-slate-600 hover:text-slate-900"
-                  }`}
+                  onClick={() => setShowBatchModal(true)}
+                  className="px-3.5 py-2 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition flex items-center gap-1.5 shadow-2xs"
+                  title="Cấp tài khoản hàng loạt theo danh sách lớp học"
                 >
-                  👨‍🏫 Giáo viên ({users.filter((u) => u.role === "teacher").length})
+                  <Users className="w-4 h-4 text-indigo-600" />
+                  <span>Cấp hàng loạt (Batch)</span>
                 </button>
+
                 <button
                   type="button"
-                  onClick={() => setRoleFilter("student")}
-                  className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
-                    roleFilter === "student" ? "bg-white text-emerald-600 shadow-xs font-extrabold" : "text-slate-600 hover:text-slate-900"
-                  }`}
+                  onClick={() => setShowExportModal(true)}
+                  className="px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center gap-1.5"
+                  title="In hoặc xuất danh sách tài khoản & mật khẩu cho học sinh"
                 >
-                  🎓 Học sinh ({users.filter((u) => u.role === "student").length})
+                  <Printer className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Xuất phiếu / In</span>
                 </button>
+
                 <button
                   type="button"
-                  onClick={() => setRoleFilter("admin")}
-                  className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
-                    roleFilter === "admin" ? "bg-white text-rose-600 shadow-xs font-extrabold" : "text-slate-600 hover:text-slate-900"
-                  }`}
+                  onClick={resetUsers}
+                  className="px-2.5 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 rounded-xl transition flex items-center gap-1"
+                  title="Khôi phục danh sách tài khoản mẫu ban đầu"
                 >
-                  👑 Admin ({users.filter((u) => u.role === "admin").length})
+                  <RotateCcw className="w-3.5 h-3.5" />
                 </button>
               </div>
-
-              {/* Lọc trạng thái */}
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="all">Mọi trạng thái</option>
-                <option value="active">Đang hoạt động</option>
-                <option value="locked">Đang bị khóa</option>
-              </select>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
-              {/* Nút Cấp tài khoản mới */}
-              <button
-                type="button"
-                onClick={handleOpenAddUser}
-                className="px-3.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition flex items-center gap-1.5 shadow-sm"
-                title="Cấp tài khoản mới cho học sinh, giáo viên hoặc quản trị"
-              >
-                <UserPlus className="w-4 h-4" />
-                <span>Cấp tài khoản mới</span>
-              </button>
+            {/* Hàng 2: Badges bộ lọc đang kích hoạt */}
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 flex-wrap text-xs">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-extrabold text-slate-500 flex items-center gap-1 shrink-0">
+                  <Filter className="w-3 h-3 text-indigo-600" />
+                  Đang lọc:
+                </span>
 
-              {/* Nút Cấp tài khoản hàng loạt */}
-              <button
-                type="button"
-                onClick={() => setShowBatchModal(true)}
-                className="px-3.5 py-2 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition flex items-center gap-1.5 shadow-2xs"
-                title="Cấp tài khoản hàng loạt theo danh sách lớp học"
-              >
-                <Users className="w-4 h-4 text-indigo-600" />
-                <span>Cấp hàng loạt (Batch)</span>
-              </button>
+                {activeUserFilterBadges.length === 0 ? (
+                  <span className="text-[11px] text-slate-400 italic bg-slate-50 px-2 py-0.5 rounded-lg border border-slate-200">
+                    Hiển thị toàn bộ ({users.length} tài khoản)
+                  </span>
+                ) : (
+                  activeUserFilterBadges.map((b) => (
+                    <span
+                      key={b.id}
+                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold"
+                    >
+                      <span>{b.label}</span>
+                      <button
+                        type="button"
+                        onClick={b.onRemove}
+                        className="w-3.5 h-3.5 rounded-full hover:bg-indigo-200 flex items-center justify-center text-indigo-900 transition"
+                        title="Bỏ lọc tiêu chí này"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
+                  ))
+                )}
 
-              {/* Nút Xuất phiếu tài khoản */}
-              <button
-                type="button"
-                onClick={() => setShowExportModal(true)}
-                className="px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center gap-1.5"
-                title="In hoặc xuất danh sách tài khoản & mật khẩu cho học sinh"
-              >
-                <Printer className="w-3.5 h-3.5 text-slate-600" />
-                <span>Xuất phiếu / In</span>
-              </button>
+                {activeUserFilterBadges.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleResetUserFilters}
+                    className="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold transition flex items-center gap-1"
+                    title="Xóa tất cả các bộ lọc đang kích hoạt"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Xóa bộ lọc</span>
+                  </button>
+                )}
+              </div>
 
-              <button
-                type="button"
-                onClick={resetUsers}
-                className="px-2.5 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 rounded-xl transition flex items-center gap-1"
-                title="Khôi phục danh sách tài khoản mẫu ban đầu"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
+              <div className="text-[11px] font-bold text-slate-500">
+                Tìm thấy <strong className="text-indigo-600 font-black">{filteredUsers.length}</strong> / {users.length} tài khoản
+              </div>
             </div>
           </div>
 

@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
   BookOpen,
-  Presentation,
   Edit3,
   BarChart3,
   Layers,
@@ -29,6 +28,7 @@ export type ActiveView =
   | "presentation"
   | "exam"
   | "analytics"
+  | "leaderboard"
   | "live"
   | "admin"
   | "student_portal";
@@ -82,9 +82,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (isAdmin) {
       return [
         { id: "bank", label: "Ngân hàng đề", icon: BookOpen },
-        { id: "presentation", label: "Trình chiếu", icon: Presentation },
         { id: "live", label: "Phòng thi Live", icon: Layers },
         { id: "analytics", label: "Báo cáo & Chấm thi", icon: BarChart3 },
+        { id: "leaderboard", label: "Bảng xếp hạng", icon: Trophy },
         { id: "admin", label: "Quản trị Admin", icon: ShieldCheck, badge: "Master" },
       ];
     }
@@ -92,9 +92,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (isTeacher) {
       return [
         { id: "bank", label: "Ngân hàng đề", icon: BookOpen },
-        { id: "presentation", label: "Trình chiếu", icon: Presentation },
         { id: "live", label: "Phòng thi Live", icon: Layers },
         { id: "analytics", label: "Báo cáo & Chấm thi", icon: BarChart3 },
+        { id: "leaderboard", label: "Bảng xếp hạng", icon: Trophy },
       ];
     }
 
@@ -103,6 +103,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       { id: "student_portal", label: "Cổng Luyện Thi", icon: GraduationCap },
       { id: "exam", label: "Làm bài thi", icon: Edit3 },
       { id: "live", label: "Vào phòng thi Live", icon: Layers },
+      { id: "leaderboard", label: "Bảng xếp hạng", icon: Trophy },
     ];
   };
 
@@ -166,19 +167,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             );
           })}
-
-          {/* Nút Xếp hạng điểm số theo Lớp & theo Đề thi */}
-          {onOpenLeaderboard && (
-            <button
-              type="button"
-              onClick={onOpenLeaderboard}
-              className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl font-extrabold text-xs flex items-center gap-1.5 whitespace-nowrap transition-all bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 hover:from-amber-400 hover:to-amber-500 shadow-xs border border-amber-400/50"
-              title="Bảng xếp hạng điểm số của tất cả các học sinh theo lớp và đề kiểm tra"
-            >
-              <Trophy className="w-4 h-4 text-slate-950" />
-              <span>Bảng Xếp Hạng</span>
-            </button>
-          )}
         </nav>
 
         {/* Global Class Selector cho Admin & Giáo viên */}
