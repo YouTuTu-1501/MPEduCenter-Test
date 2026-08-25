@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Exam, STANDARD_CLASSES, checkExamAccessStatus } from "../types/exam";
+import { parseStandardExamCode } from "../utils/examCodeHelper";
 import { useToast } from "../context/ToastContext";
 import {
   Clock,
@@ -17,6 +18,7 @@ import {
   Send,
   Users,
   ShieldAlert,
+  Info,
 } from "lucide-react";
 
 interface ExamScheduleModalProps {
@@ -52,6 +54,8 @@ export const ExamScheduleModal: React.FC<ExamScheduleModalProps> = ({
   const [copiedSummary, setCopiedSummary] = useState<boolean>(false);
 
   if (!isOpen) return null;
+
+  const parsedCode = parseStandardExamCode(exam.code);
 
   // Tạo đối tượng tạm thời để kiểm tra trạng thái preview
   const previewExam: Exam = {
@@ -89,6 +93,7 @@ export const ExamScheduleModal: React.FC<ExamScheduleModalProps> = ({
     const message = `📢 THÔNG BÁO LÀM BÀI KIỂM TRA TOÁN HỌC
 📝 Đề thi: ${exam.title}
 🔑 MÃ ĐỀ THI: 👉 ${exam.code} 👈
+📌 Quy luật mã: [Lớp]-[Chương]-[Bài]-[Lần] (${parsedCode.explanation})
 🎓 Đối tượng: ${targetClass} (${exam.grade})
 ⏱️ Thời gian làm bài: ${exam.durationMinutes} phút (${exam.questions.length} câu)
 ⏰ Lịch mở đề: ${timeInfo}
@@ -202,13 +207,13 @@ ${examPassword ? `🔒 Mật khẩu vào đề: ${examPassword}\n` : ""}
         {/* BENTO 1: MÃ ĐỀ THI & GIAO ĐỀ NHANH CHO HỌC SINH */}
         <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-900 rounded-2xl p-4 sm:p-5 text-white shadow-md relative overflow-hidden">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="space-y-1">
+            <div className="space-y-2">
               <span className="text-[11px] font-extrabold uppercase tracking-widest text-indigo-300 flex items-center gap-1.5">
                 <KeyRound className="w-4 h-4 text-indigo-400" />
-                Mã Đề Giao Cho Học Sinh (Access Code)
+                Mã Đề Chuẩn Theo Quy Luật: [Lớp]-[Chương]-[Bài]-[Lần]
               </span>
               <div className="flex items-center gap-3">
-                <span className="text-3xl sm:text-4xl font-black tracking-widest text-amber-400 font-mono bg-white/10 px-4 py-1 rounded-xl border border-white/20">
+                <span className="text-2xl sm:text-3xl font-black tracking-wider text-amber-400 font-mono bg-white/10 px-4 py-1.5 rounded-xl border border-white/20">
                   {exam.code}
                 </span>
                 <button
@@ -220,9 +225,25 @@ ${examPassword ? `🔒 Mật khẩu vào đề: ${examPassword}\n` : ""}
                   <span>{copiedCode ? "Đã chép mã" : "Chép mã đề"}</span>
                 </button>
               </div>
-              <p className="text-xs text-slate-300 mt-1">
-                Học sinh chỉ cần nhập mã <b>{exam.code}</b> tại Cổng thi là vào được ngay đề này.
-              </p>
+
+              {/* Giải thích chi tiết từng phần của mã đề */}
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] pt-1">
+                <span className="px-2 py-0.5 rounded-md bg-white/10 border border-white/15 text-slate-200">
+                  Lớp: <strong className="text-amber-300">{parsedCode.grade}</strong>
+                </span>
+                <span className="text-slate-400">•</span>
+                <span className="px-2 py-0.5 rounded-md bg-white/10 border border-white/15 text-slate-200">
+                  Chương: <strong className="text-amber-300">{parsedCode.chapter}</strong>
+                </span>
+                <span className="text-slate-400">•</span>
+                <span className="px-2 py-0.5 rounded-md bg-white/10 border border-white/15 text-slate-200">
+                  Bài: <strong className="text-amber-300">{parsedCode.lesson}</strong>
+                </span>
+                <span className="text-slate-400">•</span>
+                <span className="px-2 py-0.5 rounded-md bg-white/10 border border-white/15 text-slate-200">
+                  Lần kiểm tra: <strong className="text-amber-300">{parsedCode.attempt}</strong>
+                </span>
+              </div>
             </div>
 
             <button

@@ -1,9 +1,9 @@
 import { Exam, Question } from "../types/exam";
 
-// Nạp bộ câu hỏi phong phú từ Đề 001 (Vectơ & Tọa độ trong không gian Oxyz)
+// Nạp bộ câu hỏi phong phú từ Đề 12-02-01-01 (Vectơ & Tọa độ trong không gian Oxyz)
 export const defaultExam001: Exam = {
   id: "exam_001",
-  code: "001",
+  code: "12-02-01-01",
   title: "Đề Kiểm Tra Cơ Bản: Vectơ Và Tọa Độ Trong Không Gian",
   subject: "Toán học",
   grade: "Lớp 12",
@@ -404,10 +404,10 @@ export const defaultExam001: Exam = {
   ]
 };
 
-// Đề kiểm tra Lớp 12: Chương 1 - Ứng dụng đạo hàm
+// Đề kiểm tra Lớp 12: Chương 1 - Ứng dụng đạo hàm (Bài 14, Lần 1: 12-01-14-01)
 export const defaultExam002: Exam = {
   id: "exam_002",
-  code: "002",
+  code: "12-01-14-01",
   title: "Đề Kiểm Tra: Ứng Dụng Đạo Hàm Khảo Sát Hàm Số",
   subject: "Toán học",
   grade: "Lớp 12",
@@ -492,10 +492,10 @@ export const defaultExam002: Exam = {
   ]
 };
 
-// Đề kiểm tra Lớp 11: Chương 1 - Hàm số lượng giác và Phương trình lượng giác
+// Đề kiểm tra Lớp 11: Chương 1 - Hàm số lượng giác và Phương trình lượng giác (11-01-01-01)
 export const defaultExam003: Exam = {
   id: "exam_003",
-  code: "101",
+  code: "11-01-01-01",
   title: "Đề Kiểm Tra: Hàm Số Lượng Giác & Phương Trình Lượng Giác",
   subject: "Toán học",
   grade: "Lớp 11",
@@ -561,10 +561,10 @@ export const defaultExam003: Exam = {
   ]
 };
 
-// Đề kiểm tra Lớp 10: Chương 1 - Mệnh đề và Tập hợp
+// Đề kiểm tra Lớp 10: Chương 1 - Mệnh đề và Tập hợp (10-01-01-01)
 export const defaultExam004: Exam = {
   id: "exam_004",
-  code: "201",
+  code: "10-01-01-01",
   title: "Đề Kiểm Tra: Mệnh Đề Và Tập Hợp",
   subject: "Toán học",
   grade: "Lớp 10",

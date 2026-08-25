@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Exam, checkExamAccessStatus } from "../types/exam";
+import { parseStandardExamCode, isExamCodeMatch } from "../utils/examCodeHelper";
 import { useToast } from "../context/ToastContext";
 import {
   KeyRound,
@@ -15,6 +16,7 @@ import {
   BookOpen,
   GraduationCap,
   ShieldAlert,
+  Info,
 } from "lucide-react";
 
 interface ExamCodeEntryModalProps {
@@ -39,12 +41,18 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Tìm đề thi tương ứng với mã học sinh nhập
+  // Phân tích mã người dùng đang gõ theo quy luật [lớp][chương][bài][lần]
+  const parsedInput = useMemo(() => {
+    return parseStandardExamCode(inputCode);
+  }, [inputCode]);
+
+  // Tìm đề thi tương ứng với mã học sinh nhập (hỗ trợ nhập linh hoạt dạng 12-01-14-01 hoặc 12011401)
   const matchedExam = useMemo(() => {
     const clean = inputCode.trim().toLowerCase();
     if (!clean) return null;
     return exams.find(
       (e) =>
+        isExamCodeMatch(clean, e.code) ||
         e.code.toLowerCase() === clean ||
         e.id.toLowerCase() === clean ||
         e.title.toLowerCase().includes(clean)
@@ -66,7 +74,7 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
 
     if (!matchedExam) {
       setErrorMessage(
-        `Không tìm thấy đề thi với mã "${inputCode.trim()}". Vui lòng kiểm tra lại mã giáo viên đã giao!`
+        `Không tìm thấy đề thi với mã "${inputCode.trim()}". Vui lòng kiểm tra lại mã theo quy luật [Lớp]-[Chương]-[Bài]-[Lần] (ví dụ: 12-01-14-01)!`
       );
       return;
     }
@@ -148,9 +156,16 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
           </button>
         </div>
 
-        <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-          Nhập <b>Mã đề thi (Access Code)</b> do giáo viên cung cấp để vào đúng đề kiểm tra được giao.
-        </p>
+        {/* Hướng dẫn quy luật mã đề */}
+        <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-2xl text-xs text-indigo-950 space-y-1">
+          <div className="font-extrabold flex items-center gap-1.5 text-indigo-900">
+            <Info className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>Quy luật Mã đề thi: <code>[Lớp]-[Chương]-[Bài]-[Lần]</code></span>
+          </div>
+          <p className="text-[11px] text-slate-600 leading-relaxed pl-5.5">
+            Ví dụ: <b>12-01-14-01</b> là <i>Lớp 12, Chương 1, Bài số 14, Lần kiểm tra thứ 1</i>.
+          </p>
+        </div>
 
         {/* Form nhập mã */}
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -167,11 +182,19 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
                   setInputCode(e.target.value.toUpperCase());
                   setErrorMessage("");
                 }}
-                placeholder="Ví dụ: 001, 102, TOAN12..."
+                placeholder="Ví dụ: 12-01-14-01"
                 autoFocus
-                className="w-full pl-11 pr-4 py-3.5 text-base sm:text-lg font-black tracking-widest uppercase rounded-2xl border-2 border-slate-300 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50 outline-none transition bg-slate-50 focus:bg-white text-slate-900"
+                className="w-full pl-11 pr-4 py-3.5 text-base sm:text-lg font-mono font-black tracking-widest uppercase rounded-2xl border-2 border-slate-300 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50 outline-none transition bg-slate-50 focus:bg-white text-slate-900"
               />
             </div>
+
+            {/* Giải thích thời gian thực nếu mã hợp lệ */}
+            {inputCode.trim().length >= 4 && (
+              <div className="mt-2 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200/80 text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                <span>Cấu trúc mã nhận diện:</span>
+                <span className="text-indigo-700 font-extrabold">{parsedInput.explanation}</span>
+              </div>
+            )}
           </div>
 
           {/* Mật khẩu nếu đề yêu cầu */}
@@ -217,10 +240,12 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
               </div>
 
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                  {matchedExam.code}
+                </span>
                 <span>{matchedExam.grade}</span>
                 <span>• {matchedExam.durationMinutes} phút</span>
                 <span>• {matchedExam.questions.length} câu hỏi</span>
-                <span>• Tác giả: {matchedExam.author || "Tổ Toán"}</span>
               </div>
 
               <div className="text-[11px] text-slate-600 font-medium pt-1 border-t border-slate-200/80">
@@ -251,7 +276,7 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
         {/* Gợi ý các mã đề đang mở */}
         <div className="pt-3 border-t border-slate-100 space-y-2">
           <div className="text-xs font-bold text-slate-500">
-            💡 Gợi ý mã đề thi đang mở sẵn:
+            💡 Gợi ý mã đề thi chuẩn đang mở sẵn:
           </div>
           <div className="flex flex-wrap gap-2">
             {exams.slice(0, 4).map((ex) => {
@@ -270,7 +295,7 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
                       : "bg-slate-50 text-slate-400 border-slate-200 opacity-60"
                   }`}
                 >
-                  <span>Mã: <b>{ex.code}</b></span>
+                  <span className="font-mono"><b>{ex.code}</b></span>
                   <span className="text-[10px] text-slate-400">({ex.grade})</span>
                 </button>
               );

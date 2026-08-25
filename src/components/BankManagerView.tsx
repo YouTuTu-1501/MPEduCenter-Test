@@ -13,6 +13,11 @@ import {
   generateStandalonePresentationHtml,
   getStandardTemplateLatex,
 } from "../utils/latexParser";
+import {
+  generateStandardExamCode,
+  parseStandardExamCode,
+  isExamCodeMatch,
+} from "../utils/examCodeHelper";
 import { MathRenderer } from "./MathRenderer";
 import { TableBuilderModal } from "./TableBuilderModal";
 import { ExamScheduleModal } from "./ExamScheduleModal";
@@ -107,15 +112,30 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   );
   const [customChapterInput, setCustomChapterInput] = useState<string>("");
   const [isCustomChapter, setIsCustomChapter] = useState<boolean>(false);
+  const [importLessonNumber, setImportLessonNumber] = useState<string>("14");
+  const [importAttemptNumber, setImportAttemptNumber] = useState<string>("01");
   const [importPreview, setImportPreview] = useState<Exam | null>(null);
 
-  // Modal Chỉnh sửa nhanh Lớp & Chương cho đề thi hiện có
+  // Modal Chỉnh sửa nhanh Lớp, Chương & Mã Đề cho đề thi hiện có
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [editGrade, setEditGrade] = useState<string>("Lớp 12");
   const [editTargetClass, setEditTargetClass] = useState<string>("Tất cả các lớp");
   const [editChapter, setEditChapter] = useState<string>("");
   const [editCustomChapter, setEditCustomChapter] = useState<string>("");
   const [isEditCustomChapter, setIsEditCustomChapter] = useState<boolean>(false);
+  const [editLessonNumber, setEditLessonNumber] = useState<string>("01");
+  const [editAttemptNumber, setEditAttemptNumber] = useState<string>("01");
+  const [editCustomCode, setEditCustomCode] = useState<string>("");
+
+  // Tính mã đề chuẩn dự kiến cho Import Modal
+  const computedImportCode = useMemo(() => {
+    return generateStandardExamCode({
+      grade: importGrade,
+      chapter: isCustomChapter ? customChapterInput : importChapter,
+      lesson: importLessonNumber || "01",
+      attempt: importAttemptNumber || 1,
+    });
+  }, [importGrade, isCustomChapter, customChapterInput, importChapter, importLessonNumber, importAttemptNumber]);
 
   // Modal Thiết lập & Hẹn giờ giao đề
   const [scheduleTargetExam, setScheduleTargetExam] = useState<Exam | null>(null);
@@ -212,7 +232,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchTitle = exam.title.toLowerCase().includes(q);
-        const matchCode = exam.code.toLowerCase().includes(q);
+        const matchCode = exam.code.toLowerCase().includes(q) || isExamCodeMatch(q, exam.code);
         const matchChapter = (exam.chapter || "").toLowerCase().includes(q);
         const matchGrade = exam.grade.toLowerCase().includes(q);
         const matchSubject = exam.subject.toLowerCase().includes(q);
@@ -328,18 +348,21 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     const finalChapter = isCustomChapter ? customChapterInput : importChapter;
     parsed.grade = importGrade;
     if (finalChapter) parsed.chapter = finalChapter;
+    parsed.code = computedImportCode;
     setImportPreview(parsed);
     toast.info(
       "Phân tích mã nguồn LaTeX",
-      `Đã nhận diện ${parsed.questions.length} câu hỏi thuộc ${parsed.grade} - ${parsed.chapter || "Chương đã chọn"}.`
+      `Đã nhận diện ${parsed.questions.length} câu hỏi thuộc ${parsed.grade} - Mã đề chuẩn: ${parsed.code}.`
     );
   };
 
   const handleConfirmImport = () => {
     if (!importPreview) return;
     const finalChapter = isCustomChapter ? customChapterInput : importChapter;
+    const finalCode = computedImportCode || importPreview.code;
     const examToSave: Exam = {
       ...importPreview,
+      code: finalCode,
       title: importTitle || importPreview.title,
       grade: importGrade,
       targetClass: importTargetClass,
@@ -349,9 +372,13 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     setShowImportModal(false);
     setLatexInputText("");
     setImportPreview(null);
+    toast.success(
+      "Đã lưu đề thi thành công!",
+      `Đề "${examToSave.title}" với Mã đề: ${examToSave.code} đã sẵn sàng giao cho học sinh.`
+    );
   };
 
-  // Mở modal sửa nhanh Lớp & Chương cho 1 đề
+  // Mở modal sửa nhanh Lớp, Chương & Mã Đề cho 1 đề
   const handleOpenEditMetadata = (exam: Exam) => {
     setEditingExam(exam);
     setEditGrade(exam.grade || "Lớp 12");
@@ -370,14 +397,33 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
       setIsEditCustomChapter(false);
       setEditCustomChapter("");
     }
+
+    // Phân tích mã đề hiện có để điền vào form sửa
+    const parsedCode = parseStandardExamCode(exam.code);
+    if (parsedCode.isStandard) {
+      setEditLessonNumber(parsedCode.lessonNumber || "01");
+      setEditAttemptNumber(parsedCode.attemptNumber || "01");
+    } else {
+      setEditLessonNumber("01");
+      setEditAttemptNumber("01");
+    }
+    setEditCustomCode(exam.code);
   };
 
-  // Lưu sửa Lớp & Chương
+  // Lưu sửa Lớp, Chương & Mã Đề
   const handleSaveEditMetadata = () => {
     if (!editingExam) return;
     const finalChapter = isEditCustomChapter ? editCustomChapter : editChapter;
+    const finalCode = editCustomCode.trim() || generateStandardExamCode({
+      grade: editGrade,
+      chapter: finalChapter,
+      lesson: editLessonNumber,
+      attempt: editAttemptNumber,
+    });
+
     const updatedExam: Exam = {
       ...editingExam,
+      code: finalCode,
       grade: editGrade,
       targetClass: editTargetClass,
       chapter: finalChapter || undefined,
@@ -386,8 +432,8 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     onSaveExam(updatedExam);
     setEditingExam(null);
     toast.success(
-      "Cập nhật phân loại thành công",
-      `Đề "${updatedExam.title}" đã được chuyển sang ${updatedExam.grade} (${updatedExam.targetClass || "Tất cả các lớp"}) - ${updatedExam.chapter || "Chưa gắn chương"}.`
+      "Cập nhật đề thi thành công",
+      `Đề "${updatedExam.title}" (Mã: ${updatedExam.code}) đã được cập nhật: ${updatedExam.grade} (${updatedExam.targetClass || "Tất cả các lớp"}) - ${updatedExam.chapter || "Chưa gắn chương"}.`
     );
   };
 
@@ -1199,6 +1245,14 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                     } else {
                       setIsEditCustomChapter(false);
                       setEditChapter(e.target.value);
+                      // Tự động gợi ý mã chuẩn theo chương mới
+                      const newCode = generateStandardExamCode({
+                        grade: editGrade,
+                        chapter: e.target.value,
+                        lesson: editLessonNumber,
+                        attempt: editAttemptNumber,
+                      });
+                      setEditCustomCode(newCode);
                     }
                   }}
                   className="w-full py-2.5 px-3 rounded-xl border border-slate-300 font-medium bg-white text-slate-800 outline-none focus:border-indigo-500"
@@ -1220,6 +1274,85 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                     className="w-full mt-2 py-2 px-3 rounded-xl border border-slate-300 font-medium outline-none focus:border-indigo-500 text-xs"
                   />
                 )}
+              </div>
+
+              {/* Thiết lập Mã đề thi theo quy luật [Lớp]-[Chương]-[Bài]-[Lần] */}
+              <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-amber-900 flex items-center gap-1">
+                    <KeyRound className="w-3.5 h-3.5 text-amber-700" />
+                    4. Mã đề thi: [Lớp]-[Chương]-[Bài]-[Lần]
+                  </span>
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-md">
+                    Chuẩn GDPT
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      Số thứ tự Bài học:
+                    </label>
+                    <input
+                      type="text"
+                      value={editLessonNumber}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditLessonNumber(val);
+                        const code = generateStandardExamCode({
+                          grade: editGrade,
+                          chapter: isEditCustomChapter ? editCustomChapter : editChapter,
+                          lesson: val,
+                          attempt: editAttemptNumber,
+                        });
+                        setEditCustomCode(code);
+                      }}
+                      placeholder="Ví dụ: 14, 02..."
+                      className="w-full py-1.5 px-3 rounded-xl border border-slate-300 bg-white font-mono font-bold text-xs outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      Lần kiểm tra:
+                    </label>
+                    <select
+                      value={editAttemptNumber}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditAttemptNumber(val);
+                        const code = generateStandardExamCode({
+                          grade: editGrade,
+                          chapter: isEditCustomChapter ? editCustomChapter : editChapter,
+                          lesson: editLessonNumber,
+                          attempt: val,
+                        });
+                        setEditCustomCode(code);
+                      }}
+                      className="w-full py-1.5 px-3 rounded-xl border border-slate-300 bg-white font-mono font-bold text-xs outline-none focus:border-amber-500"
+                    >
+                      <option value="01">Lần 1 (01)</option>
+                      <option value="02">Lần 2 (02)</option>
+                      <option value="03">Lần 3 (03)</option>
+                      <option value="04">Lần 4 (04)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    Mã đề chính thức (Dùng để giao học sinh nhập):
+                  </label>
+                  <input
+                    type="text"
+                    value={editCustomCode}
+                    onChange={(e) => setEditCustomCode(e.target.value.toUpperCase())}
+                    className="w-full py-2 px-3 rounded-xl border-2 border-amber-400 bg-white font-mono font-black text-amber-900 tracking-wider text-sm outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                  <p className="text-[11px] text-amber-800 font-medium mt-1">
+                    💡 Giải nghĩa: {parseStandardExamCode(editCustomCode).explanation}
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -1283,11 +1416,11 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 <span>Thiết lập Phân loại Lớp & Chương mục:</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
                 {/* Khối Lớp */}
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
-                    Khối Lớp:
+                    1. Khối Lớp:
                   </label>
                   <select
                     value={importGrade}
@@ -1311,7 +1444,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 {/* Lớp cụ thể */}
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
-                    Áp dụng cho Lớp:
+                    2. Lớp áp dụng:
                   </label>
                   <select
                     value={importTargetClass}
@@ -1330,7 +1463,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 {/* Chương */}
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
-                    Chương / Chủ đề:
+                    3. Chương / Chủ đề:
                   </label>
                   <select
                     value={isCustomChapter ? "__custom__" : importChapter}
@@ -1362,6 +1495,49 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                     />
                   )}
                 </div>
+
+                {/* Bài số & Lần thi */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    4. Bài số & Lần thi:
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input
+                      type="text"
+                      value={importLessonNumber}
+                      onChange={(e) => setImportLessonNumber(e.target.value)}
+                      placeholder="Bài (14)"
+                      title="Số thứ tự bài học"
+                      className="w-full py-2 px-2.5 rounded-xl border border-indigo-200 bg-white font-mono font-bold text-center text-xs outline-none focus:border-indigo-500"
+                    />
+                    <select
+                      value={importAttemptNumber}
+                      onChange={(e) => setImportAttemptNumber(e.target.value)}
+                      className="w-full py-2 px-1.5 rounded-xl border border-indigo-200 bg-white font-mono font-bold text-xs outline-none focus:border-indigo-500"
+                    >
+                      <option value="01">Lần 01</option>
+                      <option value="02">Lần 02</option>
+                      <option value="03">Lần 03</option>
+                      <option value="04">Lần 04</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Preview mã đề chuẩn tạo ra */}
+              <div className="flex flex-wrap items-center justify-between p-2.5 bg-white rounded-xl border border-indigo-100 text-xs gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-indigo-900">Mã đề sẽ tạo:</span>
+                  <span className="font-mono font-black text-xs sm:text-sm bg-indigo-600 text-white px-2.5 py-0.5 rounded-lg tracking-wider shadow-2xs">
+                    {computedImportCode}
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
+                    ({parseStandardExamCode(computedImportCode).explanation})
+                  </span>
+                </div>
+                <span className="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md font-bold border border-indigo-100">
+                  Quy luật: [Lớp]-[Chương]-[Bài]-[Lần]
+                </span>
               </div>
             </div>
 
@@ -1651,7 +1827,7 @@ const ExamCardItem: React.FC<ExamCardItemProps> = ({
               type="button"
               onClick={handleCopyExamCode}
               className="font-mono font-black text-xs sm:text-sm text-indigo-700 bg-white px-2 py-0.5 rounded-md border border-indigo-200 hover:bg-indigo-50 flex items-center gap-1 transition shadow-2xs"
-              title="Bấm để sao chép mã đề thi giao cho học sinh"
+              title={`Mã giao đề: ${exam.code} (${parseStandardExamCode(exam.code).explanation}). Bấm để sao chép.`}
             >
               <KeyRound className="w-3 h-3 text-indigo-500" />
               <span>{exam.code}</span>

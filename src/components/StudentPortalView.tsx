@@ -3,6 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import { Exam, StudentSubmission, checkExamAccessStatus } from "../types/exam";
 import { MathRenderer } from "./MathRenderer";
 import { ExamCodeEntryModal } from "./ExamCodeEntryModal";
+import { isExamCodeMatch, parseStandardExamCode } from "../utils/examCodeHelper";
 import { useToast } from "../context/ToastContext";
 import {
   GraduationCap,
@@ -30,6 +31,7 @@ import {
   Unlock,
   AlertCircle,
   Send,
+  Info,
 } from "lucide-react";
 
 interface StudentPortalViewProps {
@@ -98,11 +100,12 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
     e.preventDefault();
     const clean = quickCodeInput.trim().toLowerCase();
     if (!clean) {
-      toast.warning("Vui lòng nhập Mã đề thi!", "Ví dụ: 001, 102, TOAN12...");
+      toast.warning("Vui lòng nhập Mã đề thi!", "Ví dụ: 12-01-14-01, 10-02-05-01...");
       return;
     }
     const matched = exams.find(
       (ex) =>
+        isExamCodeMatch(clean, ex.code) ||
         ex.code.toLowerCase() === clean ||
         ex.id.toLowerCase() === clean ||
         ex.title.toLowerCase().includes(clean)
@@ -110,7 +113,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
     if (!matched) {
       toast.error(
         "Không tìm thấy đề thi!",
-        `Không có đề thi nào khớp với mã "${quickCodeInput}". Vui lòng kiểm tra lại mã giáo viên giao.`
+        `Không có đề thi nào khớp với mã "${quickCodeInput}". Quy luật mã: [Lớp]-[Chương]-[Bài]-[Lần] (Ví dụ: 12-01-14-01).`
       );
       return;
     }
@@ -182,11 +185,13 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const filteredExams = useMemo(() => {
     return exams.filter((e) => {
       const matchGrade = gradeFilter === "all" || (e.grade && e.grade === gradeFilter);
+      const cleanSearch = searchQuery.trim().toLowerCase();
       const matchSearch =
-        searchQuery === "" ||
-        e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        e.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (e.chapter && e.chapter.toLowerCase().includes(searchQuery.toLowerCase()));
+        cleanSearch === "" ||
+        e.title.toLowerCase().includes(cleanSearch) ||
+        isExamCodeMatch(cleanSearch, e.code) ||
+        e.code.toLowerCase().includes(cleanSearch) ||
+        (e.chapter && e.chapter.toLowerCase().includes(cleanSearch));
       return matchGrade && matchSearch;
     });
   }, [exams, gradeFilter, searchQuery]);
@@ -376,7 +381,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                   Bạn có Mã Đề do Thầy/Cô giao?
                 </h3>
                 <p className="text-xs text-slate-300">
-                  Nhập mã đề thi (ví dụ: 001, 102, TOAN12...) để vào ngay đề kiểm tra của lớp.
+                  Nhập mã đề theo quy luật <code>[Lớp]-[Chương]-[Bài]-[Lần]</code> (ví dụ: <b>12-01-14-01</b>) để vào ngay đề kiểm tra.
                 </p>
               </div>
             </div>
@@ -389,8 +394,8 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                 type="text"
                 value={quickCodeInput}
                 onChange={(e) => setQuickCodeInput(e.target.value.toUpperCase())}
-                placeholder="Nhập mã đề..."
-                className="px-4 py-2.5 rounded-xl bg-white/10 border border-white/25 text-white placeholder:text-slate-400 font-black tracking-widest uppercase text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:bg-white/20 w-full sm:w-44"
+                placeholder="Ví dụ: 12-01-14-01"
+                className="px-4 py-2.5 rounded-xl bg-white/10 border border-white/25 text-white placeholder:text-slate-400 font-mono font-black tracking-widest uppercase text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:bg-white/20 w-full sm:w-48"
               />
               <button
                 type="submit"
@@ -451,9 +456,12 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                 >
                   <div className="space-y-3">
                     <div className="flex items-center justify-between flex-wrap gap-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-extrabold rounded-md border border-emerald-200">
-                          {exam.grade || "Lớp 12"} • Mã: <b>{exam.code}</b>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-extrabold rounded-md border border-indigo-200 font-mono" title={parseStandardExamCode(exam.code).explanation}>
+                          Mã: <b>{exam.code}</b>
+                        </span>
+                        <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-extrabold rounded-md border border-emerald-200">
+                          {exam.grade || "Lớp 12"}
                         </span>
 
                         {/* Badge trạng thái Mở / Khóa / Hẹn giờ */}

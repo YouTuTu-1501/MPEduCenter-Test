@@ -1,4 +1,5 @@
 import { Exam, Question, QuestionType, PartType, ChoiceOption, TrueFalseItem } from "../types/exam";
+import { generateStandardExamCode, parseStandardExamCode } from "./examCodeHelper";
 
 /**
  * Parser phân tích mã LaTeX hỗ trợ 4 dạng thức câu hỏi chuẩn:
@@ -20,9 +21,9 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
   let questionCounter = 1;
 
   // Trích xuất mã đề nếu có (\tieude{...} hoặc \made{...})
-  let examCode = "001";
+  let rawExamCode = "";
   const codeMatch = latexContent.match(/\\(?:tieude|made)\{([^}]+)\}/);
-  if (codeMatch) examCode = codeMatch[1].trim();
+  if (codeMatch) rawExamCode = codeMatch[1].trim();
 
   // Trích xuất tiêu đề nếu có
   let examTitle = defaultTitle;
@@ -49,6 +50,20 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     latexContent.match(/%\s*(?:CHAPTER|CHUONG|CHƯƠNG):\s*([^\n]+)/i);
   if (chapterMatch) {
     examChapter = chapterMatch[1].trim();
+  }
+
+  // Chuẩn hóa mã đề theo quy luật [lớp][chương][bài][lần] (ví dụ: 12-01-14-01)
+  let examCode = "";
+  if (rawExamCode) {
+    const parsed = parseStandardExamCode(rawExamCode);
+    examCode = parsed.formattedCode;
+  } else {
+    examCode = generateStandardExamCode({
+      grade: examGrade,
+      chapter: examChapter || "01",
+      lesson: examTitle || "01",
+      attempt: 1,
+    });
   }
 
   for (let i = 0; i < lines.length; i++) {
