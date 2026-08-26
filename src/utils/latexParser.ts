@@ -52,6 +52,20 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     examChapter = chapterMatch[1].trim();
   }
 
+  // Trích xuất Thời gian làm bài nếu có (\thoiluong{...} hoặc \thoigian{...} hoặc % THOI_GIAN: ... hoặc "Thời gian: X phút")
+  let examDuration = 90;
+  const durationMatch =
+    latexContent.match(/\\(?:thoiluong|thoigian|duration|timeLimit)\{([^}]+)\}/i) ||
+    latexContent.match(/%\s*(?:THOI_GIAN|THỜI_GIAN|THOIGIAN|DURATION|TIME):\s*([^\n]+)/i) ||
+    latexContent.match(/(?:Thời gian làm bài|Thời gian|Thời lượng)\s*:\s*(\d+)\s*(?:phút|min|')/i);
+  if (durationMatch) {
+    const rawVal = durationMatch[1].replace(/[^0-9]/g, "");
+    const parsedNum = parseInt(rawVal, 10);
+    if (!isNaN(parsedNum) && parsedNum > 0) {
+      examDuration = parsedNum;
+    }
+  }
+
   // Chuẩn hóa mã đề theo quy luật [lớp][chương][bài][lần] (ví dụ: 12-01-14-01)
   let examCode = "";
   if (rawExamCode) {
@@ -132,8 +146,8 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     subject: "Toán học",
     grade: examGrade,
     chapter: examChapter || undefined,
-    durationMinutes: 90,
-    description: `Đề thi trích xuất từ định dạng LaTeX gồm ${questions.length} câu hỏi thuộc 4 dạng thức chuẩn.`,
+    durationMinutes: examDuration,
+    description: `Đề thi trích xuất từ định dạng LaTeX gồm ${questions.length} câu hỏi thuộc 4 dạng thức chuẩn (${examDuration} phút).`,
     author: "Tổ Toán - Hệ thống Giáo dục",
     totalScore: Number(totalScore.toFixed(2)) || 10,
     questions,
@@ -496,6 +510,8 @@ export function getStandardTemplateLatex(): string {
 % ==========================================
 \\tieude{001}
 \\tenmonthi{Toán học 12 - Ôn tập chuẩn cấu trúc BGD}
+\\thoiluong{90}
+% THOI_GIAN: 90 phút
 
 % ----------------------------------------------------
 % PHẦN I: TRẮC NGHIỆM NHIỀU LỰA CHỌN (MCQ)
@@ -657,6 +673,7 @@ export function exportExamToLatex(exam: Exam): string {
 % Thông tin đề thi & Phân loại
 % GRADE: ${exam.grade}
 % CHAPTER: ${exam.chapter || ""}
+% DURATION: ${exam.durationMinutes}
 \\newcommand{\\tenkythi}{${exam.title}}
 \\newcommand{\\tenmonthi}{${exam.subject} - ${exam.grade}}
 \\newcommand{\\lop}{${exam.grade}}

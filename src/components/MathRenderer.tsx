@@ -93,11 +93,19 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
     // =========================================================================
     // 1. XỬ LÝ HÌNH VẼ TIKZ HÌNH HỌC KHÔNG GIAN, ĐỒ THỊ (\begin{tikzpicture} ... \end{tikzpicture})
     // =========================================================================
+    // Gom các khai báo \usetikzlibrary{...} và \usepackage{...} nếu có
+    const detectedLibs: string[] = [];
+    text = text.replace(/\\usetikzlibrary\{([^}]+)\}/gi, (_, libs) => {
+      libs.split(",").forEach((l: string) => detectedLibs.push(l.trim()));
+      return "";
+    });
+    text = text.replace(/\\usepackage(?:\s*\[[^\]]*\])?\{([^}]+)\}/gi, "");
+
     text = text.replace(
       /\\begin\{center\}\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\\end\{center\}/g,
       (_, tikz) => {
         const idx = tikzList.length;
-        const svg = renderTikzWithPackages(tikz);
+        const svg = renderTikzWithPackages(tikz, detectedLibs);
         tikzList.push(svg);
         return `%%%TIKZ_PLACEHOLDER_${idx}%%%`;
       }
@@ -105,7 +113,7 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
 
     text = text.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, (tikz) => {
       const idx = tikzList.length;
-      const svg = renderTikzWithPackages(tikz);
+      const svg = renderTikzWithPackages(tikz, detectedLibs);
       tikzList.push(svg);
       return `%%%TIKZ_PLACEHOLDER_${idx}%%%`;
     });

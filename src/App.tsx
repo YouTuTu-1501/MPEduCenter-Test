@@ -27,6 +27,8 @@ import {
   saveSubmissionToFirestore,
   getLocalSubmissions,
   saveUserToFirestore,
+  getDeletedExamIds,
+  getDeletedSubmissionIds,
 } from "./services/firestoreService";
 import { RotateCcw, Home, Sparkles } from "lucide-react";
 
@@ -72,6 +74,10 @@ class ErrorBoundary extends React.Component<Props, State> {
                   try {
                     localStorage.removeItem("edutest_exams");
                     localStorage.removeItem("edutest_submissions");
+                    localStorage.removeItem("edutest_deleted_exams");
+                    localStorage.removeItem("edutest_deleted_submissions");
+                    localStorage.removeItem("mpeducenter_deleted_users");
+                    localStorage.removeItem("mpeducenter_users");
                   } catch {}
                   window.location.reload();
                 }}
@@ -117,8 +123,24 @@ function MainApp() {
   const { toast } = useToast();
   const { currentUser, users, isAdmin, isTeacher, isStudent } = useAuth();
   const { selectedClassFilter, setSelectedClassFilter, selectedExamFilter, setSelectedExamFilter } = useFilter();
-  const [exams, setExams] = useState<Exam[]>(initialSampleExams);
-  const [selectedExam, setSelectedExam] = useState<Exam>(defaultExam001);
+  const [exams, setExams] = useState<Exam[]>(() => {
+    const deleted = getDeletedExamIds();
+    try {
+      const saved = localStorage.getItem("edutest_exams");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((e: Exam) => e && e.id && !deleted.has(e.id));
+        }
+      }
+    } catch {}
+    return initialSampleExams.filter((e) => !deleted.has(e.id));
+  });
+  const [selectedExam, setSelectedExam] = useState<Exam>(() => {
+    const deleted = getDeletedExamIds();
+    const available = initialSampleExams.filter((e) => !deleted.has(e.id));
+    return available[0] || defaultExam001;
+  });
   const [activeView, setActiveView] = useState<ActiveView>(() => {
     return isStudent ? "student_portal" : "bank";
   });
@@ -144,11 +166,13 @@ function MainApp() {
   useEffect(() => {
     // 1. Subscribe Đề thi
     const unsubExams = subscribeExams((firestoreExams) => {
-      if (firestoreExams && firestoreExams.length > 0) {
-        setExams(firestoreExams);
+      if (firestoreExams) {
+        const deleted = getDeletedExamIds();
+        const filtered = firestoreExams.filter((e) => e && e.id && !deleted.has(e.id));
+        setExams(filtered);
         setSelectedExam((current) => {
-          const match = firestoreExams.find((e) => e.id === current?.id);
-          return match || firestoreExams[0];
+          const match = filtered.find((e) => e.id === current?.id);
+          return match || filtered[0] || defaultExam001;
         });
       }
     });
@@ -156,7 +180,9 @@ function MainApp() {
     // 2. Subscribe Bài nộp
     const unsubSubs = subscribeSubmissions((firestoreSubs) => {
       if (firestoreSubs) {
-        setSubmissions(firestoreSubs);
+        const deletedSubs = getDeletedSubmissionIds();
+        const filtered = firestoreSubs.filter((s) => s && s.id && !deletedSubs.has(s.id));
+        setSubmissions(filtered);
       }
     });
 

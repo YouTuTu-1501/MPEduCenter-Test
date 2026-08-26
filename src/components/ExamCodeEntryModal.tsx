@@ -39,8 +39,6 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
   const [inputPassword, setInputPassword] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
 
-  if (!isOpen) return null;
-
   // Phân tích mã người dùng đang gõ theo quy luật [lớp][chương][bài][lần]
   const parsedInput = useMemo(() => {
     return parseStandardExamCode(inputCode);
@@ -61,6 +59,8 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
 
   // Kiểm tra trạng thái đề nếu tìm thấy
   const accessStatus = matchedExam ? checkExamAccessStatus(matchedExam) : null;
+
+  if (!isOpen) return null;
 
   // Xử lý vào thi
   const handleSubmit = (e: React.FormEvent) => {

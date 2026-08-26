@@ -10,6 +10,7 @@ import {
   ROLE_PERMISSIONS,
 } from "../types/auth";
 import { Exam, StudentSubmission, STANDARD_CLASSES } from "../types/exam";
+import { ExamEditorModal } from "./ExamEditorModal";
 import { useToast } from "../context/ToastContext";
 import { useFilter } from "../context/FilterContext";
 import {
@@ -89,6 +90,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     updateUser,
     updateUserAvatar,
     deleteUser,
+    deleteUsersBatch,
     toggleUserStatus,
     resetUsers,
     setUserRole,
@@ -125,6 +127,9 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   };
 
   const [activeTab, setActiveTab] = useState<"users" | "exams" | "settings">("users");
+
+  // State chỉnh sửa đề thi
+  const [editingExam, setEditingExam] = useState<Exam | null>(null);
 
   // Chọn người dùng hàng loạt (Batch Selection)
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -1284,6 +1289,29 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    const validCount = selectedUserIds.filter((id) => id !== currentUser.id).length;
+                    if (validCount === 0) {
+                      toast.error("Không thể xóa", "Bạn không thể tự xóa tài khoản của chính mình.");
+                      return;
+                    }
+                    if (
+                      confirm(
+                        `Bạn có chắc chắn muốn xóa vĩnh viễn ${validCount} tài khoản đã chọn khỏi hệ thống và Firebase?`
+                      )
+                    ) {
+                      deleteUsersBatch(selectedUserIds);
+                      setSelectedUserIds([]);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                  title="Xóa các tài khoản đã chọn vĩnh viễn"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Xóa đã chọn</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setSelectedUserIds([])}
                   className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
                 >
@@ -1635,6 +1663,15 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
 
                   <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditingExam(exam)}
+                        className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold transition flex items-center gap-1 border border-amber-200/60"
+                        title="Chỉnh sửa toàn diện đề thi (Mã đề, Thời gian, Nội dung, Câu hỏi...)"
+                      >
+                        <Edit2 className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Sửa đề</span>
+                      </button>
                       <button
                         type="button"
                         onClick={() => onSelectExam(exam, "presentation")}
@@ -2876,6 +2913,23 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL CHỈNH SỬA TOÀN DIỆN ĐỀ THI TRONG ADMIN */}
+      {editingExam && (
+        <ExamEditorModal
+          isOpen={!!editingExam}
+          exam={editingExam}
+          onClose={() => setEditingExam(null)}
+          onSave={(updatedExam) => {
+            onSaveExam(updatedExam);
+            setEditingExam(null);
+          }}
+          onDelete={(id) => {
+            onDeleteExam(id);
+            setEditingExam(null);
+          }}
+        />
       )}
     </div>
   );

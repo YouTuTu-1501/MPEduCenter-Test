@@ -13,6 +13,9 @@ import {
   saveUsersBatchToFirestore,
   deleteUserFromFirestore,
   seedInitialUsers,
+  getDeletedUserIds,
+  addDeletedUserId,
+  removeDeletedUserId,
 } from "../services/firestoreService";
 
 interface LoginResult {
@@ -49,6 +52,7 @@ interface AuthContextType {
   updateUser: (userId: string, partial: Partial<User>) => void;
   updateUserAvatar: (userId: string, avatarUrl: string) => void;
   deleteUser: (userId: string) => void;
+  deleteUsersBatch: (userIds: string[]) => void;
   toggleUserStatus: (userId: string) => void;
   resetUsers: () => void;
   showAuthModal: boolean;
@@ -90,28 +94,40 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const { toast } = useToast();
 
   const [users, setUsers] = useState<User[]>(() => {
+    const deletedUserIds = getDeletedUserIds();
     const userMap = new Map<string, User>();
-    // 1. Nạp tất cả tài khoản hệ thống chuẩn
-    INITIAL_USERS.forEach((u) => userMap.set(u.id, u));
 
-    // 2. Nạp dữ liệu từ LocalStorage (giữ lại các chỉnh sửa hoặc tài khoản mới tạo)
+    // 1. Nạp dữ liệu từ LocalStorage trước tiên nếu có
     try {
       const saved = localStorage.getItem("mpeducenter_users");
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           parsed.forEach((u: User) => {
-            if (u && u.id) {
+            if (u && u.id && !deletedUserIds.has(u.id)) {
               userMap.set(u.id, u);
             }
           });
         }
+      } else {
+        // Chỉ nạp INITIAL_USERS nếu chưa từng có cache
+        INITIAL_USERS.forEach((u) => {
+          if (!deletedUserIds.has(u.id)) {
+            userMap.set(u.id, u);
+          }
+        });
       }
-    } catch {}
+    } catch {
+      INITIAL_USERS.forEach((u) => {
+        if (!deletedUserIds.has(u.id)) {
+          userMap.set(u.id, u);
+        }
+      });
+    }
 
-    // 3. Đảm bảo tài khoản thiết bị học sinh luôn hiện diện
+    // 2. Đảm bảo tài khoản thiết bị học sinh luôn hiện diện nếu không bị xóa
     const defaultStudent = getOrCreateDeviceStudent();
-    if (!userMap.has(defaultStudent.id)) {
+    if (!deletedUserIds.has(defaultStudent.id) && !userMap.has(defaultStudent.id)) {
       userMap.set(defaultStudent.id, defaultStudent);
     }
     return Array.from(userMap.values());
@@ -130,24 +146,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
-  // Đồng bộ Firestore theo thời gian thực (Real-time Firestore Subscription) với cơ chế merge bảo vệ tài khoản cục bộ
+  // Đồng bộ Firestore theo thời gian thực (Real-time Firestore Subscription)
   useEffect(() => {
     const unsubscribe = subscribeUsers((firestoreUsers) => {
-      if (firestoreUsers && firestoreUsers.length > 0) {
-        setUsers((prev) => {
-          // Bảo vệ các tài khoản đã được tạo/chỉnh sửa trên máy hiện tại
-          const map = new Map<string, User>();
-          INITIAL_USERS.forEach((u) => map.set(u.id, u));
-          // Thêm các user từ Firestore
-          firestoreUsers.forEach((u) => map.set(u.id, u));
-          // Giữ lại hoặc ưu tiên tài khoản local nếu chưa có trên Firestore
-          prev.forEach((localUser) => {
-            if (!map.has(localUser.id)) {
-              map.set(localUser.id, localUser);
-            }
-          });
-          return Array.from(map.values());
-        });
+      if (firestoreUsers) {
+        const deletedUserIds = getDeletedUserIds();
+        const filtered = firestoreUsers.filter((u) => u && u.id && !deletedUserIds.has(u.id));
+        setUsers(filtered);
       }
     });
     return () => unsubscribe();
@@ -428,9 +433,42 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
     const target = users.find((u) => u.id === userId);
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    addDeletedUserId(userId);
+    setUsers((prev) => {
+      const updated = prev.filter((u) => u.id !== userId);
+      try {
+        localStorage.setItem("mpeducenter_users", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
     deleteUserFromFirestore(userId).catch((e) => console.warn(e));
-    toast.info("Đã xóa tài khoản", target ? `Đã xóa người dùng ${target.name}.` : undefined);
+    toast.info("Đã xóa tài khoản", target ? `Đã xóa vĩnh viễn người dùng ${target.name}.` : undefined);
+  };
+
+  const deleteUsersBatch = (userIds: string[]) => {
+    const validIds = userIds.filter((id) => id !== currentUser.id);
+    if (validIds.length === 0) {
+      toast.error("Không thể xóa", "Không có tài khoản hợp lệ để xóa (không thể tự xóa chính mình).");
+      return;
+    }
+
+    validIds.forEach((id) => {
+      addDeletedUserId(id);
+      deleteUserFromFirestore(id).catch((e) => console.warn(e));
+    });
+
+    setUsers((prev) => {
+      const updated = prev.filter((u) => !validIds.includes(u.id));
+      try {
+        localStorage.setItem("mpeducenter_users", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    toast.info(
+      "Đã xóa tài khoản hàng loạt",
+      `Đã gỡ bỏ vĩnh viễn ${validIds.length} tài khoản khỏi hệ thống và Firebase.`
+    );
   };
 
   const toggleUserStatus = (userId: string) => {
@@ -459,11 +497,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const resetUsers = () => {
+    try {
+      localStorage.removeItem("mpeducenter_deleted_users");
+      localStorage.removeItem("mpeducenter_users");
+      localStorage.removeItem("mpeducenter_current_user_id");
+    } catch {}
     setUsers(INITIAL_USERS);
     setCurrentUserId(INITIAL_USERS[3].id); // Nguyễn Hoàng Nam (Học sinh)
     seedInitialUsers().catch((e) => console.warn(e));
-    localStorage.removeItem("mpeducenter_users");
-    localStorage.removeItem("mpeducenter_current_user_id");
     toast.success("Đã khôi phục dữ liệu gốc", "Danh sách tài khoản mẫu 3 cấp đã được thiết lập lại.");
   };
 
@@ -489,6 +530,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updateUser,
         updateUserAvatar,
         deleteUser,
+        deleteUsersBatch,
         toggleUserStatus,
         resetUsers,
         showAuthModal,

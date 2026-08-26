@@ -6,6 +6,17 @@ import { ExamCodeEntryModal } from "./ExamCodeEntryModal";
 import { isExamCodeMatch, parseStandardExamCode } from "../utils/examCodeHelper";
 import { useToast } from "../context/ToastContext";
 import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  Cell,
+  ReferenceLine,
+} from "recharts";
+import {
   GraduationCap,
   BookOpen,
   History,
@@ -32,7 +43,53 @@ import {
   AlertCircle,
   Send,
   Info,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
+
+// Tooltip hiển thị chi tiết khi rê chuột vào cột biểu đồ
+const StudentScoreTooltip = ({ active, payload }: any) => {
+  if (!active || !payload || !payload.length) return null;
+  const data = payload[0]?.payload;
+  if (!data) return null;
+
+  return (
+    <div className="bg-slate-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-slate-700/80 max-w-xs text-xs space-y-2.5 z-50">
+      <div className="border-b border-slate-700/80 pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-bold text-[10px] border border-emerald-500/30">
+            Kỳ thi #{data.attemptIndex}
+          </span>
+          <span className="text-[10px] text-slate-400 font-mono">{data.dateFormatted}</span>
+        </div>
+        <h4 className="font-extrabold text-slate-100 text-sm mt-1 leading-snug">
+          {data.examTitle}
+        </h4>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/60">
+        <div>
+          <span className="text-[10px] text-slate-400 font-bold uppercase block">Tỷ lệ đạt được</span>
+          <span className="text-base font-black text-emerald-400">{data.percentage}%</span>
+        </div>
+        <div>
+          <span className="text-[10px] text-slate-400 font-bold uppercase block">Điểm số</span>
+          <span className="text-base font-black text-amber-300">
+            {data.score}/{data.maxScore}đ
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] text-slate-300 pt-1">
+        <span className="flex items-center gap-1 text-slate-400">
+          <Clock className="w-3.5 h-3.5 text-sky-400" />
+          <span>Thời gian: {data.timeMinutes} phút</span>
+        </span>
+        <span className="text-[10px] text-emerald-300 font-bold">Bấm để xem lại →</span>
+      </div>
+    </div>
+  );
+};
 
 interface StudentPortalViewProps {
   exams: Exam[];
@@ -195,6 +252,55 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       return matchGrade && matchSearch;
     });
   }, [exams, gradeFilter, searchQuery]);
+
+  // Dữ liệu biểu đồ cột tiến độ điểm số (% số điểm đạt được / tổng số điểm đề) qua các kỳ thi
+  const progressChartData = useMemo(() => {
+    if (mySubmissions.length === 0) return [];
+    const chronological = [...mySubmissions].sort((a, b) => {
+      const timeA = new Date(a.submittedAt).getTime() || 0;
+      const timeB = new Date(b.submittedAt).getTime() || 0;
+      return timeA - timeB;
+    });
+
+    return chronological.map((sub, index) => {
+      const maxScore = sub.maxScore || 10;
+      const percentage = Number(Math.min(100, Math.max(0, (sub.score / maxScore) * 100)).toFixed(1));
+      let color = "#ef4444";
+      if (percentage >= 80) color = "#10b981";
+      else if (percentage >= 65) color = "#6366f1";
+      else if (percentage >= 50) color = "#f59e0b";
+
+      let dateFormatted = "Gần đây";
+      try {
+        dateFormatted = new Date(sub.submittedAt).toLocaleString("vi-VN", {
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      } catch {}
+
+      const cleanTitle = sub.examTitle || "Đề thi";
+      const shortTitle =
+        cleanTitle.length > 16 ? `${cleanTitle.substring(0, 14)}...` : cleanTitle;
+
+      return {
+        id: sub.id || `sub_${index}`,
+        attemptIndex: index + 1,
+        label: `#${index + 1} (${percentage}%)`,
+        fullLabel: `#${index + 1} - ${shortTitle}`,
+        examTitle: sub.examTitle,
+        examId: sub.examId,
+        score: sub.score,
+        maxScore,
+        percentage,
+        timeMinutes: Math.round((sub.timeSpentSeconds || 0) / 60),
+        dateFormatted,
+        color,
+        submission: sub,
+      };
+    });
+  }, [mySubmissions]);
 
   return (
     <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
@@ -651,96 +757,235 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
 
       {/* TAB 3: PERSONAL ANALYTICS */}
       {activeTab === "analytics" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <BarChart2 className="w-5 h-5 text-emerald-600" />
-              <span>Độ chính xác theo 4 dạng thức câu hỏi</span>
-            </h3>
-            <p className="text-xs text-slate-500">
-              Đánh giá tỷ lệ làm đúng trên từng phần để tối ưu chiến thuật phòng thi.
-            </p>
-
-            <div className="space-y-3 pt-2">
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1">
-                  <span>Phần I: Trắc nghiệm 4 lựa chọn</span>
-                  <span className="text-emerald-600">{studentStats.part1Accuracy}%</span>
+        <div className="space-y-6">
+          {/* Biểu đồ Cột Recharts: Tiến độ điểm số (% Điểm đạt được) qua các kỳ kiểm tra */}
+          {progressChartData.length > 0 ? (
+            <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0 border border-emerald-100 shadow-2xs">
+                    <BarChart2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                      <span>Biểu Đồ Tiến Độ Điểm Số Qua Các Kỳ Kiểm Tra</span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
+                        % Điểm đạt được
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Tỷ lệ % điểm đạt được so với điểm tối đa của đề thi qua {progressChartData.length} lần thi gần nhất
+                    </p>
+                  </div>
                 </div>
-                <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                    style={{ width: `${studentStats.part1Accuracy}%` }}
-                  ></div>
+
+                {/* Legend chú giải */}
+                <div className="flex items-center gap-2 text-[10px] font-bold text-slate-600 flex-wrap">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span>
+                    <span>≥ 80% (Giỏi)</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500"></span>
+                    <span>65-79% (Khá)</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-amber-500"></span>
+                    <span>50-64% (Đạt)</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-rose-500"></span>
+                    <span>&lt; 50%</span>
+                  </span>
                 </div>
               </div>
 
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1">
-                  <span>Phần II: Đúng / Sai (4 ý a-b-c-d)</span>
-                  <span className="text-indigo-600">{studentStats.part2Accuracy}%</span>
-                </div>
-                <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-indigo-500 rounded-full transition-all duration-500"
-                    style={{ width: `${studentStats.part2Accuracy}%` }}
-                  ></div>
-                </div>
+              <div className="h-72 w-full pt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={progressChartData}
+                    margin={{ top: 20, right: 15, left: -10, bottom: 25 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      stroke="#64748b"
+                      tick={{ fontSize: 11, fontWeight: 700, fill: "#475569" }}
+                      interval={0}
+                      angle={-15}
+                      textAnchor="end"
+                      height={40}
+                    />
+                    <YAxis
+                      domain={[0, 100]}
+                      ticks={[0, 25, 50, 75, 100]}
+                      tickFormatter={(val) => `${val}%`}
+                      stroke="#64748b"
+                      tick={{ fontSize: 11, fontWeight: 600, fill: "#64748b" }}
+                    />
+                    <ReferenceLine
+                      y={50}
+                      stroke="#f59e0b"
+                      strokeDasharray="4 4"
+                      label={{
+                        value: "Đạt (50%)",
+                        position: "insideTopRight",
+                        fill: "#d97706",
+                        fontSize: 10,
+                        fontWeight: 700,
+                      }}
+                    />
+                    <ReferenceLine
+                      y={80}
+                      stroke="#10b981"
+                      strokeDasharray="4 4"
+                      label={{
+                        value: "Giỏi (80%)",
+                        position: "insideTopRight",
+                        fill: "#059669",
+                        fontSize: 10,
+                        fontWeight: 700,
+                      }}
+                    />
+                    <Tooltip content={<StudentScoreTooltip />} />
+                    <Bar
+                      dataKey="percentage"
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={48}
+                      cursor="pointer"
+                      onClick={(entry: any) => {
+                        if (entry && entry.submission) {
+                          setSelectedSubmissionReview(entry.submission);
+                        }
+                      }}
+                    >
+                      {progressChartData.map((entry, index) => (
+                        <Cell
+                          key={`portal-bar-cell-${index}`}
+                          fill={entry.color}
+                          className="hover:opacity-85 transition-opacity"
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
 
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1">
-                  <span>Phần III: Trả lời ngắn</span>
-                  <span className="text-amber-600">{studentStats.part3Accuracy}%</span>
-                </div>
-                <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-amber-500 rounded-full transition-all duration-500"
-                    style={{ width: `${studentStats.part3Accuracy}%` }}
-                  ></div>
-                </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-100">
+                <span className="flex items-center gap-1 text-slate-500 font-medium">
+                  💡 <span>Bấm vào từng cột trên biểu đồ để xem chi tiết lời giải & đáp án bài thi đó.</span>
+                </span>
+                <span className="font-semibold text-slate-600">
+                  Bài gần nhất:{" "}
+                  <strong className="text-emerald-600">
+                    {progressChartData[progressChartData.length - 1]?.percentage}%
+                  </strong>{" "}
+                  ({progressChartData[progressChartData.length - 1]?.score}/
+                  {progressChartData[progressChartData.length - 1]?.maxScore}đ)
+                </span>
               </div>
+            </div>
+          ) : (
+            <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center text-slate-400 shadow-xs space-y-2">
+              <BarChart2 className="w-10 h-10 mx-auto text-slate-300" />
+              <div className="text-xs font-bold text-slate-700">Chưa có dữ liệu biểu đồ tiến độ</div>
+              <p className="text-[11px] text-slate-400">
+                Hãy hoàn thành ít nhất 1 bài thi để hệ thống vẽ biểu đồ cột theo dõi tiến độ điểm số cá nhân.
+              </p>
+            </div>
+          )}
 
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1">
-                  <span>Phần IV: Tự luận & Vẽ hình không gian</span>
-                  <span className="text-purple-600">{studentStats.part4Accuracy}%</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <BarChart2 className="w-5 h-5 text-emerald-600" />
+                <span>Độ chính xác theo 4 dạng thức câu hỏi</span>
+              </h3>
+              <p className="text-xs text-slate-500">
+                Đánh giá tỷ lệ làm đúng trên từng phần để tối ưu chiến thuật phòng thi.
+              </p>
+
+              <div className="space-y-3 pt-2">
+                <div>
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span>Phần I: Trắc nghiệm 4 lựa chọn</span>
+                    <span className="text-emerald-600">{studentStats.part1Accuracy}%</span>
+                  </div>
+                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                      style={{ width: `${studentStats.part1Accuracy}%` }}
+                    ></div>
+                  </div>
                 </div>
-                <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-purple-500 rounded-full transition-all duration-500"
-                    style={{ width: `${studentStats.part4Accuracy}%` }}
-                  ></div>
+
+                <div>
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span>Phần II: Đúng / Sai (4 ý a-b-c-d)</span>
+                    <span className="text-indigo-600">{studentStats.part2Accuracy}%</span>
+                  </div>
+                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                      style={{ width: `${studentStats.part2Accuracy}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span>Phần III: Trả lời ngắn</span>
+                    <span className="text-amber-600">{studentStats.part3Accuracy}%</span>
+                  </div>
+                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-amber-500 rounded-full transition-all duration-500"
+                      style={{ width: `${studentStats.part3Accuracy}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span>Phần IV: Tự luận & Vẽ hình không gian</span>
+                    <span className="text-purple-600">{studentStats.part4Accuracy}%</span>
+                  </div>
+                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-purple-500 rounded-full transition-all duration-500"
+                      style={{ width: `${studentStats.part4Accuracy}%` }}
+                    ></div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-amber-500" />
-              <span>Gợi ý Lộ trình Ôn luyện Nâng cao</span>
-            </h3>
+            <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-amber-500" />
+                <span>Gợi ý Lộ trình Ôn luyện Nâng cao</span>
+              </h3>
 
-            <div className="space-y-3 text-xs">
-              <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200">
-                <div className="font-bold text-amber-900">🌟 Chuyên đề Hình học không gian (Khối đa diện & Thể tích)</div>
-                <div className="text-amber-800 mt-1">
-                  Tăng cường rèn luyện kỹ năng vẽ hình không gian bằng Canvas tương tác và nhận diện các thiết diện khó trong đề thi.
+              <div className="space-y-3 text-xs">
+                <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200">
+                  <div className="font-bold text-amber-900">🌟 Chuyên đề Hình học không gian (Khối đa diện & Thể tích)</div>
+                  <div className="text-amber-800 mt-1">
+                    Tăng cường rèn luyện kỹ năng vẽ hình không gian bằng Canvas tương tác và nhận diện các thiết diện khó trong đề thi.
+                  </div>
                 </div>
-              </div>
 
-              <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200">
-                <div className="font-bold text-emerald-900">✅ Dạng câu Đúng / Sai (Phần II)</div>
-                <div className="text-emerald-800 mt-1">
-                  Bạn đang làm rất tốt các câu hỏi mệnh đề logic. Chú ý tính điểm bậc thang để tối đa hóa 1.0 điểm cho mỗi câu 4 ý đúng.
+                <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200">
+                  <div className="font-bold text-emerald-900">✅ Dạng câu Đúng / Sai (Phần II)</div>
+                  <div className="text-emerald-800 mt-1">
+                    Bạn đang làm rất tốt các câu hỏi mệnh đề logic. Chú ý tính điểm bậc thang để tối đa hóa 1.0 điểm cho mỗi câu 4 ý đúng.
+                  </div>
                 </div>
-              </div>
 
-              <div className="p-3.5 rounded-2xl bg-indigo-50/80 border border-indigo-200">
-                <div className="font-bold text-indigo-900">🚀 Luyện tốc độ Trả lời ngắn (Phần III)</div>
-                <div className="text-indigo-800 mt-1">
-                  Rèn luyện quy tắc làm tròn số thập phân và phân số tối giản để không bị trừ điểm quy đổi.
+                <div className="p-3.5 rounded-2xl bg-indigo-50/80 border border-indigo-200">
+                  <div className="font-bold text-indigo-900">🚀 Luyện tốc độ Trả lời ngắn (Phần III)</div>
+                  <div className="text-indigo-800 mt-1">
+                    Rèn luyện quy tắc làm tròn số thập phân và phân số tối giản để không bị trừ điểm quy đổi.
+                  </div>
                 </div>
               </div>
             </div>

@@ -21,6 +21,7 @@ import {
 import { MathRenderer } from "./MathRenderer";
 import { TableBuilderModal } from "./TableBuilderModal";
 import { ExamScheduleModal } from "./ExamScheduleModal";
+import { ExamEditorModal } from "./ExamEditorModal";
 import { useToast } from "../context/ToastContext";
 import {
   Upload,
@@ -114,9 +115,10 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   const [isCustomChapter, setIsCustomChapter] = useState<boolean>(false);
   const [importLessonNumber, setImportLessonNumber] = useState<string>("14");
   const [importAttemptNumber, setImportAttemptNumber] = useState<string>("01");
+  const [importDuration, setImportDuration] = useState<number>(90);
   const [importPreview, setImportPreview] = useState<Exam | null>(null);
 
-  // Modal Chỉnh sửa nhanh Lớp, Chương & Mã Đề cho đề thi hiện có
+  // Modal Chỉnh sửa nhanh Lớp, Chương, Mã Đề & Thời gian cho đề thi hiện có
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [editGrade, setEditGrade] = useState<string>("Lớp 12");
   const [editTargetClass, setEditTargetClass] = useState<string>("Tất cả các lớp");
@@ -125,6 +127,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   const [isEditCustomChapter, setIsEditCustomChapter] = useState<boolean>(false);
   const [editLessonNumber, setEditLessonNumber] = useState<string>("01");
   const [editAttemptNumber, setEditAttemptNumber] = useState<string>("01");
+  const [editDuration, setEditDuration] = useState<number>(90);
   const [editCustomCode, setEditCustomCode] = useState<string>("");
 
   // Tính mã đề chuẩn dự kiến cho Import Modal
@@ -332,10 +335,13 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
           setIsCustomChapter(true);
           setCustomChapterInput(parsed.chapter);
         }
+        if (parsed.durationMinutes) {
+          setImportDuration(parsed.durationMinutes);
+        }
         setImportPreview(parsed);
         toast.info(
           "Đã phân tích mã nguồn LaTeX",
-          `Nhận diện được ${parsed.questions.length} câu hỏi (${parsed.grade || "Lớp 12"} • ${parsed.chapter || "Chương mới"}) từ "${file.name}".`
+          `Nhận diện được ${parsed.questions.length} câu hỏi (${parsed.grade || "Lớp 12"} • ${parsed.durationMinutes || 90} phút) từ "${file.name}".`
         );
       }
     };
@@ -345,14 +351,18 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   const handleParseText = () => {
     if (!latexInputText.trim()) return;
     const parsed = parseLatexExam(latexInputText, importTitle);
+    if (parsed.durationMinutes) {
+      setImportDuration(parsed.durationMinutes);
+    }
     const finalChapter = isCustomChapter ? customChapterInput : importChapter;
     parsed.grade = importGrade;
     if (finalChapter) parsed.chapter = finalChapter;
     parsed.code = computedImportCode;
+    parsed.durationMinutes = importDuration || parsed.durationMinutes || 90;
     setImportPreview(parsed);
     toast.info(
       "Phân tích mã nguồn LaTeX",
-      `Đã nhận diện ${parsed.questions.length} câu hỏi thuộc ${parsed.grade} - Mã đề chuẩn: ${parsed.code}.`
+      `Đã nhận diện ${parsed.questions.length} câu hỏi thuộc ${parsed.grade} - Thời gian: ${parsed.durationMinutes} phút - Mã đề chuẩn: ${parsed.code}.`
     );
   };
 
@@ -367,6 +377,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
       grade: importGrade,
       targetClass: importTargetClass,
       chapter: finalChapter || importPreview.chapter,
+      durationMinutes: Number(importDuration) || 90,
     };
     onSaveExam(examToSave);
     setShowImportModal(false);
@@ -374,15 +385,16 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     setImportPreview(null);
     toast.success(
       "Đã lưu đề thi thành công!",
-      `Đề "${examToSave.title}" với Mã đề: ${examToSave.code} đã sẵn sàng giao cho học sinh.`
+      `Đề "${examToSave.title}" (${examToSave.durationMinutes} phút) với Mã đề: ${examToSave.code} đã sẵn sàng giao cho học sinh.`
     );
   };
 
-  // Mở modal sửa nhanh Lớp, Chương & Mã Đề cho 1 đề
+  // Mở modal sửa nhanh Lớp, Chương, Mã Đề & Thời gian làm bài cho 1 đề
   const handleOpenEditMetadata = (exam: Exam) => {
     setEditingExam(exam);
     setEditGrade(exam.grade || "Lớp 12");
     setEditTargetClass(exam.targetClass || "Tất cả các lớp");
+    setEditDuration(exam.durationMinutes || 90);
     const stdChapters = STANDARD_CHAPTERS_BY_GRADE[exam.grade || "Lớp 12"] || [];
     if (exam.chapter && stdChapters.includes(exam.chapter)) {
       setEditChapter(exam.chapter);
@@ -410,7 +422,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     setEditCustomCode(exam.code);
   };
 
-  // Lưu sửa Lớp, Chương & Mã Đề
+  // Lưu sửa Lớp, Chương, Mã Đề & Thời gian làm bài
   const handleSaveEditMetadata = () => {
     if (!editingExam) return;
     const finalChapter = isEditCustomChapter ? editCustomChapter : editChapter;
@@ -427,13 +439,14 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
       grade: editGrade,
       targetClass: editTargetClass,
       chapter: finalChapter || undefined,
+      durationMinutes: Number(editDuration) || 90,
       updatedAt: new Date().toISOString(),
     };
     onSaveExam(updatedExam);
     setEditingExam(null);
     toast.success(
       "Cập nhật đề thi thành công",
-      `Đề "${updatedExam.title}" (Mã: ${updatedExam.code}) đã được cập nhật: ${updatedExam.grade} (${updatedExam.targetClass || "Tất cả các lớp"}) - ${updatedExam.chapter || "Chưa gắn chương"}.`
+      `Đề "${updatedExam.title}" (Mã: ${updatedExam.code} • ${updatedExam.durationMinutes} phút) đã được cập nhật thành công.`
     );
   };
 
@@ -1149,231 +1162,21 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
         )}
       </div>
 
-      {/* ================= MODAL CHỈNH SỬA PHÂN LOẠI LỚP & CHƯƠNG ================= */}
+      {/* ================= MODAL CHỈNH SỬA TOÀN DIỆN ĐỀ THI ================= */}
       {editingExam && (
-        <div
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
-          onClick={() => setEditingExam(null)}
-        >
-          <div
-            className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-lg shadow-xl border border-slate-200 text-slate-800 space-y-4 animate-in fade-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                  <Tag className="w-4 h-4" />
-                </div>
-                <h3 className="font-bold text-base text-slate-900">
-                  Phân loại Lớp & Chương cho Đề thi
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingExam(null)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
-              <div className="font-extrabold text-slate-900 line-clamp-1">
-                {editingExam.title}
-              </div>
-              <div className="text-slate-400 font-medium">Mã đề: {editingExam.code} • {editingExam.questions.length} câu</div>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              {/* Chọn Lớp */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1.5">
-                  1. Chọn Lớp (Khối):
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {STANDARD_GRADES.map((gr) => (
-                    <button
-                      key={gr}
-                      type="button"
-                      onClick={() => {
-                        setEditGrade(gr);
-                        const stds = STANDARD_CHAPTERS_BY_GRADE[gr] || [];
-                        setEditChapter(stds[0] || "");
-                        setIsEditCustomChapter(false);
-                      }}
-                      className={`py-2 px-3 rounded-xl font-bold border text-center transition ${
-                        editGrade === gr
-                          ? "bg-indigo-600 border-indigo-600 text-white shadow-xs"
-                          : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
-                      }`}
-                    >
-                      {gr}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Chọn Lớp cụ thể */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1.5">
-                  2. Áp dụng cho Lớp:
-                </label>
-                <select
-                  value={editTargetClass}
-                  onChange={(e) => setEditTargetClass(e.target.value)}
-                  className="w-full py-2.5 px-3 rounded-xl border border-slate-300 font-bold bg-white text-slate-800 outline-none focus:border-indigo-500"
-                >
-                  <option value="Tất cả các lớp">🏫 Tất cả các lớp trong khối</option>
-                  {STANDARD_CLASSES.map((cls) => (
-                    <option key={cls} value={cls}>
-                      Lớp {cls}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Chọn Chương */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1.5">
-                  3. Chọn Chương / Chủ đề:
-                </label>
-                <select
-                  value={isEditCustomChapter ? "__custom__" : editChapter}
-                  onChange={(e) => {
-                    if (e.target.value === "__custom__") {
-                      setIsEditCustomChapter(true);
-                    } else {
-                      setIsEditCustomChapter(false);
-                      setEditChapter(e.target.value);
-                      // Tự động gợi ý mã chuẩn theo chương mới
-                      const newCode = generateStandardExamCode({
-                        grade: editGrade,
-                        chapter: e.target.value,
-                        lesson: editLessonNumber,
-                        attempt: editAttemptNumber,
-                      });
-                      setEditCustomCode(newCode);
-                    }
-                  }}
-                  className="w-full py-2.5 px-3 rounded-xl border border-slate-300 font-medium bg-white text-slate-800 outline-none focus:border-indigo-500"
-                >
-                  {(STANDARD_CHAPTERS_BY_GRADE[editGrade] || []).map((ch) => (
-                    <option key={ch} value={ch}>
-                      {ch}
-                    </option>
-                  ))}
-                  <option value="__custom__">✍️ Nhập tên Chương tùy chỉnh...</option>
-                </select>
-
-                {isEditCustomChapter && (
-                  <input
-                    type="text"
-                    value={editCustomChapter}
-                    onChange={(e) => setEditCustomChapter(e.target.value)}
-                    placeholder="Nhập tên chương hoặc chủ đề mới..."
-                    className="w-full mt-2 py-2 px-3 rounded-xl border border-slate-300 font-medium outline-none focus:border-indigo-500 text-xs"
-                  />
-                )}
-              </div>
-
-              {/* Thiết lập Mã đề thi theo quy luật [Lớp]-[Chương]-[Bài]-[Lần] */}
-              <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-amber-900 flex items-center gap-1">
-                    <KeyRound className="w-3.5 h-3.5 text-amber-700" />
-                    4. Mã đề thi: [Lớp]-[Chương]-[Bài]-[Lần]
-                  </span>
-                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-md">
-                    Chuẩn GDPT
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      Số thứ tự Bài học:
-                    </label>
-                    <input
-                      type="text"
-                      value={editLessonNumber}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setEditLessonNumber(val);
-                        const code = generateStandardExamCode({
-                          grade: editGrade,
-                          chapter: isEditCustomChapter ? editCustomChapter : editChapter,
-                          lesson: val,
-                          attempt: editAttemptNumber,
-                        });
-                        setEditCustomCode(code);
-                      }}
-                      placeholder="Ví dụ: 14, 02..."
-                      className="w-full py-1.5 px-3 rounded-xl border border-slate-300 bg-white font-mono font-bold text-xs outline-none focus:border-amber-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      Lần kiểm tra:
-                    </label>
-                    <select
-                      value={editAttemptNumber}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setEditAttemptNumber(val);
-                        const code = generateStandardExamCode({
-                          grade: editGrade,
-                          chapter: isEditCustomChapter ? editCustomChapter : editChapter,
-                          lesson: editLessonNumber,
-                          attempt: val,
-                        });
-                        setEditCustomCode(code);
-                      }}
-                      className="w-full py-1.5 px-3 rounded-xl border border-slate-300 bg-white font-mono font-bold text-xs outline-none focus:border-amber-500"
-                    >
-                      <option value="01">Lần 1 (01)</option>
-                      <option value="02">Lần 2 (02)</option>
-                      <option value="03">Lần 3 (03)</option>
-                      <option value="04">Lần 4 (04)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    Mã đề chính thức (Dùng để giao học sinh nhập):
-                  </label>
-                  <input
-                    type="text"
-                    value={editCustomCode}
-                    onChange={(e) => setEditCustomCode(e.target.value.toUpperCase())}
-                    className="w-full py-2 px-3 rounded-xl border-2 border-amber-400 bg-white font-mono font-black text-amber-900 tracking-wider text-sm outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                  <p className="text-[11px] text-amber-800 font-medium mt-1">
-                    💡 Giải nghĩa: {parseStandardExamCode(editCustomCode).explanation}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setEditingExam(null)}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
-              >
-                Hủy
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveEditMetadata}
-                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition"
-              >
-                Lưu phân loại
-              </button>
-            </div>
-          </div>
-        </div>
+        <ExamEditorModal
+          isOpen={!!editingExam}
+          exam={editingExam}
+          onClose={() => setEditingExam(null)}
+          onSave={(updatedExam) => {
+            onSaveExam(updatedExam);
+            setEditingExam(null);
+          }}
+          onDelete={(id) => {
+            onDeleteExam(id);
+            setEditingExam(null);
+          }}
+        />
       )}
 
       {/* ================= MODAL NHẬP LATEX CÓ CHỌN LỚP & CHƯƠNG ================= */}
@@ -1416,9 +1219,9 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 <span>Thiết lập Phân loại Lớp & Chương mục:</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
                 {/* Khối Lớp */}
-                <div>
+                <div className="sm:col-span-3">
                   <label className="block font-bold text-slate-700 mb-1">
                     1. Khối Lớp:
                   </label>
@@ -1442,7 +1245,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 </div>
 
                 {/* Lớp cụ thể */}
-                <div>
+                <div className="sm:col-span-3">
                   <label className="block font-bold text-slate-700 mb-1">
                     2. Lớp áp dụng:
                   </label>
@@ -1461,7 +1264,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 </div>
 
                 {/* Chương */}
-                <div>
+                <div className="sm:col-span-3">
                   <label className="block font-bold text-slate-700 mb-1">
                     3. Chương / Chủ đề:
                   </label>
@@ -1497,7 +1300,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 </div>
 
                 {/* Bài số & Lần thi */}
-                <div>
+                <div className="sm:col-span-3">
                   <label className="block font-bold text-slate-700 mb-1">
                     4. Bài số & Lần thi:
                   </label>
@@ -1521,6 +1324,45 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                       <option value="04">Lần 04</option>
                     </select>
                   </div>
+                </div>
+              </div>
+
+              {/* Hàng Thời gian thực hiện bài kiểm tra */}
+              <div className="pt-2 border-t border-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span className="font-bold text-slate-700">5. Thời gian làm bài:</span>
+                  <div className="relative w-28">
+                    <input
+                      type="number"
+                      min={1}
+                      max={300}
+                      value={importDuration}
+                      onChange={(e) => setImportDuration(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full py-1.5 pl-3 pr-9 rounded-xl border border-indigo-200 bg-white font-extrabold text-indigo-900 text-xs outline-none focus:border-indigo-500 shadow-2xs"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 font-bold">
+                      phút
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] text-slate-500 font-medium mr-1">Mốc nhanh:</span>
+                  {[15, 45, 60, 90, 120].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => setImportDuration(mins)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition border ${
+                        importDuration === mins
+                          ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                          : "bg-white text-slate-600 border-indigo-100 hover:bg-indigo-50"
+                      }`}
+                    >
+                      {mins} phút
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -1656,6 +1498,10 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                     ✓ Đã nhận diện: <b>{importPreview.questions.length} câu hỏi</b> (Mã: {importPreview.code})
                   </span>
                   <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-md font-bold flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      <span>{importDuration} phút</span>
+                    </span>
                     <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md font-bold">
                       {importGrade}
                     </span>
@@ -1690,9 +1536,9 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 type="button"
                 onClick={handleConfirmImport}
                 disabled={!importPreview || importPreview.questions.length === 0}
-                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-30 text-white font-bold text-xs shadow-sm transition"
+                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-30 text-white font-bold text-xs shadow-sm transition flex items-center gap-1.5"
               >
-                Lưu vào Ngân hàng ({importGrade})
+                <span>Lưu vào Ngân hàng ({importGrade} • {importDuration} phút)</span>
               </button>
             </div>
           </div>
@@ -1802,17 +1648,23 @@ const ExamCardItem: React.FC<ExamCardItemProps> = ({
                 Lớp: {exam.targetClass}
               </span>
             )}
+
+            {/* Thời gian làm bài */}
+            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold text-[10px] border border-slate-200 flex items-center gap-1">
+              <Clock className="w-3 h-3 text-indigo-500" />
+              <span>{exam.durationMinutes || 90} phút</span>
+            </span>
           </div>
 
           <div className="flex items-center gap-1">
-            {/* Nút Đổi Lớp & Chương */}
+            {/* Nút Chỉnh sửa toàn diện Đề thi */}
             <button
               type="button"
               onClick={() => onEditMetadata(exam)}
-              className="p-1 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-100 transition"
-              title="Đổi Phân loại Lớp & Chương"
+              className="p-1.5 text-slate-500 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition"
+              title="Chỉnh sửa toàn diện đề thi (Mã đề, Thời gian, Nội dung, Câu hỏi, LaTeX...)"
             >
-              <Tag className="w-3.5 h-3.5" />
+              <Edit className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>

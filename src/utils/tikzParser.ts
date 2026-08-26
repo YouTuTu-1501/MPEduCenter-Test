@@ -71,9 +71,21 @@ export const SUPPORTED_TIKZ_LIBRARIES = [
   "positioning",
   "arrows.meta",
   "shapes.geometric",
+  "shapes.misc",
+  "shapes.symbols",
   "intersections",
   "through",
   "math",
+  "3d",
+  "perspective",
+  "decorations.pathmorphing",
+  "decorations.markings",
+  "backgrounds",
+  "fit",
+  "matrix",
+  "scopes",
+  "chains",
+  "babel",
 ] as const;
 
 /**
@@ -114,7 +126,7 @@ export function detectRequiredTikzPackages(tikzCode: string): string[] {
 
   // 4. Gói calc
   if (
-    /\(\s*\$\s*\(|!\s*[\d.]+\s*!|\)\s*[+-]\s*\(|\bcalc\b/i.test(tikzCode)
+    /\(\s*\$\s*\(|!\s*[\d.]+\s*!|\)\s*[+-]\s*\(|\bcalc\b|\\coordinate[^(]*\(\s*\$/i.test(tikzCode)
   ) {
     detected.add("calc");
   }
@@ -128,14 +140,25 @@ export function detectRequiredTikzPackages(tikzCode: string): string[] {
 
   // 6. Gói positioning
   if (
-    /above\s+of|below\s+of|left\s+of|right\s+of|above\s*=\s*of|below\s*=\s*of|left\s*=\s*of|right\s*=\s*of|node\s*\[[^\]]*midway/i.test(
+    /above\s+of|below\s+of|left\s+of|right\s+of|above\s*=\s*of|below\s*=\s*of|left\s*=\s*of|right\s*=\s*of|node\s*\[[^\]]*midway|node\s*\[[^\]]*pos=/i.test(
       tikzCode
     )
   ) {
     detected.add("positioning");
   }
 
-  // 7. Thư viện tkz-euclide nếu chứa macro tkz
+  // 7. Gói intersections
+  if (/name\s+path|intersection\s+of|name\s+intersections|by=/i.test(tikzCode)) {
+    detected.add("intersections");
+  }
+
+  // 8. Gói 3d / perspective
+  if (/canvas\s+is|3d|perspective|xyz\s+cylindrical/i.test(tikzCode)) {
+    detected.add("3d");
+    detected.add("perspective");
+  }
+
+  // 9. Thư viện tkz-euclide nếu chứa macro tkz
   if (/\\tkz[A-Z][a-zA-Z]+/i.test(tikzCode)) {
     detected.add("tkz-euclide");
   }
@@ -410,11 +433,11 @@ export function expandTikzForeach(code: string): string {
       fullEndIndex = semiIdx + 1;
     }
 
-    // Phân tích danh sách biến: ví dụ "\n" hoặc "\i/\g" hoặc "\x, \y"
-    const varNames = rawVars
-      .split(/[\/,]/)
-      .map((v) => v.trim().replace(/^\\/, ""))
-      .filter((v) => v.length > 0);
+    // Phân tích danh sách biến: hỗ trợ \x\y\t, \a\b, \x/\y/\t, \i, \j, \pos, v.v.
+    const varMatches = rawVars.match(/\\[a-zA-Z0-9_]+|[a-zA-Z0-9_]+/g);
+    const varNames = varMatches
+      ? varMatches.map((v) => v.replace(/^\\/, "").trim()).filter(Boolean)
+      : [];
 
     // Phân tích danh sách giá trị lặp
     const items = parseForeachList(rawList);
@@ -428,24 +451,22 @@ export function expandTikzForeach(code: string): string {
         const vName = varNames[i];
         const vVal = subVals[i] !== undefined ? subVals[i] : subVals[0];
 
-        // Thay thế \vName trong currentBody - chỉ thay thế khi vName là toàn bộ tên macro (không phải tiền tố của \node, \number, v.v.)
-        const regexVar = new RegExp(`\\\\${vName}(?![a-zA-Z])`, "g");
+        // Thay thế macro \vName (ví dụ \x, \y, \t, \a, \b)
+        const regexVar = new RegExp(`\\\\${vName}(?![a-zA-Z0-9_])`, "g");
         currentBody = currentBody.replace(regexVar, vVal);
 
-        // Thay thế cả trường hợp trong dấu ngoặc $\i$
-        const regexVarMath = new RegExp(`\\$?\\\\${vName}\\$?(?![a-zA-Z])`, "g");
+        // Thay thế cả trường hợp trong dấu ngoặc ${\x}$ hoặc $\x$
+        const regexVarMath = new RegExp(`\\$?\\{\\\\${vName}\\}\\$?|\\$?\\\\${vName}\\$?(?![a-zA-Z0-9_])`, "g");
         currentBody = currentBody.replace(regexVarMath, vVal);
+
+        // Thay thế dạng (\vName) hoặc (vName)
+        currentBody = currentBody.replace(new RegExp(`\\(\\\\?${vName}\\)`, "g"), `(${vVal})`);
       }
 
-      // Nếu vòng lặp dạng \foreach \i/\g có chứa nhãn đỉnh và góc định hướng mà trong thân chưa có \node
-      if (
-        varNames.length >= 2 &&
-        subVals.length >= 2 &&
-        !currentBody.includes("\\node") &&
-        !currentBody.includes("node") &&
-        /^[a-zA-Z0-9_]+$/.test(subVals[0])
-      ) {
-        currentBody += `;\n\\node at (${subVals[0]}) [${subVals[1]}]{$${subVals[0]}$};`;
+      // Đảm bảo lệnh kết thúc bằng dấu chấm phẩy nếu cần
+      currentBody = currentBody.trim();
+      if (currentBody && !currentBody.endsWith(";")) {
+        currentBody += ";";
       }
 
       expandedText += "\n" + currentBody + "\n";
@@ -619,6 +640,32 @@ export function parseCoordinateValue(coordStr: string, coordsMap: Map<string, Po
 }
 
 /**
+ * Loại bỏ các khối node[...] {...} và pic[...] {...} lồng nhau ra khỏi chuỗi lệnh TikZ
+ */
+export function stripNodesAndPics(cmd: string): string {
+  let result = "";
+  let i = 0;
+  while (i < cmd.length) {
+    const sub = cmd.substring(i);
+    const nodePicMatch = sub.match(/^(?:node|pic)\b(?:\s*\[[^\]]*\])?\s*(?:\([^\)]*\))?\s*/);
+    if (nodePicMatch) {
+      const matchLen = nodePicMatch[0].length;
+      const braceStart = i + matchLen;
+      if (cmd[braceStart] === "{") {
+        const bal = extractBalancedBraces(cmd, braceStart);
+        if (bal) {
+          i = bal.endIndex + 1;
+          continue;
+        }
+      }
+    }
+    result += cmd[i];
+    i++;
+  }
+  return result;
+}
+
+/**
  * Trích xuất nhãn LaTeX và render qua KaTeX một cách an toàn
  */
 export function renderLatexLabel(rawLabel: string): string {
@@ -638,8 +685,11 @@ export function renderLatexLabel(rawLabel: string): string {
   let mathContent = label;
   if (mathContent.startsWith("$") && mathContent.endsWith("$")) {
     mathContent = mathContent.substring(1, mathContent.length - 1).trim();
+  } else if (mathContent.startsWith("$$") && mathContent.endsWith("$$")) {
+    mathContent = mathContent.substring(2, mathContent.length - 2).trim();
   } else if (mathContent.includes("$")) {
-    mathContent = mathContent.replace(/\$/g, "");
+    // Chỉ loại bỏ dấu $ phân cách, giữ nguyên toàn bộ mã toán (ví dụ: \vec{F_1})
+    mathContent = mathContent.replace(/\$/g, "").trim();
   }
 
   try {
@@ -808,21 +858,33 @@ export function parseTikzToSvg(rawTikzCode: string): string {
   }
 
   // 7. \tkzLabelSegment[pos](A,B){$text$}
-  const tkzLabelSegmentMatches = cleanCode.matchAll(/\\tkzLabelSegment(?:\s*\[([^\]]*)\])?\s*\(([^,]+),([^)]+)\)\s*\{([^}]+)\}/g);
-  for (const match of tkzLabelSegmentMatches) {
-    const pos = (match[1] || "above").trim();
-    const p1 = coordsMap.get(match[2].trim());
-    const p2 = coordsMap.get(match[3].trim());
-    const label = match[4].trim();
-    if (p1 && p2) {
-      nodes.push({
-        id: `seg_${match[2]}_${match[3]}`,
-        x: (p1.x + p2.x) / 2,
-        y: (p1.y + p2.y) / 2,
-        pos,
-        label,
-        isBadge: true,
-      });
+  const tkzLabelSegRegex = /\\tkzLabelSegment(?:\s*\[([^\]]*)\])?\s*\(([^,]+),([^)]+)\)\s*/g;
+  let tlsMatch: RegExpExecArray | null;
+  while ((tlsMatch = tkzLabelSegRegex.exec(cleanCode)) !== null) {
+    const pos = (tlsMatch[1] || "above").trim();
+    const p1Name = tlsMatch[2].trim();
+    const p2Name = tlsMatch[3].trim();
+    const afterMatchIdx = tkzLabelSegRegex.lastIndex;
+
+    const braceStart = cleanCode.indexOf("{", afterMatchIdx);
+    if (braceStart !== -1) {
+      const bal = extractBalancedBraces(cleanCode, braceStart);
+      if (bal) {
+        const label = bal.content.trim();
+        tkzLabelSegRegex.lastIndex = bal.endIndex + 1;
+        const p1 = coordsMap.get(p1Name);
+        const p2 = coordsMap.get(p2Name);
+        if (p1 && p2 && label) {
+          nodes.push({
+            id: `seg_${p1Name}_${p2Name}`,
+            x: (p1.x + p2.x) / 2,
+            y: (p1.y + p2.y) / 2,
+            pos,
+            label,
+            isBadge: true,
+          });
+        }
+      }
     }
   }
 
@@ -877,6 +939,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
   // ==========================================
 
   const commands = cleanCode
+    .replace(/\\usetikzlibrary\{[^}]*\}/gi, "")
+    .replace(/\\usepackage(?:\s*\[[^\]]*\])?\{[^}]*\}/gi, "")
     .replace(/\\begin\{tikzpicture\}(\[[^\]]*\])?/g, "")
     .replace(/\\end\{tikzpicture\}/g, "")
     .replace(/\\begin\{[a-zA-Z*]+\}/g, "")
@@ -913,9 +977,9 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       if (pt) coordsMap.set(name, pt);
     }
 
-    // 3. \draw pic[...] {angle=C--B--A} hoặc \pic ["$30^\circ$", draw, angle radius=6mm] {angle=C--B--A} hoặc {right angle=C--A--H}
+    // 3. \draw pic[...] {angle=C--B--A} hoặc \pic ["$30^\circ$", draw, angle radius=6mm] {angle=C--B--A} hoặc {right angle=c--O--b}
     const picAngleMatches = cmd.matchAll(
-      /pic\s*(?:\[([^\]]*)\])?\s*\{\s*(?:(?:angle|right\s*angle)\s*=\s*)?([a-zA-Z0-9_]+)\s*--\s*([a-zA-Z0-9_]+)\s*--\s*([a-zA-Z0-9_]+)\s*\}/g
+      /pic\s*(?:\[([^\]]*)\])?\s*\{\s*(?:(?:angle|right\s*angle)\s*=\s*)?([a-zA-Z0-9_]+)\s*--\s*([a-zA-Z0-9_]+)\s*--\s*([a-zA-Z0-9_]+)\s*\}/gi
     );
     for (const match of picAngleMatches) {
       const optStr = match[1] || "";
@@ -926,11 +990,14 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
       if (p1 && vertex && p2) {
         const isDouble = optStr.includes("double");
-        let radius = isRightAngle ? 0.3 : 0.55;
-        const radMatch = optStr.match(/(?:angle\s+radius|radius)\s*=\s*([0-9.]+\s*(?:mm|cm|pt)?)/);
+        let radius = isRightAngle ? 0.28 : 0.55;
+        const radMatch = optStr.match(/(?:angle\s+radius|radius)\s*=\s*([0-9.]+\s*(?:mm|cm|pt)?)/i);
         if (radMatch) {
-          radius = evaluateExpr(radMatch[1]);
-          if (radius <= 0) radius = isRightAngle ? 0.3 : 0.55;
+          const rawRadiusVal = evaluateExpr(radMatch[1]);
+          if (rawRadiusVal > 0) {
+            // Nếu người dùng chỉ định angle radius=4 (đơn vị pt/mm mặc định trong TikZ)
+            radius = rawRadiusVal > 1.5 ? Math.min(0.35, rawRadiusVal * 0.07) : rawRadiusVal;
+          }
         }
 
         // Kiểm tra quotes label (gói quotes): ví dụ pic["$30^\circ$", draw]
@@ -984,37 +1051,53 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     }
 
     // 4. Cú pháp \fill[black] (A) circle(1pt)+(-90:4mm)node[scale=1]{$A$}
-    const fillPointLabelMatches = cmd.matchAll(
-      /\\(?:fill|draw)\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)\s*(?:circle\s*\([^)]+\))?\s*\+\s*\(\s*([^:]+)\s*:\s*([^)]+)\s*\)\s*node(?:\s*\[([^\]]*)\])?\s*\{([^}]*)\}/g
-    );
-    for (const match of fillPointLabelMatches) {
-      const ptName = match[2].trim();
-      const angleDeg = evaluateExpr(match[3]);
-      const dist = evaluateExpr(match[4]) || 0.4;
-      const label = match[6].trim();
+    const fillPointLabelRegex = /\\(?:fill|draw)\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)\s*(?:circle\s*\([^)]+\))?\s*\+\s*\(\s*([^:]+)\s*:\s*([^)]+)\s*\)\s*node\b/g;
+    let fplMatch: RegExpExecArray | null;
+    while ((fplMatch = fillPointLabelRegex.exec(cmd)) !== null) {
+      const ptName = fplMatch[2].trim();
+      const angleDeg = evaluateExpr(fplMatch[3]);
+      const dist = evaluateExpr(fplMatch[4]) || 0.4;
+      const afterNodeIdx = fillPointLabelRegex.lastIndex;
 
-      const basePt = parseCoordinateValue(ptName, coordsMap);
-      if (basePt) {
-        explicitDots.set(ptName, basePt);
-        const rad = (angleDeg * Math.PI) / 180;
-        const nodePt: Point2D = {
-          x: basePt.x + dist * Math.cos(rad),
-          y: basePt.y + dist * Math.sin(rad),
-        };
+      let optStr = "";
+      let braceSearchIdx = afterNodeIdx;
+      const optBracketMatch = cmd.substring(afterNodeIdx).match(/^\s*\[([^\]]*)\]/);
+      if (optBracketMatch) {
+        optStr = optBracketMatch[1].trim();
+        braceSearchIdx = afterNodeIdx + optBracketMatch[0].length;
+      }
 
-        let pos = "above";
-        if (angleDeg <= -45 && angleDeg >= -135) pos = "below";
-        else if (angleDeg > 45 && angleDeg < 135) pos = "above";
-        else if (Math.abs(angleDeg) > 135) pos = "left";
-        else if (Math.abs(angleDeg) < 45) pos = "right";
+      const braceStart = cmd.indexOf("{", braceSearchIdx);
+      if (braceStart !== -1) {
+        const bal = extractBalancedBraces(cmd, braceStart);
+        if (bal) {
+          const label = bal.content.trim();
+          fillPointLabelRegex.lastIndex = bal.endIndex + 1;
 
-        nodes.push({
-          id: `lbl_${ptName}_${nodes.length}`,
-          x: nodePt.x,
-          y: nodePt.y,
-          pos,
-          label,
-        });
+          const basePt = parseCoordinateValue(ptName, coordsMap);
+          if (basePt) {
+            explicitDots.set(ptName, basePt);
+            const rad = (angleDeg * Math.PI) / 180;
+            const nodePt: Point2D = {
+              x: basePt.x + dist * Math.cos(rad),
+              y: basePt.y + dist * Math.sin(rad),
+            };
+
+            let pos = "above";
+            if (angleDeg <= -45 && angleDeg >= -135) pos = "below";
+            else if (angleDeg > 45 && angleDeg < 135) pos = "above";
+            else if (Math.abs(angleDeg) > 135) pos = "left";
+            else if (Math.abs(angleDeg) < 45) pos = "right";
+
+            nodes.push({
+              id: `lbl_${ptName}_${nodes.length}`,
+              x: nodePt.x,
+              y: nodePt.y,
+              pos,
+              label,
+            });
+          }
+        }
       }
     }
 
@@ -1116,32 +1199,114 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       }
     }
 
-    // 7. Inline nodes in lines: \draw [<->](6,-.6)--(8,-.6)node[midway,below]{$30\text{m}$};
-    const nodeIdx = cmd.search(/node\s*(?:\[[^\]]*\])?\s*\{/);
-    if (nodeIdx !== -1 && (cmd.includes("--") || cmd.includes("to"))) {
-      const braceStart = cmd.indexOf("{", nodeIdx);
-      if (braceStart !== -1) {
-        const bal = extractBalancedBraces(cmd, braceStart);
-        if (bal) {
-          const label = bal.content.trim();
-          const beforeNode = cmd.substring(0, nodeIdx);
-          const optMatch = cmd.substring(nodeIdx).match(/node\s*\[([^\]]*)\]/);
-          const opt = optMatch ? optMatch[1] : "below";
+    // 7. Inline / path nodes:
+    // Hỗ trợ:
+    // - \path (O)--(a) node[pos=0.5,left]{$\vec{F_1}$} (O)--(b) node[pos=0.5,above]{$\vec{F_2}$} (O)--(c) node[pos=0.5,above left]{$\vec{F_3}$};
+    // - \draw [<->](6,-.6)--(8,-.6)node[midway,below]{$30\text{m}$};
+    // - \draw (A) to node[midway,above]{$\vec{v}$} (B);
+    // - \draw (A) -- (B) node[midway,above]{$\vec{u}$};
+    if (cmd.includes("node") && !cmd.startsWith("\\node")) {
+      let scanIdx = 0;
+      while (scanIdx < cmd.length) {
+        const nodeSub = cmd.substring(scanIdx);
+        const nodeMatch = nodeSub.match(/\bnode\b/);
+        if (!nodeMatch || nodeMatch.index === undefined) break;
 
-          const pointMatches = Array.from(beforeNode.matchAll(/\(([^)]+)\)/g));
-          if (pointMatches.length >= 2) {
-            const p1 = parseCoordinateValue(`(${pointMatches[0][1]})`, coordsMap);
-            const p2 = parseCoordinateValue(`(${pointMatches[1][1]})`, coordsMap);
-            if (p1 && p2 && label) {
-              nodes.push({
-                id: `midway_${nodes.length}`,
-                x: (p1.x + p2.x) / 2,
-                y: (p1.y + p2.y) / 2,
-                pos: opt,
-                label,
-                isBadge: true,
-              });
+        const nodePos = scanIdx + nodeMatch.index;
+        const beforeNode = cmd.substring(0, nodePos).trim();
+        let afterNodeIdx = nodePos + 4; // length of 'node'
+
+        let optStr = "";
+        let braceSearchIdx = afterNodeIdx;
+        const optBracketMatch = cmd.substring(afterNodeIdx).match(/^\s*\[([^\]]*)\]/);
+        if (optBracketMatch) {
+          optStr = optBracketMatch[1].trim();
+          braceSearchIdx = afterNodeIdx + optBracketMatch[0].length;
+        }
+
+        const braceStart = cmd.indexOf("{", braceSearchIdx);
+        if (braceStart === -1) {
+          scanIdx = braceSearchIdx + 1;
+          continue;
+        }
+
+        const bal = extractBalancedBraces(cmd, braceStart);
+        if (!bal) {
+          scanIdx = braceStart + 1;
+          continue;
+        }
+
+        const label = bal.content.trim();
+        const afterBraceIdx = bal.endIndex + 1;
+        scanIdx = afterBraceIdx;
+
+        // Tìm các cặp điểm xung quanh node
+        const prevParens = Array.from(beforeNode.matchAll(/\(([^)]+)\)/g));
+        const nextParens = Array.from(cmd.substring(afterBraceIdx).matchAll(/\(([^)]+)\)/g));
+
+        let posFactor = 0.5;
+        const posMatch = optStr.match(/pos\s*=\s*([0-9.]+)/i);
+        if (posMatch) {
+          posFactor = parseFloat(posMatch[1]) || 0.5;
+        }
+
+        let nodePt: Point2D | null = null;
+
+        // TH 1: Node nằm giữa (P1) -- node (P2) hoặc (P1) to node (P2)
+        if (
+          beforeNode.endsWith("--") ||
+          beforeNode.endsWith("to") ||
+          beforeNode.endsWith("-|") ||
+          beforeNode.endsWith("|-")
+        ) {
+          if (prevParens.length > 0 && nextParens.length > 0) {
+            const p1 = parseCoordinateValue(`(${prevParens[prevParens.length - 1][1]})`, coordsMap);
+            const p2 = parseCoordinateValue(`(${nextParens[0][1]})`, coordsMap);
+            if (p1 && p2) {
+              nodePt = {
+                x: p1.x + (p2.x - p1.x) * posFactor,
+                y: p1.y + (p2.y - p1.y) * posFactor,
+              };
             }
+          }
+        }
+
+        // TH 2: Node nằm sau đường nối: (P1) -- (P2) node[...]
+        if (!nodePt && prevParens.length >= 2) {
+          const lastP2 = prevParens[prevParens.length - 1];
+          const lastP1 = prevParens[prevParens.length - 2];
+          const p1 = parseCoordinateValue(`(${lastP1[1]})`, coordsMap);
+          const p2 = parseCoordinateValue(`(${lastP2[1]})`, coordsMap);
+          if (p1 && p2) {
+            nodePt = {
+              x: p1.x + (p2.x - p1.x) * posFactor,
+              y: p1.y + (p2.y - p1.y) * posFactor,
+            };
+          }
+        }
+
+        // TH 3: Node đặt trực tiếp tại một điểm: (P) node[...]
+        if (!nodePt && prevParens.length >= 1) {
+          const singleP = prevParens[prevParens.length - 1];
+          const p = parseCoordinateValue(`(${singleP[1]})`, coordsMap);
+          if (p) {
+            nodePt = { ...p };
+          }
+        }
+
+        if (nodePt && label) {
+          const isDup = nodes.some(
+            (n) => Math.abs(n.x - nodePt!.x) < 0.05 && Math.abs(n.y - nodePt!.y) < 0.05 && n.label === label
+          );
+          if (!isDup) {
+            nodes.push({
+              id: `path_node_${nodes.length}`,
+              x: nodePt.x,
+              y: nodePt.y,
+              pos: optStr || "above",
+              label,
+              isBadge: optStr.includes("midway"),
+            });
           }
         }
       }
@@ -1175,11 +1340,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
       const drawBody = cmd.replace(/^\\(?:draw|fill|filldraw|path)\s*(\[[^\]]*\])?/, "").trim();
 
-      // Bỏ các node[midway...]{...} và pic[...]
-      const cleanDrawBody = drawBody
-        .replace(/node\s*(?:\[[^\]]*\])?\s*\{[^}]*\}/g, "")
-        .replace(/pic\s*(?:\[[^\]]*\])?\s*\{[^}]*\}/g, "")
-        .trim();
+      // Bỏ các node[midway...]{...} và pic[...] an toàn bằng hàm stripNodesAndPics
+      const cleanDrawBody = stripNodesAndPics(drawBody).trim();
 
       const isCycle = cleanDrawBody.includes("cycle");
 
@@ -1424,28 +1586,28 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       svgElements += `
         <foreignObject 
           id="tikz-node-badge-${nIdx}"
-          x="${(cx + offsetX - 40).toFixed(1)}" 
-          y="${(cy + offsetY - 14).toFixed(1)}" 
-          width="80" 
-          height="28"
+          x="${(cx + offsetX - 45).toFixed(1)}" 
+          y="${(cy + offsetY - 16).toFixed(1)}" 
+          width="90" 
+          height="32"
           style="overflow: visible; pointer-events: none;"
         >
-          <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-800 font-bold text-[12px]">
-            <span class="px-1.5 py-0.5 bg-white rounded border border-slate-200 shadow-2xs">${renderedHtml}</span>
+          <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-800 font-bold text-[13px] whitespace-nowrap leading-none">
+            <span class="px-2 py-0.5 bg-white rounded border border-slate-200 shadow-2xs">${renderedHtml}</span>
           </div>
         </foreignObject>`;
     } else {
       svgElements += `
         <foreignObject 
           id="tikz-node-label-${nIdx}"
-          x="${(cx + offsetX - 28).toFixed(1)}" 
-          y="${(cy + offsetY - 16).toFixed(1)}" 
-          width="56" 
-          height="32"
+          x="${(cx + offsetX - 40).toFixed(1)}" 
+          y="${(cy + offsetY - 18).toFixed(1)}" 
+          width="80" 
+          height="36"
           style="overflow: visible; pointer-events: none;"
         >
-          <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-900 font-bold text-[13px]">
-            <span class="px-1 py-0.2">${renderedHtml}</span>
+          <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-900 font-bold text-[14px] whitespace-nowrap leading-none">
+            <span class="px-1 py-0.5 drop-shadow-xs">${renderedHtml}</span>
           </div>
         </foreignObject>`;
     }

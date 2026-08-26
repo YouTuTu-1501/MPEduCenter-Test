@@ -3,6 +3,17 @@ import { User } from "../types/auth";
 import { StudentSubmission } from "../types/exam";
 import { MathRenderer } from "./MathRenderer";
 import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  Cell,
+  ReferenceLine,
+} from "recharts";
+import {
   History,
   Award,
   Calendar,
@@ -18,6 +29,10 @@ import {
   X,
   FileCheck,
   ChevronRight,
+  Sparkles,
+  Layers,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 
 interface StudentResultHistoryModalProps {
@@ -26,6 +41,50 @@ interface StudentResultHistoryModalProps {
   onClose: () => void;
   submissions: StudentSubmission[];
 }
+
+// Custom Tooltip sang trọng cho biểu đồ cột Recharts
+const CustomScoreProgressTooltip = ({ active, payload }: any) => {
+  if (!active || !payload || !payload.length) return null;
+  const data = payload[0]?.payload;
+  if (!data) return null;
+
+  return (
+    <div className="bg-slate-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-slate-700/80 max-w-xs text-xs space-y-2.5 z-50">
+      <div className="border-b border-slate-700/80 pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold text-[10px] border border-indigo-500/30">
+            Lần thi #{data.attemptIndex}
+          </span>
+          <span className="text-[10px] text-slate-400 font-mono">{data.dateFormatted}</span>
+        </div>
+        <h4 className="font-extrabold text-slate-100 text-sm mt-1 leading-snug">
+          {data.examTitle}
+        </h4>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/60">
+        <div>
+          <span className="text-[10px] text-slate-400 font-bold uppercase block">Tỷ lệ đạt được</span>
+          <span className="text-base font-black text-emerald-400">{data.percentage}%</span>
+        </div>
+        <div>
+          <span className="text-[10px] text-slate-400 font-bold uppercase block">Điểm số</span>
+          <span className="text-base font-black text-amber-300">
+            {data.score}/{data.maxScore}đ
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] text-slate-300 pt-1">
+        <span className="flex items-center gap-1 text-slate-400">
+          <Clock className="w-3.5 h-3.5 text-sky-400" />
+          <span>Thời gian: {data.timeMinutes} phút</span>
+        </span>
+        <span className="text-[10px] text-indigo-300 font-bold">Bấm để xem chi tiết →</span>
+      </div>
+    </div>
+  );
+};
 
 export const StudentResultHistoryModal: React.FC<StudentResultHistoryModalProps> = ({
   user,
@@ -116,6 +175,65 @@ export const StudentResultHistoryModal: React.FC<StudentResultHistoryModalProps>
       return matchSearch && matchScore;
     });
   }, [studentSubmissions, searchQuery, scoreFilter]);
+
+  // Dữ liệu cho biểu đồ cột tiến độ điểm số (% điểm đạt được qua các kỳ kiểm tra)
+  const progressChartData = useMemo(() => {
+    if (studentSubmissions.length === 0) return [];
+
+    // Sắp xếp theo trình tự thời gian tăng dần (từ bài thi đầu tiên tới bài thi mới nhất)
+    const chronological = [...studentSubmissions].sort((a, b) => {
+      const timeA = new Date(a.submittedAt).getTime() || 0;
+      const timeB = new Date(b.submittedAt).getTime() || 0;
+      return timeA - timeB;
+    });
+
+    return chronological.map((sub, index) => {
+      const maxScore = sub.maxScore || 10;
+      const percentage = Number(Math.min(100, Math.max(0, (sub.score / maxScore) * 100)).toFixed(1));
+
+      let color = "#ef4444"; // < 50%
+      let gradeTier = "Chưa đạt";
+      if (percentage >= 80) {
+        color = "#10b981"; // >= 80% (Giỏi/Xuất sắc)
+      } else if (percentage >= 65) {
+        color = "#6366f1"; // 65 - 79% (Khá)
+      } else if (percentage >= 50) {
+        color = "#f59e0b"; // 50 - 64% (Đạt)
+      }
+
+      let dateFormatted = "Gần đây";
+      try {
+        dateFormatted = new Date(sub.submittedAt).toLocaleString("vi-VN", {
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      } catch {}
+
+      const cleanTitle = sub.examTitle || "Đề thi";
+      const shortTitle =
+        cleanTitle.length > 16 ? `${cleanTitle.substring(0, 14)}...` : cleanTitle;
+
+      return {
+        id: sub.id || `sub_${index}`,
+        attemptIndex: index + 1,
+        label: `#${index + 1} (${percentage}%)`,
+        fullLabel: `#${index + 1} - ${shortTitle}`,
+        examTitle: sub.examTitle,
+        examId: sub.examId,
+        score: sub.score,
+        maxScore,
+        percentage,
+        timeMinutes: Math.round((sub.timeSpentSeconds || 0) / 60),
+        dateFormatted,
+        color,
+        submission: sub,
+      };
+    });
+  }, [studentSubmissions]);
+
+  const [isChartExpanded, setIsChartExpanded] = useState<boolean>(true);
 
   if (!isOpen || !user) return null;
 
@@ -227,7 +345,161 @@ export const StudentResultHistoryModal: React.FC<StudentResultHistoryModalProps>
         </div>
 
         {/* Submissions List Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-3 flex-1">
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1">
+          {/* Biểu đồ cột Recharts: Tiến độ điểm số (% Điểm đạt được) qua các kỳ kiểm tra */}
+          {progressChartData.length > 0 && (
+            <div className="bg-gradient-to-b from-slate-50 to-white rounded-3xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold shrink-0 border border-indigo-100 shadow-2xs">
+                    <BarChart2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 flex items-center gap-2">
+                      <span>Biểu Đồ Tiến Độ Điểm Số Qua Các Kỳ Kiểm Tra</span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
+                        % Điểm đạt được
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Tỷ lệ phần trăm điểm đạt được so với điểm tối đa của đề qua các lần thi ({progressChartData.length} kỳ)
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 self-end sm:self-center flex-wrap">
+                  {/* Legend Chú giải màu */}
+                  <div className="flex items-center gap-2 text-[10px] font-bold text-slate-600 flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span>
+                      <span>≥ 80% (Giỏi)</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500"></span>
+                      <span>65-79% (Khá)</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-amber-500"></span>
+                      <span>50-64% (Đạt)</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-rose-500"></span>
+                      <span>&lt; 50%</span>
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsChartExpanded(!isChartExpanded)}
+                    className="text-xs text-slate-500 hover:text-slate-900 p-1 rounded-lg hover:bg-slate-100 transition flex items-center gap-1 font-semibold"
+                    title={isChartExpanded ? "Thu gọn biểu đồ" : "Mở rộng biểu đồ"}
+                  >
+                    {isChartExpanded ? (
+                      <>
+                        <Minimize2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Thu gọn</span>
+                      </>
+                    ) : (
+                      <>
+                        <Maximize2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Mở rộng</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {isChartExpanded && (
+                <div className="pt-1">
+                  <div className="h-64 sm:h-72 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={progressChartData}
+                        margin={{ top: 20, right: 15, left: -10, bottom: 25 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                        <XAxis
+                          dataKey="label"
+                          stroke="#64748b"
+                          tick={{ fontSize: 10, fontWeight: 700, fill: "#475569" }}
+                          interval={0}
+                          angle={-18}
+                          textAnchor="end"
+                          height={38}
+                        />
+                        <YAxis
+                          domain={[0, 100]}
+                          ticks={[0, 25, 50, 75, 100]}
+                          tickFormatter={(val) => `${val}%`}
+                          stroke="#64748b"
+                          tick={{ fontSize: 10, fontWeight: 600, fill: "#64748b" }}
+                        />
+                        <ReferenceLine
+                          y={50}
+                          stroke="#f59e0b"
+                          strokeDasharray="4 4"
+                          label={{
+                            value: "Đạt (50%)",
+                            position: "insideTopRight",
+                            fill: "#d97706",
+                            fontSize: 10,
+                            fontWeight: 700,
+                          }}
+                        />
+                        <ReferenceLine
+                          y={80}
+                          stroke="#10b981"
+                          strokeDasharray="4 4"
+                          label={{
+                            value: "Giỏi (80%)",
+                            position: "insideTopRight",
+                            fill: "#059669",
+                            fontSize: 10,
+                            fontWeight: 700,
+                          }}
+                        />
+                        <Tooltip content={<CustomScoreProgressTooltip />} />
+                        <Bar
+                          dataKey="percentage"
+                          radius={[6, 6, 0, 0]}
+                          maxBarSize={44}
+                          cursor="pointer"
+                          onClick={(entry: any) => {
+                            if (entry && entry.submission) {
+                              setSelectedSubmission(entry.submission);
+                            }
+                          }}
+                        >
+                          {progressChartData.map((entry, index) => (
+                            <Cell
+                              key={`bar-cell-${index}`}
+                              fill={entry.color}
+                              className="hover:opacity-85 transition-opacity"
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 px-1">
+                    <span className="flex items-center gap-1 text-slate-500 font-medium">
+                      💡 <span>Bấm trực tiếp vào cột bất kỳ để mở xem lại đáp án & bài làm chi tiết.</span>
+                    </span>
+                    <span className="font-semibold text-slate-500">
+                      Mới nhất:{" "}
+                      <strong className="text-emerald-600">
+                        {progressChartData[progressChartData.length - 1]?.percentage}%
+                      </strong>{" "}
+                      ({progressChartData[progressChartData.length - 1]?.score}/
+                      {progressChartData[progressChartData.length - 1]?.maxScore}đ)
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {filteredSubmissions.length === 0 ? (
             <div className="py-16 text-center text-slate-400 space-y-2">
               <BookOpen className="w-10 h-10 mx-auto text-slate-300" />
