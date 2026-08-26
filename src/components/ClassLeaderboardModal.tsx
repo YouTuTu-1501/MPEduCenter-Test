@@ -323,15 +323,20 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
     let aggList = Array.from(studentAggMap.values()).map((st) => {
       const avgScore = Number((st.scores.reduce((a, b) => a + b, 0) / st.scores.length).toFixed(2));
       const maxScore = Math.max(...st.scores);
-      const userObj = users.find((u) => u.id === st.studentId || u.name === st.studentName);
+      const userObj = users.find(
+        (u) =>
+          u.id === st.studentId ||
+          u.name.trim().toLowerCase() === st.studentName.trim().toLowerCase() ||
+          (st.subs[0]?.studentEmail && u.email.toLowerCase() === st.subs[0].studentEmail.toLowerCase())
+      );
 
       return {
         studentId: st.studentId,
-        studentName: st.studentName,
-        studentClass: st.studentClass,
+        studentName: userObj?.name || st.studentName,
+        studentClass: userObj?.schoolClass || st.studentClass,
         studentAvatar:
-          st.studentAvatar ||
           userObj?.avatar ||
+          st.studentAvatar ||
           `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(st.studentName)}`,
         avgScore,
         maxScore,

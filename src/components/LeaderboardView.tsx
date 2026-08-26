@@ -275,10 +275,15 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
 
     list.forEach((sub) => {
       const sId = (sub.studentId || sub.studentName || "unknown").trim();
-      const userProfile = users.find((u) => u.id === sId || u.name.toLowerCase() === (sub.studentName || "").toLowerCase());
-      const sName = sub.studentName || userProfile?.name || "Học sinh";
-      const sClass = sub.studentClass || userProfile?.schoolClass || "12A1";
-      const sAvatar = userProfile?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(sId)}`;
+      const userProfile = users.find(
+        (u) =>
+          u.id === sId ||
+          (u.email && sub.studentEmail && u.email.toLowerCase() === sub.studentEmail.toLowerCase()) ||
+          u.name.trim().toLowerCase() === (sub.studentName || "").trim().toLowerCase()
+      );
+      const sName = userProfile?.name || sub.studentName || "Học sinh";
+      const sClass = userProfile?.schoolClass || sub.studentClass || "12A1";
+      const sAvatar = userProfile?.avatar || sub.studentAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(sId)}`;
 
       if (!studentMap.has(sId)) {
         studentMap.set(sId, {

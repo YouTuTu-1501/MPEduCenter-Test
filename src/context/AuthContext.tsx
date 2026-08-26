@@ -90,15 +90,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const { toast } = useToast();
 
   const [users, setUsers] = useState<User[]>(() => {
+    const userMap = new Map<string, User>();
+    // 1. Nạp tất cả tài khoản hệ thống chuẩn
+    INITIAL_USERS.forEach((u) => userMap.set(u.id, u));
+
+    // 2. Nạp dữ liệu từ LocalStorage (giữ lại các chỉnh sửa hoặc tài khoản mới tạo)
     try {
       const saved = localStorage.getItem("mpeducenter_users");
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          parsed.forEach((u: User) => {
+            if (u && u.id) {
+              userMap.set(u.id, u);
+            }
+          });
+        }
       }
     } catch {}
+
+    // 3. Đảm bảo tài khoản thiết bị học sinh luôn hiện diện
     const defaultStudent = getOrCreateDeviceStudent();
-    return [defaultStudent, ...INITIAL_USERS];
+    if (!userMap.has(defaultStudent.id)) {
+      userMap.set(defaultStudent.id, defaultStudent);
+    }
+    return Array.from(userMap.values());
   });
 
   const [currentUserId, setCurrentUserId] = useState<string>(() => {
@@ -121,6 +137,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUsers((prev) => {
           // Bảo vệ các tài khoản đã được tạo/chỉnh sửa trên máy hiện tại
           const map = new Map<string, User>();
+          INITIAL_USERS.forEach((u) => map.set(u.id, u));
           // Thêm các user từ Firestore
           firestoreUsers.forEach((u) => map.set(u.id, u));
           // Giữ lại hoặc ưu tiên tài khoản local nếu chưa có trên Firestore

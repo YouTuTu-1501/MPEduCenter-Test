@@ -41,12 +41,17 @@ export const subscribeUsers = (
   // 1. Nạp tức thì từ bộ nhớ cục bộ nếu có
   try {
     const local = localStorage.getItem("mpeducenter_users");
+    const userMap = new Map<string, User>();
+    INITIAL_USERS.forEach((u) => userMap.set(u.id, u));
     if (local) {
       const parsed = JSON.parse(local);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        callback(parsed);
+        parsed.forEach((u: User) => {
+          if (u && u.id) userMap.set(u.id, u);
+        });
       }
     }
+    callback(Array.from(userMap.values()));
   } catch {}
 
   try {
@@ -61,10 +66,13 @@ export const subscribeUsers = (
           });
           return;
         }
-        const users: User[] = [];
+        const userMap = new Map<string, User>();
+        INITIAL_USERS.forEach((u) => userMap.set(u.id, u));
         snapshot.forEach((docSnap) => {
-          users.push(docSnap.data() as User);
+          const u = docSnap.data() as User;
+          if (u && u.id) userMap.set(u.id, u);
         });
+        const users = Array.from(userMap.values());
         try {
           localStorage.setItem("mpeducenter_users", JSON.stringify(users));
         } catch {}
@@ -212,16 +220,22 @@ export const seedInitialExams = async (): Promise<void> => {
 const SUBMISSIONS_COLLECTION = "submissions";
 
 export const getLocalSubmissions = (): StudentSubmission[] => {
+  const map = new Map<string, StudentSubmission>();
+  initialSampleSubmissions.forEach((s) => map.set(s.id, s));
   try {
     const raw = localStorage.getItem("edutest_submissions");
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        parsed.forEach((s: StudentSubmission) => {
+          if (s && s.id) {
+            map.set(s.id, s);
+          }
+        });
       }
     }
   } catch {}
-  return initialSampleSubmissions;
+  return Array.from(map.values());
 };
 
 export const subscribeSubmissions = (

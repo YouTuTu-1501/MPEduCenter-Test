@@ -26,6 +26,7 @@ import {
   subscribeSubmissions,
   saveSubmissionToFirestore,
   getLocalSubmissions,
+  saveUserToFirestore,
 } from "./services/firestoreService";
 import { RotateCcw, Home, Sparkles } from "lucide-react";
 
@@ -253,16 +254,71 @@ function MainApp() {
     saveSubmissionToFirestore(sub).catch((e) => console.warn(e));
   };
 
+  // Tự động tạo và đồng bộ hồ sơ người dùng nếu học sinh chưa có trong danh bạ users nhưng có bài nộp
+  const autoRegisterUnknownStudent = (
+    studentId: string,
+    studentName: string,
+    matchingSub?: StudentSubmission
+  ): User => {
+    const cleanId = (studentId || `usr_stu_${Date.now()}`).trim();
+    const cleanName = (studentName || "Học sinh").trim();
+    const cleanClass = matchingSub?.studentClass || "12A1";
+    const cleanEmail =
+      matchingSub?.studentEmail ||
+      `${cleanId.toLowerCase().replace(/[^a-z0-9]/g, "") || "student"}@student.vn`;
+    const cleanAvatar =
+      matchingSub?.studentAvatar ||
+      `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanName)}`;
+
+    const newUser: User = {
+      id: cleanId,
+      name: cleanName,
+      email: cleanEmail,
+      password: "password" in { password: "" } ? "123456" : "123456",
+      role: "student",
+      avatar: cleanAvatar,
+      schoolClass: cleanClass,
+      phone: "0900 000 000",
+      status: "active",
+      createdAt: new Date().toISOString().split("T")[0],
+      lastLogin: "Vừa xong",
+      bio: `Học sinh Lớp ${cleanClass} - Hồ sơ tự động tạo từ kết quả bài nộp`,
+    };
+
+    // 1. Đồng bộ lên Firestore
+    saveUserToFirestore(newUser).catch((e) =>
+      console.warn("Lỗi lưu auto-registered user vào Firestore:", e)
+    );
+
+    // 2. Lưu vào LocalStorage cache để Quản lý Tài khoản & Bảng xếp hạng cập nhật tức thì
+    try {
+      const savedUsersStr = localStorage.getItem("mpeducenter_users");
+      const currentUsers: User[] = savedUsersStr ? JSON.parse(savedUsersStr) : [];
+      if (
+        !currentUsers.some(
+          (u) =>
+            u.id === newUser.id ||
+            u.email.toLowerCase() === newUser.email.toLowerCase()
+        )
+      ) {
+        const updatedUsers = [newUser, ...currentUsers];
+        localStorage.setItem("mpeducenter_users", JSON.stringify(updatedUsers));
+      }
+    } catch {}
+
+    return newUser;
+  };
+
   // Mở lịch sử thi của một học sinh cụ thể
   const handleOpenStudentHistory = (studentId: string, studentName: string) => {
-    // Tìm trong danh sách users trước
+    // 1. Kiểm tra đối chiếu với danh sách users hệ thống
     const existingUser = users.find(
       (u) =>
         (u.id && u.id.trim() === studentId.trim()) ||
         (u.name && u.name.toLowerCase().trim() === studentName.toLowerCase().trim())
     );
 
-    // Tìm bài nộp liên quan để trích xuất thêm avatar và lớp chuẩn
+    // 2. Tìm bài nộp liên quan để trích xuất thêm avatar và lớp chuẩn
     const matchingSub = submissions.find(
       (s) =>
         s.studentId === studentId ||
@@ -270,18 +326,10 @@ function MainApp() {
         studentName.toLowerCase().includes(s.studentName.toLowerCase())
     );
 
-    const target: User = existingUser || {
-      id: studentId,
-      name: studentName,
-      email: matchingSub?.studentEmail || `${studentId}@edutest.local`,
-      role: "student" as const,
-      avatar:
-        matchingSub?.studentAvatar ||
-        `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(studentName)}`,
-      schoolClass: matchingSub?.studentClass || "12A1",
-      status: "active" as const,
-      createdAt: "2026-01-01",
-    };
+    // 3. Nếu chưa có trong users nhưng có bài nộp (hoặc click từ BXH), kích hoạt autoRegisterUnknownStudent
+    const target: User =
+      existingUser ||
+      autoRegisterUnknownStudent(studentId, studentName, matchingSub);
 
     setHistoryTargetUser(target);
     setShowHistoryModal(true);
@@ -350,6 +398,7 @@ function MainApp() {
           }}
           onOpenLeaderboard={() => setActiveView("leaderboard")}
           onOpenStudentHistory={handleOpenStudentHistory}
+          users={users}
         />
       )}
 
