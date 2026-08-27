@@ -256,7 +256,7 @@ export const StudentResultHistoryModal: React.FC<StudentResultHistoryModalProps>
                 <span className="font-extrabold text-amber-300">{user.name}</span>
                 <span>•</span>
                 <span className="text-slate-300 font-semibold">
-                  {user.role === "student" ? `Lớp ${user.schoolClass || "12A1"}` : user.email}
+                  {user.role === "student" ? (user.schoolClass ? `Lớp ${user.schoolClass}` : "Học sinh") : user.email}
                 </span>
                 <span>•</span>
                 <span className="text-emerald-300 font-bold">{studentSubmissions.length} lượt thi đã nộp</span>

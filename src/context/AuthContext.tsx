@@ -15,7 +15,7 @@ import {
   seedInitialUsers,
   getDeletedUserIds,
   addDeletedUserId,
-  removeDeletedUserId,
+  syncUserToSubmissions,
 } from "../services/firestoreService";
 
 interface LoginResult {
@@ -32,8 +32,17 @@ interface RegisterData {
   subject?: string;
 }
 
+interface AuthSessionData {
+  userId: string;
+  email?: string;
+  remember: boolean;
+  loginAt: number;
+}
+
+const AUTH_SESSION_KEY = "mpeducenter_auth_session";
+
 interface AuthContextType {
-  currentUser: User;
+  currentUser: User | null;
   users: User[];
   isAdmin: boolean;
   isTeacher: boolean;
@@ -44,8 +53,9 @@ interface AuthContextType {
   setUserRole: (userId: string, newRole: UserRole) => void;
   updateUserPermissions: (userId: string, permissions: PermissionKey[]) => void;
   toggleUserPermission: (userId: string, perm: PermissionKey) => void;
-  login: (email: string, password?: string) => LoginResult;
-  register: (data: RegisterData) => LoginResult;
+  login: (emailOrUsername: string, password?: string, rememberMe?: boolean) => LoginResult;
+  loginAsDemo: (demoRole: "admin" | "teacher" | "student", rememberMe?: boolean) => LoginResult;
+  register: (data: RegisterData, rememberMe?: boolean) => LoginResult;
   logout: () => void;
   addUser: (userData: Omit<User, "id" | "createdAt">) => User;
   addUsersBatch: (newUsersList: Array<Omit<User, "id" | "createdAt">>) => User[];
@@ -63,31 +73,26 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Tạo tài khoản học sinh khách riêng biệt cho từng thiết bị để không bị ghi đè lẫn nhau
-function getOrCreateDeviceStudent(): User {
-  let guestId = "";
+// Lấy thông tin session đã lưu từ localStorage hoặc sessionStorage
+function getSavedSession(): AuthSessionData | null {
   try {
-    guestId = localStorage.getItem("mpeducenter_device_student_id") || "";
-  } catch {}
+    // 1. Kiểm tra localStorage (đã chọn Ghi nhớ đăng nhập)
+    const localSaved = localStorage.getItem(AUTH_SESSION_KEY);
+    if (localSaved) {
+      const parsed = JSON.parse(localSaved);
+      if (parsed && parsed.userId) return parsed;
+    }
 
-  if (!guestId) {
-    guestId = `usr_stu_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    try {
-      localStorage.setItem("mpeducenter_device_student_id", guestId);
-    } catch {}
+    // 2. Kiểm tra sessionStorage (chỉ lưu phiên hiện tại)
+    const sessionSaved = sessionStorage.getItem(AUTH_SESSION_KEY);
+    if (sessionSaved) {
+      const parsed = JSON.parse(sessionSaved);
+      if (parsed && parsed.userId) return parsed;
+    }
+  } catch (e) {
+    console.warn("Lỗi đọc auth session:", e);
   }
-
-  return {
-    id: guestId,
-    name: "Học sinh mới",
-    email: `hocsinh_${guestId.slice(-4)}@student.edutest.vn`,
-    role: "student",
-    schoolClass: "12A1",
-    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(guestId)}`,
-    status: "active",
-    createdAt: new Date().toISOString().split("T")[0],
-    lastLogin: "Vừa xong",
-  };
+  return null;
 }
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -95,93 +100,75 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [users, setUsers] = useState<User[]>(() => {
     const deletedUserIds = getDeletedUserIds();
-    const userMap = new Map<string, User>();
-
-    // 1. Nạp dữ liệu từ LocalStorage trước tiên nếu có
+    
+    // 1. Nạp từ LocalStorage nếu có
     try {
       const saved = localStorage.getItem("mpeducenter_users");
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((u: User) => {
-            if (u && u.id && !deletedUserIds.has(u.id)) {
-              userMap.set(u.id, u);
-            }
-          });
-        }
-      } else {
-        // Chỉ nạp INITIAL_USERS nếu chưa từng có cache
-        INITIAL_USERS.forEach((u) => {
-          if (!deletedUserIds.has(u.id)) {
-            userMap.set(u.id, u);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const validUsers = parsed.filter((u: User) => u && u.id && !deletedUserIds.has(u.id));
+          if (validUsers.length > 0) {
+            return validUsers;
           }
-        });
-      }
-    } catch {
-      INITIAL_USERS.forEach((u) => {
-        if (!deletedUserIds.has(u.id)) {
-          userMap.set(u.id, u);
         }
-      });
-    }
+      }
+    } catch {}
 
-    // 2. Đảm bảo tài khoản thiết bị học sinh luôn hiện diện nếu không bị xóa
-    const defaultStudent = getOrCreateDeviceStudent();
-    if (!deletedUserIds.has(defaultStudent.id) && !userMap.has(defaultStudent.id)) {
-      userMap.set(defaultStudent.id, defaultStudent);
-    }
-    return Array.from(userMap.values());
+    // 2. Nếu hoàn toàn chưa có dữ liệu lưu trước đó, chỉ dùng tài khoản quản trị mặc định
+    return INITIAL_USERS.filter((u) => !deletedUserIds.has(u.id));
   });
 
-  const [currentUserId, setCurrentUserId] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem("mpeducenter_current_user_id");
-      if (saved) return saved;
-    } catch {}
-    // Mặc định tài khoản học sinh riêng của thiết bị này
-    const defaultStudent = getOrCreateDeviceStudent();
-    return defaultStudent.id;
+  // State User ID đăng nhập hiện tại - chỉ lấy từ Session đã lưu, KHÔNG tự động fallback vào bất kỳ ai
+  const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
+    const session = getSavedSession();
+    return session ? session.userId : null;
   });
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
-  // Đồng bộ Firestore theo thời gian thực (Real-time Firestore Subscription)
+  // Đồng bộ Firestore theo thời gian thực
   useEffect(() => {
     const unsubscribe = subscribeUsers((firestoreUsers) => {
       if (firestoreUsers) {
         const deletedUserIds = getDeletedUserIds();
-        const filtered = firestoreUsers.filter((u) => u && u.id && !deletedUserIds.has(u.id));
-        setUsers(filtered);
+        let validUsers = firestoreUsers.filter(
+          (u) => u && u.id && !deletedUserIds.has(u.id)
+        );
+
+        // Đảm bảo tài khoản Quản trị viên youtu1501@gmail.com luôn hiện diện
+        const adminExists = validUsers.some(
+          (u) => u.email.toLowerCase() === "youtu1501@gmail.com" || u.role === "admin"
+        );
+        if (!adminExists) {
+          const rootAdmin = INITIAL_USERS[0];
+          validUsers = [rootAdmin, ...validUsers];
+          saveUserToFirestore(rootAdmin).catch((e) => console.warn(e));
+        }
+
+        setUsers(validUsers);
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // Lưu users vào LocalStorage để cache offline
+  // Lưu cache users vào LocalStorage
   useEffect(() => {
     try {
       localStorage.setItem("mpeducenter_users", JSON.stringify(users));
     } catch {}
   }, [users]);
 
-  // Lưu currentUserId
-  useEffect(() => {
-    try {
-      localStorage.setItem("mpeducenter_current_user_id", currentUserId);
-    } catch {}
-  }, [currentUserId]);
+  // Tìm User tương ứng với currentUserId
+  const currentUser: User | null = currentUserId
+    ? users.find((u) => u.id === currentUserId) || null
+    : null;
 
-  const currentUser =
-    users.find((u) => u.id === currentUserId) ||
-    users.find((u) => u.role === "student") ||
-    users[0] ||
-    INITIAL_USERS[0];
-
-  const isAdmin = currentUser.role === "admin";
-  const isTeacher = currentUser.role === "teacher";
-  const isStudent = currentUser.role === "student";
-  const isAuthenticated = true;
+  const isAuthenticated = !!currentUser && currentUser.status !== "locked";
+  const isAdmin = currentUser?.role === "admin";
+  const isTeacher = currentUser?.role === "teacher";
+  const isStudent = currentUser?.role === "student";
 
   const getUserPermissions = (user: User): PermissionKey[] => {
     const defaultPerms = ROLE_PERMISSIONS[user.role] || [];
@@ -192,11 +179,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const hasPermission = (perm: PermissionKey): boolean => {
+    if (!currentUser) return false;
     const perms = getUserPermissions(currentUser);
     return perms.includes(perm);
   };
 
-  // Cấp đổi vai trò trực tiếp do Admin thực hiện trong bảng Quản trị
+  // Cấp đổi vai trò trực tiếp do Admin thực hiện
   const setUserRole = (userId: string, newRole: UserRole) => {
     const target = users.find((u) => u.id === userId);
     setUsers((prev) =>
@@ -206,7 +194,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ...u,
             role: newRole,
             subject: newRole === "teacher" ? u.subject || "Toán học THPT" : u.subject,
-            schoolClass: newRole === "student" ? u.schoolClass || "12A1" : u.schoolClass,
+            schoolClass: newRole === "student" ? u.schoolClass || "" : u.schoolClass,
           };
           saveUserToFirestore(updated).catch((e) => console.warn(e));
           return updated;
@@ -221,7 +209,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
   };
 
-  // Cập nhật danh sách quyền tùy chỉnh chi tiết cho người dùng
+  // Cập nhật danh sách quyền tùy chỉnh
   const updateUserPermissions = (userId: string, permissions: PermissionKey[]) => {
     const target = users.find((u) => u.id === userId);
     setUsers((prev) =>
@@ -243,7 +231,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
   };
 
-  // Bật/tắt một quyền cụ thể cho một người dùng
+  // Bật/tắt một quyền cụ thể
   const toggleUserPermission = (userId: string, perm: PermissionKey) => {
     const target = users.find((u) => u.id === userId);
     const currentCustom = target?.customPermissions || (target ? ROLE_PERMISSIONS[target.role] : []) || [];
@@ -272,40 +260,103 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
   };
 
-  // Đăng nhập BẮT BUỘC có xác thực Email & Mật khẩu
-  const login = (emailInput: string, passwordInput: string = "123456"): LoginResult => {
-    const cleanEmail = emailInput.trim().toLowerCase();
-    const found = users.find((u) => u.email.toLowerCase() === cleanEmail);
+  // Đăng nhập có kiểm tra xác thực và hỗ trợ "Ghi nhớ đăng nhập" (Remember Me)
+  const login = (
+    emailOrUsername: string,
+    passwordInput: string = "061091",
+    rememberMe: boolean = true
+  ): LoginResult => {
+    const cleanInput = emailOrUsername.trim().toLowerCase();
+    
+    // Đặc biệt: Nếu đăng nhập tài khoản Quản trị viên chính (youtu1501@gmail.com / youtu1501 / admin)
+    const isMasterAdminLogin =
+      cleanInput === "youtu1501@gmail.com" ||
+      cleanInput === "youtu1501" ||
+      cleanInput === "admin" ||
+      cleanInput === "admin@edulink.vn";
+
+    // Tìm theo Email, Username (phần trước @), Tên, hoặc ID
+    let found = users.find((u) => {
+      const emailMatch = u.email.toLowerCase() === cleanInput;
+      const usernamePart = u.email.split("@")[0].toLowerCase();
+      const usernameMatch = usernamePart === cleanInput;
+      const idMatch = u.id.toLowerCase() === cleanInput;
+      const nameMatch = u.name.toLowerCase() === cleanInput;
+      return emailMatch || usernameMatch || idMatch || nameMatch;
+    });
+
+    // Nếu không tìm thấy nhưng là master admin (do chưa đồng bộ kịp), tạo ngay đối tượng admin
+    if (!found && isMasterAdminLogin) {
+      found = INITIAL_USERS[0];
+    }
 
     if (!found) {
       return {
         success: false,
-        message: `Email "${cleanEmail}" chưa được đăng ký trong hệ thống.`,
+        message: `Không tìm thấy tài khoản "${emailOrUsername}". Vui lòng kiểm tra lại Email / Tên đăng nhập hoặc liên hệ Thầy Phương để nhận tài khoản.`,
       };
     }
 
     if (found.status === "locked") {
       return {
         success: false,
-        message: "Tài khoản này đã bị Quản trị viên khóa tạm thời.",
+        message: "Tài khoản này hiện đang bị Quản trị viên khóa tạm thời.",
       };
     }
 
-    // Kiểm tra mật khẩu (nếu user có password thì so khớp, nếu chưa có thì cho qua với pass mặc định 123456)
-    const validPassword = found.password || "123456";
-    if (passwordInput && passwordInput !== validPassword && passwordInput !== "123456") {
+    // Kiểm tra mật khẩu (hỗ trợ cả 061091 và mật khẩu đã lưu)
+    const validPassword = found.password || (isMasterAdminLogin ? "061091" : "123456");
+    const inputPass = passwordInput.trim();
+    const isPasswordValid =
+      inputPass === validPassword ||
+      (isMasterAdminLogin && (inputPass === "061091" || inputPass === "123456")) ||
+      inputPass === "123456";
+
+    if (!isPasswordValid) {
       return {
         success: false,
-        message: "Mật khẩu không chính xác. Vui lòng kiểm tra lại!",
+        message: isMasterAdminLogin
+          ? "Mật khẩu Quản trị viên không chính xác (Mật khẩu: 061091)."
+          : "Mật khẩu không chính xác. Mật khẩu mặc định hệ thống là: 123456",
       };
     }
 
     // Đăng nhập thành công
     const now = "Vừa xong";
-    const updatedUser = { ...found, lastLogin: now };
+    const updatedUser = {
+      ...found,
+      lastLogin: now,
+      password: isMasterAdminLogin ? "061091" : found.password,
+    };
     setCurrentUserId(found.id);
-    
-    setUsers((prev) => prev.map((u) => (u.id === found.id ? updatedUser : u)));
+
+    // Lưu phiên đăng nhập theo tùy chọn Remember Me
+    const sessionData: AuthSessionData = {
+      userId: found.id,
+      email: found.email,
+      remember: rememberMe,
+      loginAt: Date.now(),
+    };
+
+    try {
+      if (rememberMe) {
+        localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(sessionData));
+        sessionStorage.removeItem(AUTH_SESSION_KEY);
+      } else {
+        sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(sessionData));
+        localStorage.removeItem(AUTH_SESSION_KEY);
+      }
+    } catch (e) {
+      console.warn("Lỗi lưu session:", e);
+    }
+
+    setUsers((prev) => {
+      const exists = prev.some((u) => u.id === found!.id);
+      if (exists) {
+        return prev.map((u) => (u.id === found!.id ? updatedUser : u));
+      }
+      return [updatedUser, ...prev];
+    });
     saveUserToFirestore(updatedUser).catch((e) => console.warn(e));
 
     const roleName =
@@ -319,26 +370,43 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: true, message: "Đăng nhập thành công" };
   };
 
+  // Đăng nhập nhanh tài khoản mẫu (Demo Login)
+  const loginAsDemo = (
+    demoRole: "admin" | "teacher" | "student",
+    rememberMe: boolean = true
+  ): LoginResult => {
+    let targetEmail = "youtu1501@gmail.com";
+    let pass = "061091";
+    if (demoRole === "admin") {
+      targetEmail = "youtu1501@gmail.com";
+      pass = "061091";
+    } else if (demoRole === "teacher") {
+      targetEmail = "toan.tran@edulink.vn";
+      pass = "123456";
+    }
+
+    return login(targetEmail, pass, rememberMe);
+  };
+
   // Đăng ký tài khoản học sinh mới
-  const register = (data: RegisterData): LoginResult => {
+  const register = (data: RegisterData, rememberMe: boolean = true): LoginResult => {
     const cleanEmail = data.email.trim().toLowerCase();
     const exists = users.some((u) => u.email.toLowerCase() === cleanEmail);
 
     if (exists) {
       return {
         success: false,
-        message: `Email "${cleanEmail}" đã tồn tại trên hệ thống. Vui lòng chọn Đăng nhập hoặc sử dụng email khác.`,
+        message: `Email "${cleanEmail}" đã tồn tại. Vui lòng đăng nhập hoặc sử dụng email khác.`,
       };
     }
 
-    // Đăng ký công khai luôn gán quyền Học sinh (Student)
     const newUser: User = {
       id: `usr_${Date.now()}`,
       name: data.name.trim(),
       email: cleanEmail,
       password: data.password || "123456",
       role: "student",
-      schoolClass: data.schoolClass || "12A1",
+      schoolClass: data.schoolClass?.trim() || "",
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.name)}`,
       status: "active",
       createdAt: new Date().toISOString().split("T")[0],
@@ -347,6 +415,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setUsers((prev) => [newUser, ...prev]);
     setCurrentUserId(newUser.id);
+
+    const sessionData: AuthSessionData = {
+      userId: newUser.id,
+      email: newUser.email,
+      remember: rememberMe,
+      loginAt: Date.now(),
+    };
+
+    try {
+      if (rememberMe) {
+        localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(sessionData));
+        sessionStorage.removeItem(AUTH_SESSION_KEY);
+      } else {
+        sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(sessionData));
+        localStorage.removeItem(AUTH_SESSION_KEY);
+      }
+    } catch {}
+
     saveUserToFirestore(newUser).catch((e) => console.warn(e));
 
     toast.success(
@@ -357,12 +443,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: true, message: "Đăng ký thành công" };
   };
 
-  // Đăng xuất: chuyển về tài khoản học sinh mặc định và mở modal đăng nhập
+  // Đăng xuất hoàn toàn và đưa về màn hình Đăng Nhập
   const logout = () => {
-    const student = users.find((u) => u.role === "student") || users[0];
-    setCurrentUserId(student.id);
-    toast.info("Đã đăng xuất", "Bạn đã đăng xuất khỏi tài khoản hiện tại.");
-    setShowAuthModal(true);
+    try {
+      localStorage.removeItem(AUTH_SESSION_KEY);
+      localStorage.removeItem("mpeducenter_current_user_id");
+      sessionStorage.removeItem(AUTH_SESSION_KEY);
+    } catch {}
+
+    setCurrentUserId(null);
+    setShowAuthModal(false);
+    setShowProfileModal(false);
+
+    toast.info("Đã đăng xuất", "Bạn đã đăng xuất tài khoản an toàn.");
   };
 
   const addUser = (userData: Omit<User, "id" | "createdAt">): User => {
@@ -376,7 +469,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     setUsers((prev) => [newUser, ...prev]);
     saveUserToFirestore(newUser).catch((e) => console.warn(e));
-    toast.success("Cấp tài khoản thành công", `Tài khoản ${newUser.name} (${newUser.email}) đã được cấp.`);
+    toast.success("Cấp tài khoản thành công", `Tài khoản ${newUser.name} (${newUser.email}) đã được tạo.`);
     return newUser;
   };
 
@@ -405,12 +498,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (u.id === userId) {
           const updated: User = { ...u, avatar: avatarUrl };
           saveUserToFirestore(updated).catch((e) => console.warn(e));
+          syncUserToSubmissions(updated).catch((e) => console.warn(e));
           return updated;
         }
         return u;
       })
     );
-    toast.success("Đổi ảnh đại diện thành công!", "Hình đại diện mới của bạn đã được lưu và cập nhật.");
+    toast.success("Đổi ảnh đại diện thành công!", "Hình đại diện mới của bạn đã được cập nhật.");
   };
 
   const updateUser = (userId: string, partial: Partial<User>) => {
@@ -419,6 +513,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (u.id === userId) {
           const updated = { ...u, ...partial };
           saveUserToFirestore(updated).catch((e) => console.warn(e));
+          syncUserToSubmissions(updated).catch((e) => console.warn(e));
           return updated;
         }
         return u;
@@ -428,7 +523,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteUser = (userId: string) => {
-    if (userId === currentUser.id) {
+    if (currentUser && userId === currentUser.id) {
       toast.error("Không thể xóa", "Bạn không thể tự xóa tài khoản đang đăng nhập hiện tại.");
       return;
     }
@@ -446,9 +541,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteUsersBatch = (userIds: string[]) => {
-    const validIds = userIds.filter((id) => id !== currentUser.id);
+    const validIds = userIds.filter((id) => !currentUser || id !== currentUser.id);
     if (validIds.length === 0) {
-      toast.error("Không thể xóa", "Không có tài khoản hợp lệ để xóa (không thể tự xóa chính mình).");
+      toast.error("Không thể xóa", "Không có tài khoản hợp lệ để xóa.");
       return;
     }
 
@@ -467,12 +562,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     toast.info(
       "Đã xóa tài khoản hàng loạt",
-      `Đã gỡ bỏ vĩnh viễn ${validIds.length} tài khoản khỏi hệ thống và Firebase.`
+      `Đã gỡ bỏ vĩnh viễn ${validIds.length} tài khoản khỏi hệ thống.`
     );
   };
 
   const toggleUserStatus = (userId: string) => {
-    if (userId === currentUser.id) {
+    if (currentUser && userId === currentUser.id) {
       toast.error("Không thể khóa", "Bạn không thể tự khóa tài khoản của chính mình.");
       return;
     }
@@ -500,10 +595,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       localStorage.removeItem("mpeducenter_deleted_users");
       localStorage.removeItem("mpeducenter_users");
-      localStorage.removeItem("mpeducenter_current_user_id");
+      localStorage.removeItem(AUTH_SESSION_KEY);
+      sessionStorage.removeItem(AUTH_SESSION_KEY);
     } catch {}
     setUsers(INITIAL_USERS);
-    setCurrentUserId(INITIAL_USERS[3].id); // Nguyễn Hoàng Nam (Học sinh)
+    setCurrentUserId(null);
     seedInitialUsers().catch((e) => console.warn(e));
     toast.success("Đã khôi phục dữ liệu gốc", "Danh sách tài khoản mẫu 3 cấp đã được thiết lập lại.");
   };
@@ -523,6 +619,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updateUserPermissions,
         toggleUserPermission,
         login,
+        loginAsDemo,
         register,
         logout,
         addUser,

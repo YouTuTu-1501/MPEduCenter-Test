@@ -711,10 +711,5 @@ export const defaultExam004: Exam = {
   ]
 };
 
-// Toàn bộ danh sách đề thi mẫu chuẩn đa lớp và đa chương
-export const initialSampleExams: Exam[] = [
-  defaultExam001,
-  defaultExam002,
-  defaultExam003,
-  defaultExam004,
-];
+// Danh sách đề thi ban đầu (Mặc định trống khi hệ thống mới khởi tạo)
+export const initialSampleExams: Exam[] = [];

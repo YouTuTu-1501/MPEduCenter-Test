@@ -12,7 +12,8 @@ import {
   RotateCcw,
   Check,
 } from "lucide-react";
-import { useFilter, STANDARD_CLASSES_LIST } from "../context/FilterContext";
+import { useFilter } from "../context/FilterContext";
+import { useAuth } from "../context/AuthContext";
 import { SCORE_TIERS } from "../utils/filterUtils";
 import { ROLE_LABELS } from "../types/auth";
 
@@ -27,6 +28,7 @@ export const GlobalFilterDrawer: React.FC<GlobalFilterDrawerProps> = ({
   totalSubmissions,
   totalUsers,
 }) => {
+  const { users } = useAuth();
   const {
     isFilterDrawerOpen,
     closeFilterDrawer,
@@ -50,9 +52,16 @@ export const GlobalFilterDrawer: React.FC<GlobalFilterDrawerProps> = ({
 
   if (!isFilterDrawerOpen) return null;
 
-  const displayClasses = availableClasses && availableClasses.length > 0
-    ? Array.from(new Set([...STANDARD_CLASSES_LIST, ...availableClasses]))
-    : STANDARD_CLASSES_LIST;
+  const displayClasses = React.useMemo(() => {
+    if (availableClasses && availableClasses.length > 0) return availableClasses;
+    const set = new Set<string>();
+    (users || []).forEach((u) => {
+      if (u.schoolClass && u.schoolClass.trim()) {
+        set.add(u.schoolClass.trim());
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
+  }, [availableClasses, users]);
 
   return (
     <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex justify-end animate-fadeIn">
@@ -131,26 +140,32 @@ export const GlobalFilterDrawer: React.FC<GlobalFilterDrawerProps> = ({
             </div>
 
             {/* Chi tiết từng Lớp */}
-            <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-1.5 bg-slate-50 rounded-2xl border border-slate-200">
-              {displayClasses.map((cls) => {
-                const isSel = selectedClassFilter === cls;
-                return (
-                  <button
-                    key={cls}
-                    type="button"
-                    onClick={() => setSelectedClassFilter(cls)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
-                      isSel
-                        ? "bg-amber-500 text-slate-950 font-black shadow-xs"
-                        : "bg-white text-slate-700 hover:bg-amber-50 border border-slate-200"
-                    }`}
-                  >
-                    <span>Lớp {cls}</span>
-                    {isSel && <Check className="w-3 h-3 text-slate-950 stroke-[3]" />}
-                  </button>
-                );
-              })}
-            </div>
+            {displayClasses.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-1.5 bg-slate-50 rounded-2xl border border-slate-200">
+                {displayClasses.map((cls) => {
+                  const isSel = selectedClassFilter === cls;
+                  return (
+                    <button
+                      key={cls}
+                      type="button"
+                      onClick={() => setSelectedClassFilter(cls)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                        isSel
+                          ? "bg-amber-500 text-slate-950 font-black shadow-xs"
+                          : "bg-white text-slate-700 hover:bg-amber-50 border border-slate-200"
+                      }`}
+                    >
+                      <span>Lớp {cls}</span>
+                      {isSel && <Check className="w-3 h-3 text-slate-950 stroke-[3]" />}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-center">
+                <p className="text-xs text-slate-400 italic">Chưa có lớp học nào trong hệ thống</p>
+              </div>
+            )}
           </div>
 
           {/* 2. Dạng thức / Phần thi câu hỏi */}

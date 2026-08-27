@@ -230,7 +230,12 @@ export const deleteUserFromFirestore = async (userId: string): Promise<void> => 
       }
     } catch {}
 
-    // 3. Xóa trên Firestore Database
+    // 3. Xóa các bài làm liên quan của người dùng này để đồng bộ toàn bộ báo cáo
+    try {
+      await purgeUserSubmissions(userId);
+    } catch {}
+
+    // 4. Xóa trên Firestore Database
     const ref = doc(db, USERS_COLLECTION, userId);
     await deleteDoc(ref);
   } catch (err) {
@@ -374,23 +379,208 @@ const SUBMISSIONS_COLLECTION = "submissions";
 
 export const getLocalSubmissions = (): StudentSubmission[] => {
   const deletedSubs = getDeletedSubmissionIds();
+  const deletedUsers = getDeletedUserIds();
   try {
     const raw = localStorage.getItem("edutest_submissions");
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.filter((s: StudentSubmission) => s && s.id && !deletedSubs.has(s.id));
+        return parsed.filter(
+          (s: StudentSubmission) =>
+            s && s.id && !deletedSubs.has(s.id) && (!s.studentId || !deletedUsers.has(s.studentId))
+        );
       }
     }
   } catch {}
-  return initialSampleSubmissions.filter((s) => !deletedSubs.has(s.id));
+  return [];
+};
+
+/**
+ * Xóa sạch 100% kết quả thi (Submissions) trên cả Firestore và LocalStorage
+ */
+export const clearAllSubmissions = async (): Promise<void> => {
+  try {
+    localStorage.removeItem("edutest_submissions");
+    localStorage.removeItem(DELETED_SUBMISSIONS_KEY);
+    const subDocs = await getDocs(collection(db, SUBMISSIONS_COLLECTION));
+    for (const d of subDocs.docs) {
+      await deleteDoc(d.ref).catch(() => {});
+    }
+  } catch (err) {
+    console.warn("Lỗi xóa toàn bộ submissions:", err);
+  }
+};
+
+/**
+ * Quét và loại bỏ vĩnh viễn các bản ghi submission không thuộc về bất kỳ userId nào đang tồn tại
+ * Đồng bộ làm sạch triệt để cả trên Firestore và LocalStorage
+ */
+export const clearOrphanedData = async (existingUsers?: User[]): Promise<void> => {
+  try {
+    const validUserIds = new Set<string>();
+    const validEmails = new Set<string>();
+    const validNames = new Set<string>();
+
+    if (existingUsers && existingUsers.length > 0) {
+      existingUsers.forEach((u) => {
+        if (u) {
+          if (u.id) validUserIds.add(u.id);
+          if (u.email) validEmails.add(u.email.toLowerCase());
+          if (u.name) validNames.add(u.name.trim().toLowerCase());
+        }
+      });
+    } else {
+      // Truy vấn trực tiếp danh sách users từ Firestore và local cache
+      const userDocs = await getDocs(collection(db, USERS_COLLECTION));
+      userDocs.forEach((docSnap) => {
+        validUserIds.add(docSnap.id);
+        const data = docSnap.data() as User;
+        if (data) {
+          if (data.id) validUserIds.add(data.id);
+          if (data.email) validEmails.add(data.email.toLowerCase());
+          if (data.name) validNames.add(data.name.trim().toLowerCase());
+        }
+      });
+
+      try {
+        const local = localStorage.getItem("mpeducenter_users");
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((u: User) => {
+              if (u && u.id) validUserIds.add(u.id);
+              if (u && u.email) validEmails.add(u.email.toLowerCase());
+              if (u && u.name) validNames.add(u.name.trim().toLowerCase());
+            });
+          }
+        }
+      } catch {}
+    }
+
+    const deletedUserIds = getDeletedUserIds();
+
+    // 1. Quét và loại bỏ vĩnh viễn trên Firestore
+    const subDocs = await getDocs(collection(db, SUBMISSIONS_COLLECTION));
+    for (const docSnap of subDocs.docs) {
+      const sub = docSnap.data() as StudentSubmission;
+      const studentId = sub.studentId || (sub as any).userId;
+
+      const hasValidId = studentId && validUserIds.has(studentId) && !deletedUserIds.has(studentId);
+      const hasValidEmail = sub.studentEmail && validEmails.has(sub.studentEmail.toLowerCase());
+      const hasValidName = sub.studentName && validNames.has(sub.studentName.trim().toLowerCase());
+
+      const isBelongingToExistingUser = Boolean(
+        hasValidId || (validUserIds.size === 0 ? false : (hasValidEmail || hasValidName))
+      );
+
+      if (!isBelongingToExistingUser) {
+        addDeletedSubmissionId(docSnap.id);
+        await deleteDoc(docSnap.ref).catch(() => {});
+      }
+    }
+
+    // 2. Dọn dẹp trên LocalStorage
+    try {
+      const raw = localStorage.getItem("edutest_submissions");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((s: StudentSubmission) => {
+            const sid = s.studentId || (s as any).userId;
+            const hasValidId = sid && validUserIds.has(sid) && !deletedUserIds.has(sid);
+            const hasValidEmail = s.studentEmail && validEmails.has(s.studentEmail.toLowerCase());
+            const hasValidName = s.studentName && validNames.has(s.studentName.trim().toLowerCase());
+            return Boolean(hasValidId || (validUserIds.size === 0 ? false : (hasValidEmail || hasValidName)));
+          });
+          localStorage.setItem("edutest_submissions", JSON.stringify(cleaned));
+        }
+      }
+    } catch {}
+  } catch (err) {
+    console.warn("Lỗi khi dọn dẹp submission mồ côi (clearOrphanedData):", err);
+  }
+};
+
+/**
+ * Tự động làm sạch các bài nộp mồ côi (không thuộc về bất kỳ tài khoản học sinh nào hiện có)
+ */
+export const cleanupOrphanedSubmissions = async (validUsers: User[]): Promise<void> => {
+  return clearOrphanedData(validUsers);
+};
+
+export const purgeUserSubmissions = async (userId: string): Promise<void> => {
+  try {
+    const raw = localStorage.getItem("edutest_submissions");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const subsToDelete = parsed.filter(
+          (s: StudentSubmission) => s && (s.studentId === userId)
+        );
+        subsToDelete.forEach((s) => addDeletedSubmissionId(s.id));
+        const remaining = parsed.filter(
+          (s: StudentSubmission) => s && s.studentId !== userId
+        );
+        localStorage.setItem("edutest_submissions", JSON.stringify(remaining));
+
+        for (const sub of subsToDelete) {
+          try {
+            await deleteDoc(doc(db, SUBMISSIONS_COLLECTION, sub.id));
+          } catch {}
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Lỗi xóa bài nộp của người dùng:", err);
+  }
+};
+
+export const syncUserToSubmissions = async (user: User): Promise<void> => {
+  try {
+    const raw = localStorage.getItem("edutest_submissions");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        let hasChanges = false;
+        const updated = parsed.map((s: StudentSubmission) => {
+          if (
+            s.studentId === user.id ||
+            (s.studentEmail && user.email && s.studentEmail.toLowerCase() === user.email.toLowerCase())
+          ) {
+            hasChanges = true;
+            return {
+              ...s,
+              studentId: user.id,
+              studentName: user.name,
+              studentClass: user.schoolClass || s.studentClass,
+              studentEmail: user.email || s.studentEmail,
+              studentAvatar: user.avatar || s.studentAvatar,
+            };
+          }
+          return s;
+        });
+
+        if (hasChanges) {
+          localStorage.setItem("edutest_submissions", JSON.stringify(updated));
+          for (const sub of updated) {
+            if (sub.studentId === user.id) {
+              const cleanSub = cleanForFirestore(sub);
+              await setDoc(doc(db, SUBMISSIONS_COLLECTION, sub.id), cleanSub, { merge: true }).catch(() => {});
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Lỗi đồng bộ thông tin người dùng vào bài nộp:", err);
+  }
 };
 
 export const subscribeSubmissions = (
   callback: (subs: StudentSubmission[]) => void,
   onError?: (error: Error) => void
 ) => {
-  // 1. Nạp tức thì từ LocalStorage hoặc bộ dữ liệu khởi tạo để UI hiển thị ngay lập tức
+  // 1. Nạp từ LocalStorage
   const initialLocal = getLocalSubmissions();
   callback(initialLocal);
 
@@ -400,24 +590,25 @@ export const subscribeSubmissions = (
       q,
       (snapshot) => {
         const currentDeleted = getDeletedSubmissionIds();
+        const currentDeletedUsers = getDeletedUserIds();
         if (snapshot.empty) {
-          const local = getLocalSubmissions();
-          if (local.length > 0) {
-            for (const sub of local) {
-              const cleanSub = cleanForFirestore(sub);
-              setDoc(doc(db, SUBMISSIONS_COLLECTION, sub.id), cleanSub, { merge: true }).catch(() => {});
-            }
-            callback(local);
-          } else {
-            callback([]);
-          }
+          // Khi Database chưa có bài nộp nào, đồng bộ chính xác về 0 lượt thi
+          try {
+            localStorage.setItem("edutest_submissions", JSON.stringify([]));
+          } catch {}
+          callback([]);
           return;
         }
 
         const firestoreSubs: StudentSubmission[] = [];
         snapshot.forEach((docSnap) => {
           const sub = docSnap.data() as StudentSubmission;
-          if (sub && sub.id && !currentDeleted.has(sub.id)) {
+          if (
+            sub &&
+            sub.id &&
+            !currentDeleted.has(sub.id) &&
+            (!sub.studentId || !currentDeletedUsers.has(sub.studentId))
+          ) {
             firestoreSubs.push(sub);
           }
         });
@@ -449,6 +640,7 @@ export const subscribeSubmissions = (
     return () => {};
   }
 };
+
 
 export const saveSubmissionToFirestore = async (
   sub: StudentSubmission
@@ -552,5 +744,68 @@ export const updateLiveRoomInFirestore = async (
     await setDoc(ref, cleanData, { merge: true });
   } catch (err) {
     console.warn("Lỗi cập nhật LiveRoom lên Firestore:", err);
+  }
+};
+
+/**
+ * Xóa sạch 100% dữ liệu cũ (Tài khoản học sinh, bài làm, điểm số, đề thi)
+ * và đưa hệ thống về trạng thái sạch sẽ trên Project mới MPEduCenter-Test.
+ */
+export const wipeAndResetAllData = async (): Promise<void> => {
+  try {
+    // 1. Dọn sạch toàn bộ LocalStorage
+    localStorage.removeItem("mpeducenter_users");
+    localStorage.removeItem("edutest_exams");
+    localStorage.removeItem("edutest_submissions");
+    localStorage.removeItem(DELETED_USERS_KEY);
+    localStorage.removeItem(DELETED_EXAMS_KEY);
+    localStorage.removeItem(DELETED_SUBMISSIONS_KEY);
+
+    // 2. Xóa sạch submissions trên Firestore
+    try {
+      const subDocs = await getDocs(collection(db, SUBMISSIONS_COLLECTION));
+      for (const d of subDocs.docs) {
+        await deleteDoc(d.ref);
+      }
+    } catch (e) {
+      console.warn("Lỗi xóa submissions:", e);
+    }
+
+    // 3. Xóa sạch exams trên Firestore
+    try {
+      const examDocs = await getDocs(collection(db, EXAMS_COLLECTION));
+      for (const d of examDocs.docs) {
+        await deleteDoc(d.ref);
+      }
+    } catch (e) {
+      console.warn("Lỗi xóa exams:", e);
+    }
+
+    // 4. Xóa sạch live rooms
+    try {
+      const roomDocs = await getDocs(collection(db, LIVEROOMS_COLLECTION));
+      for (const d of roomDocs.docs) {
+        await deleteDoc(d.ref);
+      }
+    } catch (e) {
+      console.warn("Lỗi xóa live rooms:", e);
+    }
+
+    // 5. Làm sạch danh sách người dùng và tạo lại duy nhất tài khoản Quản trị viên gốc
+    try {
+      const userDocs = await getDocs(collection(db, USERS_COLLECTION));
+      for (const d of userDocs.docs) {
+        await deleteDoc(d.ref);
+      }
+      const rootAdmin = INITIAL_USERS[0];
+      if (rootAdmin) {
+        const ref = doc(db, USERS_COLLECTION, rootAdmin.id);
+        await setDoc(ref, cleanForFirestore(rootAdmin));
+      }
+    } catch (e) {
+      console.warn("Lỗi reset users:", e);
+    }
+  } catch (err) {
+    console.error("Lỗi xóa sạch dữ liệu:", err);
   }
 };

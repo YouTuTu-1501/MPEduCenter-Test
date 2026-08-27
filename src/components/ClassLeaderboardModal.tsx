@@ -9,6 +9,7 @@ import {
   isScoreInTier,
   extractGradeFromClass,
 } from "../utils/filterUtils";
+import { getDeletedUserIds } from "../services/firestoreService";
 import {
   Trophy,
   Award,
@@ -72,21 +73,70 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
     }
   }, [isOpen, defaultExamId, defaultClassFilter]);
 
-  // Danh sách các lớp thực tế có bài làm hoặc danh mục chuẩn
+  // Đồng bộ hóa toàn bộ danh sách bài nộp với danh sách người dùng thực tế (users)
+  // và loại bỏ vĩnh viễn các học sinh đã bị xóa
+  const syncedSubmissions = useMemo(() => {
+    const deletedUserIds = getDeletedUserIds();
+    const studentUsers = (users || []).filter((u) => u.role === "student" || !u.role);
+    const validUserIds = new Set((users || []).map((u) => u.id));
+    const validEmails = new Set((users || []).map((u) => u.email.toLowerCase()));
+    const validNames = new Set((users || []).map((u) => u.name.trim().toLowerCase()));
+
+    // Nếu hệ thống không có học sinh nào (chỉ có Admin), danh sách bài nộp sẽ là 0
+    if (users && users.length > 0 && studentUsers.length === 0) {
+      return [];
+    }
+
+    return submissions
+      .filter((s) => {
+        if (!s || !s.id) return false;
+        if (s.studentId && deletedUserIds.has(s.studentId)) return false;
+        if (users && users.length > 0) {
+          const isMatched =
+            (s.studentId && validUserIds.has(s.studentId)) ||
+            (s.studentEmail && validEmails.has(s.studentEmail.toLowerCase())) ||
+            (s.studentName && validNames.has(s.studentName.trim().toLowerCase()));
+          if (!isMatched) return false;
+        }
+        return true;
+      })
+      .map((s) => {
+        const matchedUser = users?.find(
+          (u) =>
+            (s.studentId && u.id === s.studentId) ||
+            (u.email && s.studentEmail && u.email.toLowerCase() === s.studentEmail.toLowerCase()) ||
+            (u.name && s.studentName && u.name.trim().toLowerCase() === s.studentName.trim().toLowerCase())
+        );
+        if (matchedUser) {
+          return {
+            ...s,
+            studentId: matchedUser.id,
+            studentName: matchedUser.name,
+            studentClass: matchedUser.schoolClass || s.studentClass || "",
+            studentEmail: matchedUser.email || s.studentEmail,
+            studentAvatar: matchedUser.avatar || s.studentAvatar,
+          };
+        }
+        return s;
+      });
+  }, [submissions, users]);
+
+  // Danh sách các lớp thực tế có bài làm hoặc tài khoản học sinh
   const availableClasses = useMemo(() => {
     const classSet = new Set<string>();
-    STANDARD_CLASSES.forEach((c) => classSet.add(c));
-    submissions.forEach((s) => {
-      if (s.studentClass) classSet.add(s.studentClass);
+    syncedSubmissions.forEach((s) => {
+      if (s.studentClass && s.studentClass.trim()) classSet.add(s.studentClass.trim());
     });
-    users.forEach((u) => {
-      if (u.schoolClass) classSet.add(u.schoolClass);
+    (users || []).forEach((u) => {
+      if (u.schoolClass && u.schoolClass.trim()) {
+        classSet.add(u.schoolClass.trim());
+      }
     });
 
-    const all = Array.from(classSet);
+    const all = Array.from(classSet).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
     if (selectedGrade === "all") return all;
     return all.filter((c) => extractGradeFromClass(c) === selectedGrade || c.startsWith(selectedGrade.replace("Lớp ", "")));
-  }, [submissions, users, selectedGrade]);
+  }, [syncedSubmissions, users, selectedGrade]);
 
   // Danh sách đề thi được lọc theo Khối
   const filteredExamsByGrade = useMemo(() => {
@@ -174,7 +224,7 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
   // Lọc và tính toán bảng xếp hạng
   const leaderboardData = useMemo(() => {
     // 1. Lọc theo Khối lớp
-    let filteredSubs = submissions;
+    let filteredSubs = syncedSubmissions;
     if (selectedGrade !== "all") {
       filteredSubs = filteredSubs.filter((s) => {
         const gradeFromSubClass = extractGradeFromClass(s.studentClass);
@@ -199,7 +249,7 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
     // 3. Lọc theo Lớp
     if (selectedClass !== "all") {
       filteredSubs = filteredSubs.filter((s) => {
-        if (!s.studentClass) return selectedClass === "12A1";
+        if (!s.studentClass) return false;
         if (s.studentClass === selectedClass) return true;
         if (selectedClass === "Lớp 12" && s.studentClass.startsWith("12")) return true;
         if (selectedClass === "Lớp 11" && s.studentClass.startsWith("11")) return true;
@@ -264,7 +314,7 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
         rank: idx + 1,
         studentId: item.studentId,
         studentName: item.studentName,
-        studentClass: item.studentClass || "12A1",
+        studentClass: item.studentClass || "",
         studentAvatar:
           item.studentAvatar ||
           users.find((u) => u.id === item.studentId || u.name === item.studentName)?.avatar ||
@@ -303,7 +353,7 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
         studentAggMap.set(key, {
           studentId: sub.studentId,
           studentName: sub.studentName,
-          studentClass: sub.studentClass || "12A1",
+          studentClass: sub.studentClass || "",
           studentAvatar: sub.studentAvatar,
           scores: [sub.score],
           totalTime: sub.timeSpentSeconds || 0,

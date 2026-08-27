@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import {
@@ -70,21 +70,33 @@ export const UserProfileModal: React.FC = () => {
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<"preset" | "upload" | "dicebear" | "url" | "info">("preset");
-  const [selectedAvatarUrl, setSelectedAvatarUrl] = useState<string>(currentUser.avatar);
+  const [selectedAvatarUrl, setSelectedAvatarUrl] = useState<string>(currentUser?.avatar || "");
   const [customUrlInput, setCustomUrlInput] = useState<string>("");
-  const [diceSeed, setDiceSeed] = useState<string>(currentUser.name || "MathStudent");
+  const [diceSeed, setDiceSeed] = useState<string>(currentUser?.name || "MathStudent");
   const [diceStyle, setDiceStyle] = useState<string>("avataaars");
 
   // Form thông tin cá nhân
-  const [nameInput, setNameInput] = useState<string>(currentUser.name);
-  const [phoneInput, setPhoneInput] = useState<string>(currentUser.phone || "");
-  const [classInput, setClassInput] = useState<string>(currentUser.schoolClass || "12A1");
-  const [subjectInput, setSubjectInput] = useState<string>(currentUser.subject || "Toán học THPT");
-  const [bioInput, setBioInput] = useState<string>(currentUser.bio || "");
+  const [nameInput, setNameInput] = useState<string>(currentUser?.name || "");
+  const [phoneInput, setPhoneInput] = useState<string>(currentUser?.phone || "");
+  const [classInput, setClassInput] = useState<string>(currentUser?.schoolClass || "");
+  const [subjectInput, setSubjectInput] = useState<string>(currentUser?.subject || "Toán học THPT");
+  const [bioInput, setBioInput] = useState<string>(currentUser?.bio || "");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  if (!showProfileModal) return null;
+  useEffect(() => {
+    if (currentUser) {
+      setSelectedAvatarUrl(currentUser.avatar || "");
+      setDiceSeed(currentUser.name || "MathStudent");
+      setNameInput(currentUser.name || "");
+      setPhoneInput(currentUser.phone || "");
+      setClassInput(currentUser.schoolClass || "");
+      setSubjectInput(currentUser.subject || "Toán học THPT");
+      setBioInput(currentUser.bio || "");
+    }
+  }, [currentUser, showProfileModal]);
+
+  if (!showProfileModal || !currentUser) return null;
 
   // Xử lý upload ảnh từ thiết bị
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {

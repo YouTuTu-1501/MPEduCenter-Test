@@ -56,6 +56,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const {
     currentUser,
+    users,
     isAdmin,
     isTeacher,
     isStudent,
@@ -65,6 +66,21 @@ export const Navbar: React.FC<NavbarProps> = ({
   } = useAuth();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const realClasses = React.useMemo(() => {
+    const set = new Set<string>();
+    (users || []).forEach((u) => {
+      if (u.schoolClass && u.schoolClass.trim()) {
+        set.add(u.schoolClass.trim());
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
+  }, [users]);
+
+  const classesGrade12 = realClasses.filter((c) => c.startsWith("12") || c.includes("12"));
+  const classesGrade11 = realClasses.filter((c) => c.startsWith("11") || c.includes("11"));
+  const classesGrade10 = realClasses.filter((c) => c.startsWith("10") || c.includes("10"));
+  const classesOther = realClasses.filter((c) => !classesGrade12.includes(c) && !classesGrade11.includes(c) && !classesGrade10.includes(c));
 
   // Đóng dropdown khi click bên ngoài
   useEffect(() => {
@@ -180,26 +196,38 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="bg-transparent text-xs font-black text-amber-950 focus:outline-none cursor-pointer pr-1 py-0.5"
               title="Chọn lớp để lọc dữ liệu toàn hệ thống"
             >
-              <option value="all">🏫 Tất cả các lớp</option>
-              <optgroup label="Khối 12">
-                <option value="12A1">Lớp 12A1</option>
-                <option value="12A2">Lớp 12A2</option>
-                <option value="12A3">Lớp 12A3</option>
-                <option value="12D1">Lớp 12D1</option>
-                <option value="Lớp 12">Toàn khối 12</option>
-              </optgroup>
-              <optgroup label="Khối 11">
-                <option value="11A1">Lớp 11A1</option>
-                <option value="11A2">Lớp 11A2</option>
-                <option value="11B1">Lớp 11B1</option>
-                <option value="Lớp 11">Toàn khối 11</option>
-              </optgroup>
-              <optgroup label="Khối 10">
-                <option value="10A1">Lớp 10A1</option>
-                <option value="10A2">Lớp 10A2</option>
-                <option value="10D1">Lớp 10D1</option>
-                <option value="Lớp 10">Toàn khối 10</option>
-              </optgroup>
+              <option value="all">🏫 Tất cả các lớp {realClasses.length > 0 ? `(${realClasses.length} lớp)` : ""}</option>
+              {classesGrade12.length > 0 && (
+                <optgroup label="Khối 12">
+                  <option value="Lớp 12">Toàn khối 12</option>
+                  {classesGrade12.map((cls) => (
+                    <option key={cls} value={cls}>Lớp {cls}</option>
+                  ))}
+                </optgroup>
+              )}
+              {classesGrade11.length > 0 && (
+                <optgroup label="Khối 11">
+                  <option value="Lớp 11">Toàn khối 11</option>
+                  {classesGrade11.map((cls) => (
+                    <option key={cls} value={cls}>Lớp {cls}</option>
+                  ))}
+                </optgroup>
+              )}
+              {classesGrade10.length > 0 && (
+                <optgroup label="Khối 10">
+                  <option value="Lớp 10">Toàn khối 10</option>
+                  {classesGrade10.map((cls) => (
+                    <option key={cls} value={cls}>Lớp {cls}</option>
+                  ))}
+                </optgroup>
+              )}
+              {classesOther.length > 0 && (
+                <optgroup label="Lớp khác">
+                  {classesOther.map((cls) => (
+                    <option key={cls} value={cls}>Lớp {cls}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
         )}

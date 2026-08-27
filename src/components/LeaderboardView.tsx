@@ -9,6 +9,7 @@ import {
   isScoreInTier,
   extractGradeFromClass,
 } from "../utils/filterUtils";
+import { getDeletedUserIds } from "../services/firestoreService";
 import {
   Trophy,
   Award,
@@ -101,18 +102,67 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
     }
   }, [rankingMode, activeGradeTab]);
 
-  // Danh sách các lớp thực tế có bài làm hoặc danh mục chuẩn
+  // Đồng bộ hóa toàn bộ danh sách bài nộp với danh sách người dùng thực tế (users)
+  // và loại bỏ vĩnh viễn các học sinh đã bị xóa
+  const syncedSubmissions = useMemo(() => {
+    const deletedUserIds = getDeletedUserIds();
+    const studentUsers = (users || []).filter((u) => u.role === "student" || !u.role);
+    const validUserIds = new Set((users || []).map((u) => u.id));
+    const validEmails = new Set((users || []).map((u) => u.email.toLowerCase()));
+    const validNames = new Set((users || []).map((u) => u.name.trim().toLowerCase()));
+
+    // Nếu hệ thống không có học sinh nào (chỉ có Admin), bảng xếp hạng sẽ là 0
+    if (users && users.length > 0 && studentUsers.length === 0) {
+      return [];
+    }
+
+    return submissions
+      .filter((s) => {
+        if (!s || !s.id) return false;
+        if (s.studentId && deletedUserIds.has(s.studentId)) return false;
+        if (users && users.length > 0) {
+          const isMatched =
+            (s.studentId && validUserIds.has(s.studentId)) ||
+            (s.studentEmail && validEmails.has(s.studentEmail.toLowerCase())) ||
+            (s.studentName && validNames.has(s.studentName.trim().toLowerCase()));
+          if (!isMatched) return false;
+        }
+        return true;
+      })
+      .map((s) => {
+        const matchedUser = users?.find(
+          (u) =>
+            (s.studentId && u.id === s.studentId) ||
+            (u.email && s.studentEmail && u.email.toLowerCase() === s.studentEmail.toLowerCase()) ||
+            (u.name && s.studentName && u.name.trim().toLowerCase() === s.studentName.trim().toLowerCase())
+        );
+        if (matchedUser) {
+          return {
+            ...s,
+            studentId: matchedUser.id,
+            studentName: matchedUser.name,
+            studentClass: matchedUser.schoolClass || s.studentClass || "",
+            studentEmail: matchedUser.email || s.studentEmail,
+            studentAvatar: matchedUser.avatar || s.studentAvatar,
+          };
+        }
+        return s;
+      });
+  }, [submissions, users]);
+
+  // Danh sách các lớp thực tế có bài làm hoặc tài khoản học sinh
   const availableClasses = useMemo(() => {
     const classSet = new Set<string>();
-    STANDARD_CLASSES.forEach((c) => classSet.add(c));
-    submissions.forEach((s) => {
-      if (s.studentClass) classSet.add(s.studentClass);
+    syncedSubmissions.forEach((s) => {
+      if (s.studentClass && s.studentClass.trim()) classSet.add(s.studentClass.trim());
     });
-    users.forEach((u) => {
-      if (u.schoolClass) classSet.add(u.schoolClass);
+    (users || []).forEach((u) => {
+      if (u.schoolClass && u.schoolClass.trim()) {
+        classSet.add(u.schoolClass.trim());
+      }
     });
 
-    const all = Array.from(classSet);
+    const all = Array.from(classSet).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
     const targetGrade = rankingMode === "by_grade" && activeGradeTab !== "compare_all" ? activeGradeTab : selectedGrade;
     if (targetGrade === "all") return all;
     return all.filter(
@@ -120,7 +170,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         extractGradeFromClass(c) === targetGrade ||
         c.startsWith(targetGrade.replace("Lớp ", ""))
     );
-  }, [submissions, users, selectedGrade, rankingMode, activeGradeTab]);
+  }, [syncedSubmissions, users, selectedGrade, rankingMode, activeGradeTab]);
 
   // Danh sách đề thi được lọc theo Khối
   const filteredExamsByGrade = useMemo(() => {
@@ -282,7 +332,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           u.name.trim().toLowerCase() === (sub.studentName || "").trim().toLowerCase()
       );
       const sName = userProfile?.name || sub.studentName || "Học sinh";
-      const sClass = userProfile?.schoolClass || sub.studentClass || "12A1";
+      const sClass = userProfile?.schoolClass || sub.studentClass || "";
       const sAvatar = userProfile?.avatar || sub.studentAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(sId)}`;
 
       if (!studentMap.has(sId)) {
@@ -368,8 +418,8 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   // Dữ liệu bảng xếp hạng chính hiện tại
   const leaderboardData = useMemo(() => {
     const targetGrade = rankingMode === "by_grade" && activeGradeTab !== "compare_all" ? activeGradeTab : selectedGrade;
-    return computeLeaderboardRows(submissions, targetGrade);
-  }, [submissions, exams, selectedExamId, selectedGrade, selectedClass, selectedScoreTier, searchKeyword, sortBy, users, rankingMode, activeGradeTab]);
+    return computeLeaderboardRows(syncedSubmissions, targetGrade);
+  }, [syncedSubmissions, exams, selectedExamId, selectedGrade, selectedClass, selectedScoreTier, searchKeyword, sortBy, users, rankingMode, activeGradeTab]);
 
   // Thống kê bento cho bảng xếp hạng hiện tại
   const currentStats = useMemo(() => {
@@ -399,7 +449,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   const gradeComparisons = useMemo(() => {
     const grades = ["Lớp 12", "Lớp 11", "Lớp 10"];
     return grades.map((g) => {
-      const gRows = computeLeaderboardRows(submissions, g);
+      const gRows = computeLeaderboardRows(syncedSubmissions, g);
       const total = gRows.length;
       if (total === 0) {
         return {

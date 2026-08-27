@@ -13,6 +13,7 @@ import { Exam, StudentSubmission, STANDARD_CLASSES } from "../types/exam";
 import { ExamEditorModal } from "./ExamEditorModal";
 import { useToast } from "../context/ToastContext";
 import { useFilter } from "../context/FilterContext";
+import { wipeAndResetAllData, clearAllSubmissions } from "../services/firestoreService";
 import {
   ShieldCheck,
   Users,
@@ -141,7 +142,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   const [formEmail, setFormEmail] = useState<string>("");
   const [formPassword, setFormPassword] = useState<string>("123456");
   const [formRole, setFormRole] = useState<UserRole>("student");
-  const [formClass, setFormClass] = useState<string>("12A1");
+  const [formClass, setFormClass] = useState<string>("");
   const [formSubject, setFormSubject] = useState<string>("Toán học THPT");
   const [formPhone, setFormPhone] = useState<string>("");
   const [formAvatar, setFormAvatar] = useState<string>("");
@@ -163,11 +164,9 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   >([]);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [isUploadingExcel, setIsUploadingExcel] = useState<boolean>(false);
-  const [batchNamesText, setBatchNamesText] = useState<string>(
-    "Nguyễn Văn An\nTrần Thị Bích\nLê Hoàng Cường\nPhạm Thị Dung\nHoàng Minh Đức\nĐỗ Hải Đăng"
-  );
+  const [batchNamesText, setBatchNamesText] = useState<string>("");
   const [batchRole, setBatchRole] = useState<UserRole>("student");
-  const [batchClass, setBatchClass] = useState<string>("12A1");
+  const [batchClass, setBatchClass] = useState<string>("");
   const [batchSubject, setBatchSubject] = useState<string>("Toán học THPT");
   const [batchPasswordRule, setBatchPasswordRule] = useState<"default" | "random" | "custom">("default");
   const [batchCustomPass, setBatchCustomPass] = useState<string>("123456");
@@ -176,6 +175,12 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   // Modal Xuất phiếu cấp tài khoản (Export Credentials Cards / CSV)
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [exportClassFilter, setExportClassFilter] = useState<string>("all");
+
+  // State các Modal Xác nhận (In-App Confirmations - tránh lỗi confirm() trong iframe)
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [batchDeleteConfirm, setBatchDeleteConfirm] = useState<boolean>(false);
+  const [examToDelete, setExamToDelete] = useState<Exam | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
 
   // Helper chuyển tên tiếng Việt sang email không dấu
   const slugifyVietnamese = (str: string): string => {
@@ -231,10 +236,27 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     const studentCount = users.filter((u) => u.role === "student").length;
     const activeUsers = users.filter((u) => u.status === "active").length;
 
-    const totalSubmissions = submissions.length;
+    const validUserIds = new Set(users.map((u) => u.id));
+    const validEmails = new Set(users.map((u) => u.email.toLowerCase()));
+    const validNames = new Set(users.map((u) => u.name.trim().toLowerCase()));
+
+    // Chỉ tính bài nộp thuộc về học sinh hiện có trong danh sách tài khoản
+    const validSubmissions =
+      studentCount === 0
+        ? []
+        : submissions.filter((s) => {
+            if (!s || !s.id) return false;
+            return (
+              (s.studentId && validUserIds.has(s.studentId)) ||
+              (s.studentEmail && validEmails.has(s.studentEmail.toLowerCase())) ||
+              (s.studentName && validNames.has(s.studentName.trim().toLowerCase()))
+            );
+          });
+
+    const totalSubmissions = validSubmissions.length;
     const avgScore =
       totalSubmissions > 0
-        ? (submissions.reduce((sum, s) => sum + s.score, 0) / totalSubmissions).toFixed(2)
+        ? (validSubmissions.reduce((sum, s) => sum + s.score, 0) / totalSubmissions).toFixed(2)
         : "0.00";
 
     return {
@@ -271,16 +293,15 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     });
   }, [users, roleFilter, statusFilter, adminClassFilter, searchQuery]);
 
-  // Danh sách các lớp thực tế từ người dùng và chuẩn
+  // Danh sách các lớp thực tế từ người dùng
   const userClasses = useMemo(() => {
     const set = new Set<string>();
-    STANDARD_CLASSES.forEach((c) => set.add(c));
     users.forEach((u) => {
       if (u.schoolClass && u.schoolClass.trim()) {
         set.add(u.schoolClass.trim());
       }
     });
-    return Array.from(set);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
   }, [users]);
 
   // Badges bộ lọc đang áp dụng cho bảng Người dùng
@@ -379,7 +400,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     setFormEmail("");
     setFormPassword("123456");
     setFormRole("student");
-    setFormClass("12A1");
+    setFormClass("");
     setFormSubject("Toán học THPT");
     setFormPhone("");
     setFormAvatar("");
@@ -413,7 +434,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     setFormEmail(user.email);
     setFormPassword(user.password || "123456");
     setFormRole(user.role);
-    setFormClass(user.schoolClass || "12A1");
+    setFormClass(user.schoolClass || "");
     setFormSubject(user.subject || "Toán học THPT");
     setFormPhone(user.phone || "");
     setFormAvatar(user.avatar || "");
@@ -1099,16 +1120,18 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                       <option value="Lớp 11">Khối 11 ({users.filter((u) => u.schoolClass?.startsWith("11")).length} hs)</option>
                       <option value="Lớp 10">Khối 10 ({users.filter((u) => u.schoolClass?.startsWith("10")).length} hs)</option>
                     </optgroup>
-                    <optgroup label="Danh sách Lớp học">
-                      {userClasses.map((cls) => {
-                        const cnt = users.filter((u) => u.schoolClass === cls).length;
-                        return (
-                          <option key={cls} value={cls}>
-                            Lớp {cls} {cnt > 0 ? `(${cnt} tài khoản)` : ""}
-                          </option>
-                        );
-                      })}
-                    </optgroup>
+                    {userClasses.length > 0 && (
+                      <optgroup label="Danh sách Lớp học">
+                        {userClasses.map((cls) => {
+                          const cnt = users.filter((u) => u.schoolClass === cls).length;
+                          return (
+                            <option key={cls} value={cls}>
+                              Lớp {cls} {cnt > 0 ? `(${cnt} tài khoản)` : ""}
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
 
@@ -1295,16 +1318,9 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                       toast.error("Không thể xóa", "Bạn không thể tự xóa tài khoản của chính mình.");
                       return;
                     }
-                    if (
-                      confirm(
-                        `Bạn có chắc chắn muốn xóa vĩnh viễn ${validCount} tài khoản đã chọn khỏi hệ thống và Firebase?`
-                      )
-                    ) {
-                      deleteUsersBatch(selectedUserIds);
-                      setSelectedUserIds([]);
-                    }
+                    setBatchDeleteConfirm(true);
                   }}
-                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
                   title="Xóa các tài khoản đã chọn vĩnh viễn"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -1489,7 +1505,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                         <td className="py-3.5 px-4 font-medium text-slate-700">
                           {user.role === "student" ? (
                             <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200 font-bold text-xs">
-                              Lớp {user.schoolClass || "12A1"}
+                              {user.schoolClass ? `Lớp ${user.schoolClass}` : "Chưa xếp lớp"}
                             </span>
                           ) : (
                             <span className="text-slate-700 font-semibold">
@@ -1565,13 +1581,10 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                             {/* Xóa tài khoản */}
                             {!isSelf && (
                               <button
+                                id={`btn-delete-user-${user.id}`}
                                 type="button"
-                                onClick={() => {
-                                  if (confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản "${user.name}"?`)) {
-                                    deleteUser(user.id);
-                                  }
-                                }}
-                                className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition"
+                                onClick={() => setUserToDelete(user)}
+                                className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
                                 title="Xóa tài khoản"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -1693,12 +1706,8 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => {
-                        if (confirm(`Bạn có chắc chắn muốn xóa đề thi "${exam.title}" khỏi hệ thống?`)) {
-                          onDeleteExam(exam.id);
-                        }
-                      }}
-                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition"
+                      onClick={() => setExamToDelete(exam)}
+                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
                       title="Xóa đề thi"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -1789,26 +1798,39 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 </div>
               </div>
 
-              <div className="p-4 rounded-2xl bg-rose-50/60 border border-rose-200 space-y-2">
+              <div className="p-4 rounded-2xl bg-rose-50/60 border border-rose-200 space-y-3">
                 <div className="flex items-center gap-2 text-rose-700 font-bold text-xs">
                   <AlertTriangle className="w-4 h-4 text-rose-600" />
-                  <span>Khu vực Nguy hiểm</span>
+                  <span>Khu vực Nguy hiểm & Quản lý Dữ liệu</span>
                 </div>
                 <p className="text-[11px] text-rose-600">
-                  Khôi phục toàn bộ hệ thống về trạng thái đề thi và tài khoản mặc định ban đầu.
+                  Thực hiện làm sạch lượt làm bài thi hoặc khôi phục toàn bộ hệ thống về cài đặt ban đầu.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (confirm("Bạn có chắc chắn muốn khôi phục toàn bộ hệ thống về cài đặt ban đầu?")) {
-                      localStorage.clear();
-                      window.location.reload();
-                    }
-                  }}
-                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
-                >
-                  Khôi phục toàn bộ dữ liệu gốc
-                </button>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await clearAllSubmissions();
+                        toast.success("Đã xóa sạch lượt thi", "Toàn bộ bài nộp và điểm số đã được đưa về 0.");
+                      } catch {
+                        toast.error("Lỗi", "Không thể xóa bài nộp.");
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Xóa toàn bộ lượt thi (Về 0 lượt)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowResetConfirm(true)}
+                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Khôi phục toàn bộ dữ liệu gốc</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1854,7 +1876,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                   <p className="text-xs text-slate-400">
                     {permissionTargetUser.email} •{" "}
                     {permissionTargetUser.role === "student"
-                      ? `Lớp ${permissionTargetUser.schoolClass || "12A1"}`
+                      ? permissionTargetUser.schoolClass ? `Lớp ${permissionTargetUser.schoolClass}` : "Chưa xếp lớp"
                       : permissionTargetUser.subject || "Toán THPT"}
                   </p>
                 </div>
@@ -2773,8 +2795,9 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                   className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="all">Tất cả ({users.length} tài khoản)</option>
-                  <option value="12A1">Lớp 12A1</option>
-                  <option value="12A2">Lớp 12A2</option>
+                  {userClasses.map((c) => (
+                    <option key={c} value={c}>Lớp {c}</option>
+                  ))}
                   <option value="teacher">Chỉ Giáo viên</option>
                   <option value="student">Chỉ Học sinh</option>
                 </select>
@@ -2909,6 +2932,210 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition text-xs"
               >
                 Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL XÁC NHẬN XÓA TÀI KHOẢN ĐƠN LẺ */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-5">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-3 bg-rose-50 rounded-2xl border border-rose-100">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Xác nhận xóa tài khoản</h3>
+                <p className="text-xs text-slate-500">Hành động này không thể hoàn tác</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
+              <div className="flex items-center gap-3">
+                <img
+                  src={userToDelete.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userToDelete.name)}`}
+                  alt={userToDelete.name}
+                  className="w-10 h-10 rounded-xl object-cover bg-slate-200 border border-slate-200"
+                />
+                <div>
+                  <div className="font-bold text-sm text-slate-900">{userToDelete.name}</div>
+                  <div className="text-xs text-slate-500">{userToDelete.email}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-200/60 text-xs">
+                <span className="text-slate-500 font-medium">Vai trò:</span>
+                <span className="font-bold text-slate-700">
+                  {userToDelete.role === "admin" ? "Quản trị viên" : userToDelete.role === "teacher" ? "Giáo viên" : "Học sinh"}
+                </span>
+                {userToDelete.schoolClass && (
+                  <>
+                    <span className="text-slate-300">•</span>
+                    <span className="text-slate-500 font-medium">Lớp:</span>
+                    <span className="font-bold text-indigo-600">{userToDelete.schoolClass}</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản <strong className="text-slate-900">{userToDelete.name}</strong>? Toàn bộ thông tin tài khoản và phân quyền sẽ bị gỡ bỏ khỏi hệ thống.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setUserToDelete(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                id="btn-confirm-delete-user"
+                type="button"
+                onClick={() => {
+                  const idToDelete = userToDelete.id;
+                  deleteUser(idToDelete);
+                  setUserToDelete(null);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-sm flex items-center gap-2 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác nhận xóa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL XÁC NHẬN XÓA HÀNG LOẠT */}
+      {batchDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-5">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-3 bg-rose-50 rounded-2xl border border-rose-100">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Xóa hàng loạt tài khoản</h3>
+                <p className="text-xs text-slate-500">Xóa đồng thời nhiều tài khoản đã chọn</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Bạn có chắc chắn muốn xóa vĩnh viễn <strong className="text-rose-600 font-bold">{selectedUserIds.filter(id => id !== currentUser.id).length}</strong> tài khoản đã chọn? Dữ liệu người dùng sẽ được gỡ bỏ hoàn toàn.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setBatchDeleteConfirm(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                id="btn-confirm-delete-batch-users"
+                type="button"
+                onClick={() => {
+                  deleteUsersBatch(selectedUserIds);
+                  setSelectedUserIds([]);
+                  setBatchDeleteConfirm(false);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-sm flex items-center gap-2 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác nhận xóa tất cả</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL XÁC NHẬN XÓA ĐỀ THI */}
+      {examToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-5">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-3 bg-rose-50 rounded-2xl border border-rose-100">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Xác nhận xóa đề thi</h3>
+                <p className="text-xs text-slate-500">Hành động này không thể hoàn tác</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Bạn có chắc chắn muốn xóa đề thi <strong className="text-slate-900">{examToDelete.title}</strong> khỏi hệ thống?
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setExamToDelete(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                id="btn-confirm-delete-exam"
+                type="button"
+                onClick={() => {
+                  onDeleteExam(examToDelete.id);
+                  setExamToDelete(null);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-sm flex items-center gap-2 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xóa đề thi</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL XÁC NHẬN KHÔI PHỤC DỮ LIỆU GỐC */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-5">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-3 bg-rose-50 rounded-2xl border border-rose-100">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Khôi phục dữ liệu gốc</h3>
+                <p className="text-xs text-slate-500">Khu vực nhạy cảm</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Bạn có chắc chắn muốn khôi phục toàn bộ hệ thống về cài đặt ban đầu? Toàn bộ phiên lưu trữ cục bộ sẽ được dọn dẹp và trang sẽ được tải lại.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowResetConfirm(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                id="btn-confirm-reset-system"
+                type="button"
+                onClick={async () => {
+                  try {
+                    await wipeAndResetAllData();
+                  } catch {}
+                  localStorage.clear();
+                  window.location.reload();
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-sm flex items-center gap-2 cursor-pointer"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Xác nhận khôi phục & Xóa sạch</span>
               </button>
             </div>
           </div>

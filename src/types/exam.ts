@@ -205,18 +205,7 @@ export const checkExamAccessStatus = (exam: Exam): ExamAccessStatus => {
 // Cấu trúc danh mục Khối Lớp và Lớp học chuẩn
 export const STANDARD_GRADES = ["Lớp 12", "Lớp 11", "Lớp 10"] as const;
 
-export const STANDARD_CLASSES = [
-  "12A1",
-  "12A2",
-  "12A3",
-  "12D1",
-  "11A1",
-  "11A2",
-  "11B1",
-  "10A1",
-  "10A2",
-  "10D1",
-] as const;
+export const STANDARD_CLASSES: readonly string[] = [];
 
 export const STANDARD_CHAPTERS_BY_GRADE: Record<string, string[]> = {
   "Lớp 12": [

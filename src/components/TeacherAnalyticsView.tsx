@@ -9,6 +9,7 @@ import {
   isScoreInTier,
 } from "../utils/filterUtils";
 import { useFilter } from "../context/FilterContext";
+import { getDeletedUserIds } from "../services/firestoreService";
 import {
   BarChart,
   Bar,
@@ -261,28 +262,78 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     );
   }, [isAllExamsMode, selectedExamFilter, allExams, exam]);
 
-  // Danh sách các lớp thực tế có bài làm hoặc lớp chuẩn
+  // Đồng bộ hóa toàn bộ danh sách bài nộp với danh sách người dùng thực tế (users)
+  // và loại bỏ vĩnh viễn các học sinh đã bị xóa
+  const syncedSubmissions = useMemo(() => {
+    const deletedUserIds = getDeletedUserIds();
+    const studentUsers = (users || []).filter((u) => u.role === "student" || !u.role);
+    const validUserIds = new Set((users || []).map((u) => u.id));
+    const validEmails = new Set((users || []).map((u) => u.email.toLowerCase()));
+    const validNames = new Set((users || []).map((u) => u.name.trim().toLowerCase()));
+
+    // Nếu hệ thống không có học sinh nào (chỉ có Admin), danh sách bài nộp sẽ là 0
+    if (users && users.length > 0 && studentUsers.length === 0) {
+      return [];
+    }
+
+    return submissions
+      .filter((s) => {
+        if (!s || !s.id) return false;
+        if (s.studentId && deletedUserIds.has(s.studentId)) return false;
+        if (users && users.length > 0) {
+          const isMatched =
+            (s.studentId && validUserIds.has(s.studentId)) ||
+            (s.studentEmail && validEmails.has(s.studentEmail.toLowerCase())) ||
+            (s.studentName && validNames.has(s.studentName.trim().toLowerCase()));
+          if (!isMatched) return false;
+        }
+        return true;
+      })
+      .map((s) => {
+        const matchedUser = users?.find(
+          (u) =>
+            (s.studentId && u.id === s.studentId) ||
+            (u.email && s.studentEmail && u.email.toLowerCase() === s.studentEmail.toLowerCase()) ||
+            (u.name && s.studentName && u.name.trim().toLowerCase() === s.studentName.trim().toLowerCase())
+        );
+        if (matchedUser) {
+          return {
+            ...s,
+            studentId: matchedUser.id,
+            studentName: matchedUser.name,
+            studentClass: matchedUser.schoolClass || s.studentClass || "",
+            studentEmail: matchedUser.email || s.studentEmail,
+            studentAvatar: matchedUser.avatar || s.studentAvatar,
+          };
+        }
+        return s;
+      });
+  }, [submissions, users]);
+
+  // Danh sách các lớp thực tế có bài làm hoặc tài khoản học sinh
   const availableClasses = useMemo(() => {
     const classSet = new Set<string>();
-    STANDARD_CLASSES.forEach((c) => classSet.add(c));
-    submissions.forEach((s) => {
-      if (s.studentClass) classSet.add(s.studentClass);
+    syncedSubmissions.forEach((s) => {
+      if (s.studentClass && s.studentClass.trim()) classSet.add(s.studentClass.trim());
     });
-    return Array.from(classSet);
-  }, [submissions]);
+    (users || []).forEach((u) => {
+      if (u.schoolClass && u.schoolClass.trim()) classSet.add(u.schoolClass.trim());
+    });
+    return Array.from(classSet).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
+  }, [syncedSubmissions, users]);
 
   // 1. Lọc theo Đề thi
   const filteredSubmissionsByExam = useMemo(() => {
-    if (isAllExamsMode) return submissions;
+    if (isAllExamsMode) return syncedSubmissions;
     const targetExam = activeExam || exam;
-    return submissions.filter((s) => {
+    return syncedSubmissions.filter((s) => {
       return (
         s.examId === targetExam.id ||
         s.examId === targetExam.code ||
         (!!s.examTitle && !!targetExam.title && s.examTitle.trim().toLowerCase() === targetExam.title.trim().toLowerCase())
       );
     });
-  }, [submissions, isAllExamsMode, activeExam, exam]);
+  }, [syncedSubmissions, isAllExamsMode, activeExam, exam]);
 
   // 2. Lọc theo Lớp được Admin/Giáo viên chọn
   const filteredSubmissionsByClass = useMemo(() => {
@@ -367,8 +418,8 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
 
   // 1. Toàn bộ bài làm của các học sinh thuộc lớp đang chọn (không giới hạn ở 1 đề thi)
   const crossExamSubmissions = useMemo(() => {
-    if (activeClass === "all") return submissions;
-    return submissions.filter((sub) => {
+    if (activeClass === "all") return syncedSubmissions;
+    return syncedSubmissions.filter((sub) => {
       if (!sub.studentClass) return true;
       if (sub.studentClass === activeClass) return true;
       if (activeClass === "Lớp 12" && sub.studentClass.startsWith("12")) return true;
@@ -376,7 +427,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
       if (activeClass === "Lớp 10" && sub.studentClass.startsWith("10")) return true;
       return false;
     });
-  }, [submissions, activeClass]);
+  }, [syncedSubmissions, activeClass]);
 
   // 2. Danh sách tất cả các đề thi theo trình tự thời gian
   const chronologicalExams = useMemo(() => {
@@ -392,8 +443,8 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
       });
     });
 
-    // Thêm các đề có trong submissions nhưng chưa có trong allExams
-    submissions.forEach((s) => {
+    // Thêm các đề có trong syncedSubmissions nhưng chưa có trong allExams
+    syncedSubmissions.forEach((s) => {
       if (s.examId && !examMap.has(s.examId)) {
         examMap.set(s.examId, {
           id: s.examId,
@@ -405,7 +456,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     });
 
     return Array.from(examMap.values()).sort((a, b) => a.orderDate - b.orderDate);
-  }, [allExams, submissions]);
+  }, [allExams, syncedSubmissions]);
 
   // 3. Danh sách học sinh cùng tiến độ qua các đề thi
   const studentsProgressSummary = useMemo(() => {
@@ -423,12 +474,11 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     crossExamSubmissions.forEach((sub) => {
       const sId = sub.studentId || sub.studentName;
       if (!studentMap.has(sId)) {
-        const matchingUser = users.find((u) => u.id === sId || u.name === sub.studentName);
         studentMap.set(sId, {
           studentId: sId,
           studentName: sub.studentName,
-          studentClass: matchingUser?.schoolClass || sub.studentClass || "12A1",
-          studentAvatar: matchingUser?.avatar || sub.studentAvatar,
+          studentClass: sub.studentClass || "",
+          studentAvatar: sub.studentAvatar,
           submissions: [],
         });
       }
@@ -459,7 +509,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     });
 
     return summaryList.sort((a, b) => b.totalExamsTaken - a.totalExamsTaken || b.latestScore - a.latestScore);
-  }, [crossExamSubmissions, users]);
+  }, [crossExamSubmissions]);
 
   // Học sinh đang được chọn theo dõi tiến bộ
   const activeProgressStudent = useMemo(() => {
@@ -467,6 +517,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     const found = studentsProgressSummary.find((s) => s.studentId === selectedProgressStudentId);
     return found || studentsProgressSummary[0];
   }, [studentsProgressSummary, selectedProgressStudentId]);
+
 
   // 4. Dữ liệu chuẩn hóa cho Recharts Line Chart
   const scoreProgressChartData = useMemo(() => {
@@ -666,7 +717,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
   const handleExportCSV = () => {
     let csv = "\uFEFFSBD,Họ và tên,Lớp,Điểm tổng,Phần I,Phần II,Phần III,Phần IV,Thời gian nộp\n";
     filteredSubmissionsByClass.forEach((s) => {
-      csv += `"${s.studentId}","${s.studentName}","${s.studentClass || "12A1"}",${s.score},${s.partScores.part_1.earned},${s.partScores.part_2.earned},${s.partScores.part_3.earned},${s.partScores.part_4.earned},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
+      csv += `"${s.studentId}","${s.studentName}","${s.studentClass || ""}",${s.score},${s.partScores.part_1.earned},${s.partScores.part_2.earned},${s.partScores.part_3.earned},${s.partScores.part_4.earned},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -1036,13 +1087,21 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                       <select
                         value={activeProgressStudent?.studentId || ""}
                         onChange={(e) => setSelectedProgressStudentId(e.target.value)}
-                        className="flex-1 md:w-64 px-3 py-2 rounded-xl bg-white border border-slate-300 font-bold text-xs text-slate-900 shadow-2xs outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                        disabled={studentsProgressSummary.length === 0}
+                        className="flex-1 md:w-64 px-3 py-2 rounded-xl bg-white border border-slate-300 font-bold text-xs text-slate-900 shadow-2xs outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:bg-slate-100 disabled:text-slate-400"
                       >
-                        {studentsProgressSummary.map((st) => (
-                          <option key={st.studentId} value={st.studentId}>
-                            {st.studentName} ({st.studentClass}) - {st.totalExamsTaken} bài thi
-                          </option>
-                        ))}
+                        {studentsProgressSummary.length === 0 ? (
+                          <option value="">Chưa có dữ liệu học sinh</option>
+                        ) : (
+                          studentsProgressSummary.map((st) => {
+                            const cleanName = st.studentName.replace(/\s*-\s*\d{1,2}[A-Z]\d*/, "");
+                            return (
+                              <option key={st.studentId} value={st.studentId}>
+                                {cleanName} ({st.studentClass}) - {st.totalExamsTaken} bài thi
+                              </option>
+                            );
+                          })
+                        )}
                       </select>
                     </div>
 
@@ -1578,7 +1637,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                         </td>
                         <td className="p-3 text-center">
                           <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-xs border border-amber-200">
-                            {sub.studentClass || "12A1"}
+                            {sub.studentClass || "Chưa phân lớp"}
                           </span>
                         </td>
                         <td className="p-3 text-center">{sub.partScores.part_1.earned}đ</td>

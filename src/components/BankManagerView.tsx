@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import {
   Exam,
   Question,
+  StudentSubmission,
   STANDARD_GRADES,
   STANDARD_CLASSES,
   STANDARD_CHAPTERS_BY_GRADE,
@@ -23,6 +24,7 @@ import { TableBuilderModal } from "./TableBuilderModal";
 import { ExamScheduleModal } from "./ExamScheduleModal";
 import { ExamEditorModal } from "./ExamEditorModal";
 import { useToast } from "../context/ToastContext";
+import { useAuth } from "../context/AuthContext";
 import {
   Upload,
   Download,
@@ -74,6 +76,7 @@ interface BankManagerViewProps {
   onDeleteExam: (examId: string) => void;
   selectedClassFilter?: string;
   onSelectClassFilter?: (cls: string) => void;
+  submissions?: StudentSubmission[];
 }
 
 export const BankManagerView: React.FC<BankManagerViewProps> = ({
@@ -83,8 +86,23 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   onDeleteExam,
   selectedClassFilter = "all",
   onSelectClassFilter,
+  submissions = [],
 }) => {
   const { toast } = useToast();
+  const { users } = useAuth();
+
+  const realClasses = useMemo(() => {
+    const set = new Set<string>();
+    (users || []).forEach((u) => {
+      if (u.schoolClass && u.schoolClass.trim()) set.add(u.schoolClass.trim());
+    });
+    exams.forEach((e) => {
+      if (e.targetClass && e.targetClass !== "Tất cả các lớp" && !e.targetClass.startsWith("Lớp ")) {
+        set.add(e.targetClass);
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
+  }, [users, exams]);
 
   // Bộ lọc Lớp & Chương & Tìm kiếm
   const [internalClassFilter, setInternalClassFilter] = useState<string>(selectedClassFilter);
@@ -113,7 +131,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   );
   const [customChapterInput, setCustomChapterInput] = useState<string>("");
   const [isCustomChapter, setIsCustomChapter] = useState<boolean>(false);
-  const [importLessonNumber, setImportLessonNumber] = useState<string>("14");
+  const [importLessonNumber, setImportLessonNumber] = useState<string>("01");
   const [importAttemptNumber, setImportAttemptNumber] = useState<string>("01");
   const [importDuration, setImportDuration] = useState<number>(90);
   const [importPreview, setImportPreview] = useState<Exam | null>(null);
@@ -136,7 +154,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
       grade: importGrade,
       chapter: isCustomChapter ? customChapterInput : importChapter,
       lesson: importLessonNumber || "01",
-      attempt: importAttemptNumber || 1,
+      attempt: importAttemptNumber || "01",
     });
   }, [importGrade, isCustomChapter, customChapterInput, importChapter, importLessonNumber, importAttemptNumber]);
 
@@ -268,24 +286,10 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   }, [filteredExams]);
 
   // Đề nổi bật
-  const currentFeaturedExam = filteredExams[0] || exams[0] || {
-    id: "default_fallback",
-    code: "001",
-    title: "Đề Kiểm Tra Cơ Bản",
-    subject: "Toán học",
-    grade: "Lớp 12",
-    chapter: "Chương 2: Vectơ và Hệ trục toạ độ trong không gian Oxyz",
-    durationMinutes: 90,
-    totalScore: 10,
-    author: "Hệ thống Giáo dục",
-    description: "Bộ đề chuẩn cấu trúc GD&ĐT",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    questions: [],
-  };
+  const currentFeaturedExam: Exam | null = filteredExams[0] || exams[0] || null;
 
   // Thống kê tổng số câu hỏi theo 4 dạng thức an toàn
-  const safeExams = Array.isArray(exams) && exams.length > 0 ? exams : [currentFeaturedExam];
+  const safeExams = Array.isArray(exams) ? exams : [];
   const totalQuestions = safeExams.reduce((acc, e) => acc + (e?.questions?.length || 0), 0);
   const singleChoiceCount = safeExams.reduce(
     (acc, e) => acc + (e?.questions || []).filter((q) => q.part === "part_1").length,
@@ -489,138 +493,172 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
         <div className="grid grid-cols-12 gap-5">
           {/* Bento Item 1: Xem trước đề thi nổi bật (Col span 8) */}
           <section className="col-span-12 lg:col-span-8 bg-white rounded-3xl border border-slate-200 shadow-xs p-6 sm:p-7 flex flex-col justify-between">
-            <div className="flex flex-wrap justify-between items-center gap-3 mb-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={`px-3 py-1 text-xs font-bold rounded-full uppercase tracking-wider border ${getGradeBadgeStyle(
-                    currentFeaturedExam.grade
-                  )}`}
-                >
-                  {currentFeaturedExam.grade}
-                </span>
-                <span className="px-3 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded-full border border-slate-200 truncate max-w-xs">
-                  {currentFeaturedExam.chapter || "Chương mục chung"}
-                </span>
-                <span className="text-xs text-slate-400 font-semibold">
-                  Mã: {currentFeaturedExam.code} • {currentFeaturedExam.questions.length} câu • {currentFeaturedExam.durationMinutes} phút
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowTableBuilder(true)}
-                  className="px-3.5 py-1.5 text-xs font-bold border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl flex items-center gap-1.5 transition shadow-2xs"
-                  title="Mở công cụ thiết kế Bảng xét dấu / Bảng biến thiên / Bảng thống kê"
-                >
-                  <Table className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Vẽ Bảng TeX</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowImportModal(true)}
-                  className="px-3.5 py-1.5 text-xs font-bold border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-700 flex items-center gap-1.5 transition"
-                >
-                  <Upload className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Nhập TeX mới</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onSelectExam(currentFeaturedExam, "presentation")}
-                  className="px-4 py-1.5 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-xl flex items-center gap-1.5 transition shadow-sm"
-                >
-                  <Presentation className="w-3.5 h-3.5" />
-                  <span>Trình chiếu ngay</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Khung nội dung câu hỏi mẫu phong cách Bento */}
-            <div className="bg-slate-50/80 rounded-2xl p-5 border border-slate-100 mb-5">
-              <div className="flex justify-between items-start mb-3">
-                <div className="space-y-1">
-                  <span className="text-[11px] font-extrabold text-indigo-600 uppercase tracking-wider">
-                    {currentFeaturedExam.subject}
-                  </span>
-                  <h3 className="font-bold text-base sm:text-lg text-slate-900 leading-snug">
-                    {currentFeaturedExam.title}
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleOpenEditMetadata(currentFeaturedExam)}
-                  className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs transition"
-                  title="Đổi lớp và chương"
-                >
-                  <Tag className="w-3 h-3 text-indigo-600" />
-                  <span>Đổi Lớp/Chương</span>
-                </button>
-              </div>
-
-              <p className="text-xs text-slate-500 font-medium mb-4 leading-relaxed line-clamp-2">
-                {currentFeaturedExam.description || "Đề kiểm tra chuẩn chương trình giáo dục phổ thông."}
-              </p>
-
-              {/* Xem nhanh 3 câu hỏi đầu */}
-              {currentFeaturedExam.questions && currentFeaturedExam.questions.length > 0 && (
-                <div className="space-y-2.5">
-                  {currentFeaturedExam.questions.slice(0, 2).map((q, idx) => (
-                    <div
-                      key={q.id || idx}
-                      className="p-3 bg-white rounded-xl border border-slate-200/80 text-xs flex items-start gap-2.5"
+            {currentFeaturedExam ? (
+              <>
+                <div className="flex flex-wrap justify-between items-center gap-3 mb-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`px-3 py-1 text-xs font-bold rounded-full uppercase tracking-wider border ${getGradeBadgeStyle(
+                        currentFeaturedExam.grade
+                      )}`}
                     >
-                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold text-[11px] shrink-0">
-                        {q.title || `Câu ${idx + 1}`}
-                      </span>
-                      <div className="flex-1 overflow-hidden">
-                        <span className="font-semibold text-slate-800 line-clamp-2">
-                          <MathRenderer content={q.content} inline />
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                      {currentFeaturedExam.grade}
+                    </span>
+                    <span className="px-3 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded-full border border-slate-200 truncate max-w-xs">
+                      {currentFeaturedExam.chapter || "Chương mục chung"}
+                    </span>
+                    <span className="text-xs text-slate-400 font-semibold">
+                      Mã: {currentFeaturedExam.code} • {currentFeaturedExam.questions.length} câu • {currentFeaturedExam.durationMinutes} phút
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowTableBuilder(true)}
+                      className="px-3.5 py-1.5 text-xs font-bold border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl flex items-center gap-1.5 transition shadow-2xs"
+                      title="Mở công cụ thiết kế Bảng xét dấu / Bảng biến thiên / Bảng thống kê"
+                    >
+                      <Table className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Vẽ Bảng TeX</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowImportModal(true)}
+                      className="px-3.5 py-1.5 text-xs font-bold border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-700 flex items-center gap-1.5 transition"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Nhập TeX mới</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSelectExam(currentFeaturedExam, "presentation")}
+                      className="px-4 py-1.5 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-xl flex items-center gap-1.5 transition shadow-sm"
+                    >
+                      <Presentation className="w-3.5 h-3.5" />
+                      <span>Trình chiếu ngay</span>
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            {/* Footer hành động của Bento Hero */}
-            <div className="flex flex-wrap justify-between items-center gap-3 pt-2">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => onSelectExam(currentFeaturedExam, "exam")}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition"
-                >
-                  <Edit className="w-3.5 h-3.5" />
-                  <span>Vào thi thử nghiệm</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onSelectExam(currentFeaturedExam, "live")}
-                  className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-bold text-xs flex items-center gap-1.5 transition"
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  <span>Mở phòng Live</span>
-                </button>
-              </div>
+                {/* Khung nội dung câu hỏi mẫu phong cách Bento */}
+                <div className="bg-slate-50/80 rounded-2xl p-5 border border-slate-100 mb-5">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-extrabold text-indigo-600 uppercase tracking-wider">
+                        {currentFeaturedExam.subject}
+                      </span>
+                      <h3 className="font-bold text-base sm:text-lg text-slate-900 leading-snug">
+                        {currentFeaturedExam.title}
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditMetadata(currentFeaturedExam)}
+                      className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs transition"
+                      title="Đổi lớp và chương"
+                    >
+                      <Tag className="w-3 h-3 text-indigo-600" />
+                      <span>Đổi Lớp/Chương</span>
+                    </button>
+                  </div>
 
-              <div className="flex items-center gap-3 text-xs">
-                <button
-                  type="button"
-                  onClick={() => handleDownloadLatex(currentFeaturedExam)}
-                  className="text-indigo-600 hover:underline font-bold flex items-center gap-1"
-                >
-                  <Download className="w-3.5 h-3.5" /> .tex
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDownloadPresentationHtml(currentFeaturedExam)}
-                  className="text-emerald-600 hover:underline font-bold flex items-center gap-1"
-                >
-                  <Download className="w-3.5 h-3.5" /> Slide offline
-                </button>
+                  <p className="text-xs text-slate-500 font-medium mb-4 leading-relaxed line-clamp-2">
+                    {currentFeaturedExam.description || "Đề kiểm tra chuẩn chương trình giáo dục phổ thông."}
+                  </p>
+
+                  {/* Xem nhanh 3 câu hỏi đầu */}
+                  {currentFeaturedExam.questions && currentFeaturedExam.questions.length > 0 && (
+                    <div className="space-y-2.5">
+                      {currentFeaturedExam.questions.slice(0, 2).map((q, idx) => (
+                        <div
+                          key={q.id || idx}
+                          className="p-3 bg-white rounded-xl border border-slate-200/80 text-xs flex items-start gap-2.5"
+                        >
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold text-[11px] shrink-0">
+                            {q.title || `Câu ${idx + 1}`}
+                          </span>
+                          <div className="flex-1 overflow-hidden">
+                            <span className="font-semibold text-slate-800 line-clamp-2">
+                              <MathRenderer content={q.content} inline />
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer hành động của Bento Hero */}
+                <div className="flex flex-wrap justify-between items-center gap-3 pt-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onSelectExam(currentFeaturedExam, "exam")}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                      <span>Vào thi thử nghiệm</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSelectExam(currentFeaturedExam, "live")}
+                      className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-bold text-xs flex items-center gap-1.5 transition"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Mở phòng Live</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadLatex(currentFeaturedExam)}
+                      className="text-indigo-600 hover:underline font-bold flex items-center gap-1"
+                    >
+                      <Download className="w-3.5 h-3.5" /> .tex
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadPresentationHtml(currentFeaturedExam)}
+                      className="text-emerald-600 hover:underline font-bold flex items-center gap-1"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Slide offline
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="py-10 text-center flex flex-col items-center justify-center space-y-4 my-auto">
+                <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <BookOpen className="w-7 h-7" />
+                </div>
+                <div className="space-y-1.5 max-w-md">
+                  <h3 className="text-base font-bold text-slate-800">Ngân hàng đề thi đang trống</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Hệ thống hiện tại chưa có đề thi nào. Bạn có thể sử dụng công cụ Nhập TeX mới hoặc Vẽ Bảng TeX để khởi tạo đề kiểm tra đầu tiên.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowImportModal(true)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Nhập đề TeX mới</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTableBuilder(true)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-1.5 transition"
+                  >
+                    <Table className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Vẽ Bảng TeX</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </section>
 
           {/* Bento Item 2: Thống kê Ngân hàng theo Lớp & 4 Dạng thức */}
@@ -663,28 +701,30 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
               </div>
 
               {/* Quick Class Chips trong sidebar */}
-              <div className="flex flex-wrap gap-1.5 mb-4">
-                {["12A1", "12A2", "11A1", "10A1"].map((cls) => {
-                  const isSel = activeClassFilter === cls;
-                  return (
-                    <button
-                      key={cls}
-                      type="button"
-                      onClick={() => {
-                        handleClassChange(cls);
-                        setSelectedChapterFilter("all");
-                      }}
-                      className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition ${
-                        isSel
-                          ? "bg-amber-400 border-amber-300 text-slate-900 shadow-xs"
-                          : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
-                      }`}
-                    >
-                      Lớp {cls}
-                    </button>
-                  );
-                })}
-              </div>
+              {realClasses.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {realClasses.slice(0, 8).map((cls) => {
+                    const isSel = activeClassFilter === cls;
+                    return (
+                      <button
+                        key={cls}
+                        type="button"
+                        onClick={() => {
+                          handleClassChange(cls);
+                          setSelectedChapterFilter("all");
+                        }}
+                        className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition ${
+                          isSel
+                            ? "bg-amber-400 border-amber-300 text-slate-900 shadow-xs"
+                            : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+                        }`}
+                      >
+                        Lớp {cls}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* 4 Dạng thức chuẩn */}
               <div className="space-y-2 text-xs">
@@ -738,30 +778,43 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
               </div>
 
               {/* Danh sách tiến độ các chương */}
-              <div className="space-y-2.5 my-3 max-h-44 overflow-y-auto pr-1">
-                {examsGroupedByChapter.slice(0, 4).map((grp, idx) => (
-                  <div key={idx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-bold text-slate-800 truncate max-w-[200px]" title={grp.chapterName}>
-                        {grp.chapterName}
-                      </span>
-                      <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded-md">
-                        {grp.exams.length} đề
-                      </span>
+              {examsGroupedByChapter.length > 0 ? (
+                <div className="space-y-2.5 my-3 max-h-44 overflow-y-auto pr-1">
+                  {examsGroupedByChapter.slice(0, 4).map((grp, idx) => (
+                    <div key={idx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-slate-800 truncate max-w-[200px]" title={grp.chapterName}>
+                          {grp.chapterName}
+                        </span>
+                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded-md">
+                          {grp.exams.length} đề
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-[10px] text-slate-500">
+                        <span>{grp.totalQuestions} câu hỏi</span>
+                        <span>TB {grp.avgDuration} phút</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between items-center text-[10px] text-slate-500">
-                      <span>{grp.totalQuestions} câu hỏi</span>
-                      <span>TB {grp.avgDuration} phút</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-xs text-slate-400">
+                  Chưa có chủ đề / chương nào
+                </div>
+              )}
             </div>
 
             <button
               type="button"
-              onClick={() => onSelectExam(currentFeaturedExam, "analytics")}
-              className="w-full mt-2 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1.5"
+              onClick={() => {
+                if (currentFeaturedExam) {
+                  onSelectExam(currentFeaturedExam, "analytics");
+                } else {
+                  toast.info("Chưa có đề thi", "Vui lòng nhập đề thi để xem phân tích.");
+                }
+              }}
+              disabled={!currentFeaturedExam}
+              className="w-full mt-2 py-2 border border-slate-200 hover:bg-slate-50 disabled:opacity-50 rounded-xl text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1.5"
             >
               <BarChart2 className="w-3.5 h-3.5 text-indigo-600" />
               <span>Xem phân tích phổ điểm & lỗ hổng</span>
@@ -775,43 +828,63 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 Hoạt động theo Lớp
               </h3>
 
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-bold text-indigo-700">
-                    12A1
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-xs font-bold text-slate-800">Lớp 12A1 (Toán)</div>
-                    <div className="text-[10px] text-emerald-600 font-semibold">38/40 đã nộp bài</div>
-                  </div>
-                </div>
+              {realClasses.length > 0 ? (
+                <div className="space-y-3 max-h-48 overflow-y-auto pr-1">
+                  {realClasses.slice(0, 5).map((cls, idx) => {
+                    const classStudents = (users || []).filter(
+                      (u) => u.role === "student" && u.schoolClass === cls
+                    );
+                    const classSubs = (submissions || []).filter(
+                      (s) => s.studentClass === cls
+                    );
+                    const colorThemes = [
+                      "bg-indigo-100 text-indigo-700",
+                      "bg-sky-100 text-sky-700",
+                      "bg-emerald-100 text-emerald-700",
+                      "bg-amber-100 text-amber-700",
+                      "bg-rose-100 text-rose-700",
+                    ];
+                    const colorCls = colorThemes[idx % colorThemes.length];
 
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-sky-100 flex items-center justify-center text-xs font-bold text-sky-700">
-                    11B2
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-xs font-bold text-slate-800">Lớp 11B2</div>
-                    <div className="text-[10px] text-slate-400 font-medium">Đang làm Chương 1</div>
-                  </div>
+                    return (
+                      <div key={cls} className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-full ${colorCls} flex items-center justify-center text-xs font-bold shrink-0`}>
+                          {cls.length <= 4 ? cls : cls.slice(0, 3)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-bold text-slate-800 truncate">Lớp {cls}</div>
+                          <div className="text-[10px] text-slate-500 font-medium">
+                            {classStudents.length} học sinh • {classSubs.length} bài nộp
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700">
-                    10C3
+              ) : (
+                <div className="py-6 text-center space-y-1.5">
+                  <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                    <GraduationCap className="w-5 h-5" />
                   </div>
-                  <div className="flex-1">
-                    <div className="text-xs font-bold text-slate-800">Lớp 10C3</div>
-                    <div className="text-[10px] text-slate-400 font-medium">Chuẩn bị thi Chương 1</div>
-                  </div>
+                  <p className="text-xs font-bold text-slate-700">Chưa có lớp học</p>
+                  <p className="text-[11px] text-slate-400 leading-snug">
+                    Hệ thống chưa có học sinh và lớp học nào được tạo.
+                  </p>
                 </div>
-              </div>
+              )}
             </div>
 
             <button
               type="button"
-              onClick={() => onSelectExam(currentFeaturedExam, "live")}
-              className="w-full mt-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5"
+              onClick={() => {
+                if (currentFeaturedExam) {
+                  onSelectExam(currentFeaturedExam, "live");
+                } else {
+                  toast.info("Chưa có đề thi", "Vui lòng nhập đề thi trước khi mở phòng Live.");
+                }
+              }}
+              disabled={!currentFeaturedExam}
+              className="w-full mt-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5"
             >
               <Users className="w-3.5 h-3.5" />
               <span>Theo dõi lớp học Live</span>
@@ -833,16 +906,30 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
             <div className="flex sm:flex-col gap-2 shrink-0">
               <button
                 type="button"
-                onClick={() => handleDownloadPresentationHtml(currentFeaturedExam)}
-                className="bg-white text-indigo-600 px-5 py-2.5 rounded-2xl font-bold text-xs shadow-md hover:bg-indigo-50 flex items-center gap-1.5 transition"
+                onClick={() => {
+                  if (currentFeaturedExam) {
+                    handleDownloadPresentationHtml(currentFeaturedExam);
+                  } else {
+                    toast.info("Chưa có đề thi", "Vui lòng nhập đề thi trước khi tải Slide.");
+                  }
+                }}
+                disabled={!currentFeaturedExam}
+                className="bg-white text-indigo-600 disabled:opacity-50 px-5 py-2.5 rounded-2xl font-bold text-xs shadow-md hover:bg-indigo-50 flex items-center gap-1.5 transition"
               >
                 <Download className="w-4 h-4" />
                 <span>Tải Slide HTML</span>
               </button>
               <button
                 type="button"
-                onClick={() => handleDownloadLatex(currentFeaturedExam)}
-                className="bg-indigo-700 hover:bg-indigo-800 text-white px-5 py-2 rounded-2xl font-bold text-xs flex items-center gap-1.5 transition"
+                onClick={() => {
+                  if (currentFeaturedExam) {
+                    handleDownloadLatex(currentFeaturedExam);
+                  } else {
+                    toast.info("Chưa có đề thi", "Vui lòng nhập đề thi trước khi tải file .tex.");
+                  }
+                }}
+                disabled={!currentFeaturedExam}
+                className="bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white px-5 py-2 rounded-2xl font-bold text-xs flex items-center gap-1.5 transition"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Tải file .tex</span>
@@ -878,7 +965,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
               </button>
 
               {/* Quick Class Chips */}
-              {["12A1", "12A2", "11A1", "10A1"].map((cls) => {
+              {realClasses.slice(0, 6).map((cls) => {
                 const count = exams.filter((e) => isExamMatchClassFilter(e, cls)).length;
                 const isSelected = activeClassFilter === cls;
                 return (
@@ -1309,19 +1396,20 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                       type="text"
                       value={importLessonNumber}
                       onChange={(e) => setImportLessonNumber(e.target.value)}
-                      placeholder="Bài (14)"
-                      title="Số thứ tự bài học"
+                      placeholder="Bài số (09, 14...)"
+                      title="Số thứ tự bài học (nhập 09, 9 hoặc Bài 09 đều được)"
                       className="w-full py-2 px-2.5 rounded-xl border border-indigo-200 bg-white font-mono font-bold text-center text-xs outline-none focus:border-indigo-500"
                     />
                     <select
                       value={importAttemptNumber}
                       onChange={(e) => setImportAttemptNumber(e.target.value)}
-                      className="w-full py-2 px-1.5 rounded-xl border border-indigo-200 bg-white font-mono font-bold text-xs outline-none focus:border-indigo-500"
+                      className="w-full py-2 px-1.5 rounded-xl border border-indigo-200 bg-white font-mono font-bold text-xs outline-none focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="01">Lần 01</option>
                       <option value="02">Lần 02</option>
                       <option value="03">Lần 03</option>
                       <option value="04">Lần 04</option>
+                      <option value="05">Lần 05</option>
                     </select>
                   </div>
                 </div>

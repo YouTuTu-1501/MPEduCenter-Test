@@ -35,28 +35,39 @@ export const pad2 = (val: string | number | undefined | null, defaultVal: string
 };
 
 /**
- * Trích xuất số lớp từ tên khối lớp (ví dụ: "Lớp 12" -> "12", "12A1" -> "12", "10" -> "10")
+ * Trích xuất số lớp từ tên khối lớp (ví dụ: "Lớp 12" -> "12", "12A1" -> "12", "10" -> "10", 12 -> "12")
  */
-export const extractGradeNumber = (gradeStr?: string): string => {
-  if (!gradeStr) return "12";
-  const match = gradeStr.match(/(?:Lớp\s*|Khối\s*)?(\d{1,2})/i);
+export const extractGradeNumber = (gradeStr?: string | number): string => {
+  if (gradeStr === undefined || gradeStr === null) return "12";
+  if (typeof gradeStr === "number") return pad2(gradeStr, "12");
+  const str = String(gradeStr).trim();
+  if (!str) return "12";
+  if (/^\d{1,2}$/.test(str)) {
+    return pad2(str, "12");
+  }
+  const match = str.match(/(?:Lớp\s*|Khối\s*|Grade\s*|G)?(\d{1,2})/i);
   if (match && match[1]) {
-    const num = parseInt(match[1], 10);
-    return num < 10 ? `0${num}` : `${num}`;
+    return pad2(match[1], "12");
   }
   return "12";
 };
 
 /**
- * Trích xuất số chương từ tên chương (ví dụ: "Chương 2: Vectơ..." -> "02", "Chương 1" -> "01")
+ * Trích xuất số chương từ tên chương (ví dụ: "Chương 2: Vectơ..." -> "02", "Chương 1" -> "01", "2" -> "02", 2 -> "02")
  */
-export const extractChapterNumber = (chapterStr?: string): string => {
-  if (!chapterStr) return "01";
-  const match = chapterStr.match(/(?:Chương|Chapter|Ch|C)\s*(\d{1,2})/i);
+export const extractChapterNumber = (chapterStr?: string | number): string => {
+  if (chapterStr === undefined || chapterStr === null) return "01";
+  if (typeof chapterStr === "number") return pad2(chapterStr, "01");
+  const str = String(chapterStr).trim();
+  if (!str) return "01";
+  if (/^\d{1,2}$/.test(str)) {
+    return pad2(str, "01");
+  }
+  const match = str.match(/(?:Chương\s*số|Chương|Chapter|Ch|C)\s*(\d{1,2})/i);
   if (match && match[1]) {
     return pad2(match[1], "01");
   }
-  const anyNum = chapterStr.match(/(\d{1,2})/);
+  const anyNum = str.match(/(\d{1,2})/);
   if (anyNum && anyNum[1]) {
     return pad2(anyNum[1], "01");
   }
@@ -64,32 +75,67 @@ export const extractChapterNumber = (chapterStr?: string): string => {
 };
 
 /**
- * Trích xuất số bài từ tiêu đề hoặc chuỗi bài (ví dụ: "Bài 14: Khảo sát..." -> "14", "Bài số 14" -> "14")
+ * Trích xuất số bài từ tiêu đề hoặc chuỗi bài (ví dụ: "09" -> "09", "9" -> "09", "Bài 14: Khảo sát..." -> "14", "Bài số 14" -> "14", "bài 09" -> "09", 14 -> "14")
  */
-export const extractLessonNumber = (lessonOrTitleStr?: string): string => {
-  if (!lessonOrTitleStr) return "01";
-  const match = lessonOrTitleStr.match(/(?:Bài|Lesson|B|L|Bài số)\s*(\d{1,2})/i);
+export const extractLessonNumber = (lessonOrTitleStr?: string | number): string => {
+  if (lessonOrTitleStr === undefined || lessonOrTitleStr === null) return "01";
+  if (typeof lessonOrTitleStr === "number") return pad2(lessonOrTitleStr, "01");
+  const str = String(lessonOrTitleStr).trim();
+  if (!str) return "01";
+
+  // Nhập trực tiếp số (ví dụ: "09", "9", "14")
+  if (/^\d{1,2}$/.test(str)) {
+    return pad2(str, "01");
+  }
+
+  // Khớp tiền tố có chữ Bài, Bài số, Lesson, B, L (ví dụ: "Bài 09", "Bài 9", "Bài số 14", "Lesson 3", "B09", "bài 09")
+  const match = str.match(/(?:Bài\s*số|Bài|Lesson|B|L)\s*(\d{1,2})/i);
   if (match && match[1]) {
     return pad2(match[1], "01");
   }
+
+  // Khớp bất kỳ cụm số nào trong chuỗi
+  const anyNum = str.match(/(\d{1,2})/);
+  if (anyNum && anyNum[1]) {
+    return pad2(anyNum[1], "01");
+  }
+
   return "01";
 };
 
 /**
- * Trích xuất số lần kiểm tra từ chuỗi (ví dụ: "Lần 1" -> "01", "Lần 2" -> "02")
+ * Trích xuất số lần kiểm tra từ chuỗi (ví dụ: "02" -> "02", "2" -> "02", "Lần 1" -> "01", "Lần 2" -> "02", "Lần 02" -> "02", 2 -> "02")
  */
-export const extractAttemptNumber = (attemptOrTitleStr?: string): string => {
-  if (!attemptOrTitleStr) return "01";
-  const match = attemptOrTitleStr.match(/(?:Lần|Attempt|Đợt|Lần thi|Lần kiểm tra)\s*(\d{1,2})/i);
+export const extractAttemptNumber = (attemptOrTitleStr?: string | number): string => {
+  if (attemptOrTitleStr === undefined || attemptOrTitleStr === null) return "01";
+  if (typeof attemptOrTitleStr === "number") return pad2(attemptOrTitleStr, "01");
+  const str = String(attemptOrTitleStr).trim();
+  if (!str) return "01";
+
+  // Nhập hoặc chọn trực tiếp số (ví dụ: "02", "2", "01", "3")
+  if (/^\d{1,2}$/.test(str)) {
+    return pad2(str, "01");
+  }
+
+  // Khớp tiền tố Lần kiểm tra, Lần thi, Lần, Attempt, Đợt (ví dụ: "Lần 02", "Lần 2", "Lần thi 03", "Lần kiểm tra 1", "Đợt 2")
+  const match = str.match(/(?:Lần\s*kiểm\s*tra|Lần\s*thi|Lần|Attempt|Đợt|L)\s*(\d{1,2})/i);
   if (match && match[1]) {
     return pad2(match[1], "01");
   }
+
+  // Khớp bất kỳ cụm số nào trong chuỗi
+  const anyNum = str.match(/(\d{1,2})/);
+  if (anyNum && anyNum[1]) {
+    return pad2(anyNum[1], "01");
+  }
+
   return "01";
 };
 
 /**
  * Tạo mã đề thi chuẩn theo quy luật [lớp][chương][bài][lần]
  * @example generateStandardExamCode({ grade: "Lớp 12", chapter: "Chương 1", lesson: 14, attempt: 1 }) => "12-01-14-01"
+ * @example generateStandardExamCode({ grade: "Lớp 12", chapter: "Chương 1", lesson: "09", attempt: "02" }) => "12-01-09-02"
  */
 export const generateStandardExamCode = (params: {
   grade?: string | number;
@@ -97,10 +143,10 @@ export const generateStandardExamCode = (params: {
   lesson?: string | number;
   attempt?: string | number;
 }): string => {
-  const g = extractGradeNumber(String(params.grade || "12"));
-  const c = typeof params.chapter === "number" ? pad2(params.chapter) : extractChapterNumber(String(params.chapter || "01"));
-  const l = typeof params.lesson === "number" ? pad2(params.lesson) : extractLessonNumber(String(params.lesson || "01"));
-  const a = typeof params.attempt === "number" ? pad2(params.attempt) : extractAttemptNumber(String(params.attempt || "01"));
+  const g = extractGradeNumber(params.grade ?? "12");
+  const c = extractChapterNumber(params.chapter ?? "01");
+  const l = extractLessonNumber(params.lesson ?? "01");
+  const a = extractAttemptNumber(params.attempt ?? "01");
 
   return `${g}-${c}-${l}-${a}`;
 };

@@ -11,12 +11,12 @@ import {
   ShieldCheck,
   ExternalLink,
   MessageCircle,
-  UserCheck,
+  GraduationCap,
+  Sparkles,
   Copy,
   Check,
   School,
-  GraduationCap,
-  Sparkles,
+  ArrowRight,
 } from "lucide-react";
 
 export const AuthModal: React.FC = () => {
@@ -29,6 +29,7 @@ export const AuthModal: React.FC = () => {
   const [mode, setMode] = useState<"login" | "contact">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -43,7 +44,7 @@ export const AuthModal: React.FC = () => {
       return;
     }
 
-    const res = login(email.trim(), password.trim());
+    const res = login(email.trim(), password.trim(), rememberMe);
     if (res.success) {
       setShowAuthModal(false);
       setEmail("");
@@ -75,7 +76,7 @@ export const AuthModal: React.FC = () => {
               </h3>
               <p className="text-xs text-slate-300">
                 {mode === "login"
-                  ? "Đăng nhập hệ thống khảo thí & thi trực tuyến"
+                  ? "Đăng nhập tài khoản hệ thống"
                   : "Thông tin liên hệ Thầy Trần Đình Phương để nhận tài khoản"}
               </p>
             </div>
@@ -83,7 +84,7 @@ export const AuthModal: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowAuthModal(false)}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition"
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition cursor-pointer"
             title="Đóng"
           >
             ✕
@@ -98,7 +99,7 @@ export const AuthModal: React.FC = () => {
               setMode("login");
               setErrorMessage(null);
             }}
-            className={`pb-3 px-4 text-xs sm:text-sm font-extrabold transition flex items-center gap-2 border-b-2 ${
+            className={`pb-3 px-4 text-xs sm:text-sm font-extrabold transition flex items-center gap-2 border-b-2 cursor-pointer ${
               mode === "login"
                 ? "border-indigo-600 text-indigo-600"
                 : "border-transparent text-slate-500 hover:text-slate-800"
@@ -113,7 +114,7 @@ export const AuthModal: React.FC = () => {
               setMode("contact");
               setErrorMessage(null);
             }}
-            className={`pb-3 px-4 text-xs sm:text-sm font-extrabold transition flex items-center gap-2 border-b-2 ${
+            className={`pb-3 px-4 text-xs sm:text-sm font-extrabold transition flex items-center gap-2 border-b-2 cursor-pointer ${
               mode === "contact"
                 ? "border-amber-600 text-amber-700"
                 : "border-transparent text-slate-500 hover:text-slate-800"
@@ -175,32 +176,47 @@ export const AuthModal: React.FC = () => {
                 </div>
               </div>
 
+              {/* Ghi nhớ đăng nhập */}
+              <div className="flex items-center justify-between pt-0.5">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-slate-700">
+                    Ghi nhớ đăng nhập cho lần sau
+                  </span>
+                </label>
+              </div>
+
               <div className="pt-2">
                 <button
                   type="submit"
-                  className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-2"
+                  className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <LogIn className="w-4 h-4" />
                   <span>Đăng nhập hệ thống</span>
+                  <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
 
               {/* Thông tin hỗ trợ học sinh */}
-              <div className="mt-4 p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-xs space-y-2">
+              <div className="mt-3 p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-xs space-y-1.5">
                 <div className="flex items-center gap-1.5 font-bold text-amber-900">
                   <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>Bạn chưa có tài khoản hoặc quên mật khẩu?</span>
+                  <span>Chưa có tài khoản hoặc quên mật khẩu?</span>
                 </div>
                 <p className="text-amber-800 text-[11px] leading-relaxed">
-                  Học sinh không được tự đăng ký tài khoản tự do. Tài khoản được cấp tập trung bởi{" "}
-                  <strong>Thầy Trần Đình Phương</strong>.
+                  Tài khoản được cấp tập trung bởi <strong>Thầy Trần Đình Phương</strong>.
                 </p>
                 <button
                   type="button"
                   onClick={() => setMode("contact")}
-                  className="inline-flex items-center gap-1.5 font-bold text-indigo-700 hover:text-indigo-900 underline text-xs"
+                  className="inline-flex items-center gap-1 font-bold text-indigo-700 hover:text-indigo-900 underline text-xs cursor-pointer"
                 >
-                  <span>Xem thông tin liên hệ Thầy Phương để nhận tài khoản →</span>
+                  <span>Xem thông tin liên hệ Thầy Phương →</span>
                 </button>
               </div>
             </form>
@@ -258,7 +274,7 @@ export const AuthModal: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleCopyFbLink}
-                      className="text-[11px] font-bold text-slate-600 hover:text-indigo-600 flex items-center gap-1"
+                      className="text-[11px] font-bold text-slate-600 hover:text-indigo-600 flex items-center gap-1 cursor-pointer"
                     >
                       {copiedLink ? (
                         <>
@@ -284,7 +300,6 @@ export const AuthModal: React.FC = () => {
                   </a>
                 </div>
 
-                {/* Các bước học sinh cần nhắn tin */}
                 <div className="space-y-1.5 text-xs text-slate-700">
                   <div className="font-bold text-slate-900 flex items-center gap-1.5">
                     <GraduationCap className="w-4 h-4 text-emerald-600" />
@@ -306,7 +321,6 @@ export const AuthModal: React.FC = () => {
                   </p>
                 </div>
 
-                {/* Nút bấm chuyển hướng nhanh tới Facebook */}
                 <div className="pt-2">
                   <a
                     href="https://www.facebook.com/you.tu.104418"
@@ -335,7 +349,7 @@ export const AuthModal: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setMode("login")}
-                className="px-3.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold transition text-xs flex items-center gap-1"
+                className="px-3.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold transition text-xs flex items-center gap-1 cursor-pointer"
               >
                 <LogIn className="w-3.5 h-3.5" />
                 <span>Quay lại Đăng nhập</span>
@@ -344,7 +358,7 @@ export const AuthModal: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowAuthModal(false)}
-              className="px-4 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold transition"
+              className="px-4 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold transition cursor-pointer"
             >
               Đóng
             </button>

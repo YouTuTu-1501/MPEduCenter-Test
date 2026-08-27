@@ -363,7 +363,7 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
       timeSpent,
       {
         studentEmail: currentUser.email,
-        studentClass: currentUser.schoolClass || (studentName.includes("-") ? studentName.split("-")[1]?.trim() : "12A1"),
+        studentClass: currentUser.schoolClass || (studentName.includes("-") ? studentName.split("-")[1]?.trim() : "") || "",
         studentAvatar: currentUser.avatar,
       }
     );

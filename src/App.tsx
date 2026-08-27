@@ -15,6 +15,7 @@ import { UserProfileModal } from "./components/UserProfileModal";
 import { StudentResultHistoryModal } from "./components/StudentResultHistoryModal";
 import { ClassLeaderboardModal } from "./components/ClassLeaderboardModal";
 import { LeaderboardView } from "./components/LeaderboardView";
+import { LoginScreen } from "./components/LoginScreen";
 import { ToastProvider, useToast } from "./context/ToastContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { FilterProvider, useFilter } from "./context/FilterContext";
@@ -29,6 +30,9 @@ import {
   saveUserToFirestore,
   getDeletedExamIds,
   getDeletedSubmissionIds,
+  getDeletedUserIds,
+  clearOrphanedData,
+  cleanupOrphanedSubmissions,
 } from "./services/firestoreService";
 import { RotateCcw, Home, Sparkles } from "lucide-react";
 
@@ -78,6 +82,7 @@ class ErrorBoundary extends React.Component<Props, State> {
                     localStorage.removeItem("edutest_deleted_submissions");
                     localStorage.removeItem("mpeducenter_deleted_users");
                     localStorage.removeItem("mpeducenter_users");
+                    localStorage.removeItem("mpeducenter_auth_session");
                   } catch {}
                   window.location.reload();
                 }}
@@ -109,7 +114,7 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
           <FilterProvider>
-            <MainApp />
+            <AppRoot />
             <AuthModal />
             <UserProfileModal />
           </FilterProvider>
@@ -119,9 +124,20 @@ export default function App() {
   );
 }
 
-function MainApp() {
+function AppRoot() {
+  const { isAuthenticated, currentUser } = useAuth();
+
+  // Bắt buộc người dùng phải đăng nhập mới xem được nội dung trang web
+  if (!isAuthenticated || !currentUser) {
+    return <LoginScreen />;
+  }
+
+  return <MainApp currentUser={currentUser} />;
+}
+
+function MainApp({ currentUser }: { currentUser: User }) {
   const { toast } = useToast();
-  const { currentUser, users, isAdmin, isTeacher, isStudent } = useAuth();
+  const { users, isAdmin, isTeacher, isStudent } = useAuth();
   const { selectedClassFilter, setSelectedClassFilter, selectedExamFilter, setSelectedExamFilter } = useFilter();
   const [exams, setExams] = useState<Exam[]>(() => {
     const deleted = getDeletedExamIds();
@@ -152,6 +168,11 @@ function MainApp() {
   const [showLeaderboard, setShowLeaderboard] = useState<boolean>(false);
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
   const [historyTargetUser, setHistoryTargetUser] = useState<User | null>(null);
+
+  // 1. Quét và loại bỏ vĩnh viễn các bản ghi submission không thuộc về userId nào đang tồn tại
+  useEffect(() => {
+    clearOrphanedData().catch(() => {});
+  }, []);
 
   // Tự động điều chỉnh tab điều hướng khi đổi vai trò (RBAC Route Guard)
   useEffect(() => {
@@ -191,6 +212,41 @@ function MainApp() {
       unsubSubs();
     };
   }, []);
+
+  // Tự động quét và dọn dẹp các bài nộp không thuộc về bất kỳ tài khoản học sinh nào hiện có
+  useEffect(() => {
+    if (users && users.length > 0) {
+      clearOrphanedData(users).catch(() => {});
+    }
+  }, [users]);
+
+  // Lọc danh sách bài nộp hợp lệ: chỉ giữ lại bài nộp của học sinh thực tế còn tồn tại trong hệ thống
+  const validSubmissions = React.useMemo(() => {
+    const deletedUserIds = getDeletedUserIds();
+    const deletedSubs = getDeletedSubmissionIds();
+    const studentUsers = users.filter((u) => u.role === "student" || !u.role);
+    const validUserIds = new Set(users.map((u) => u.id));
+    const validEmails = new Set(users.map((u) => u.email.toLowerCase()));
+    const validNames = new Set(users.map((u) => u.name.trim().toLowerCase()));
+
+    // Nếu hệ thống không có học sinh nào, danh sách lượt thi chắc chắn là 0
+    if (users.length > 0 && studentUsers.length === 0) {
+      return [];
+    }
+
+    return submissions.filter((s) => {
+      if (!s || !s.id || deletedSubs.has(s.id)) return false;
+      if (s.studentId && deletedUserIds.has(s.studentId)) return false;
+      if (users.length > 0) {
+        const isMatched =
+          (s.studentId && validUserIds.has(s.studentId)) ||
+          (s.studentEmail && validEmails.has(s.studentEmail.toLowerCase())) ||
+          (s.studentName && validNames.has(s.studentName.trim().toLowerCase()));
+        return Boolean(isMatched);
+      }
+      return true;
+    });
+  }, [submissions, users]);
 
   // Đảm bảo selectedExam luôn hợp lệ
   const safeSelectedExam = selectedExam || exams[0] || defaultExam001;
@@ -288,7 +344,7 @@ function MainApp() {
   ): User => {
     const cleanId = (studentId || `usr_stu_${Date.now()}`).trim();
     const cleanName = (studentName || "Học sinh").trim();
-    const cleanClass = matchingSub?.studentClass || "12A1";
+    const cleanClass = matchingSub?.studentClass || "";
     const cleanEmail =
       matchingSub?.studentEmail ||
       `${cleanId.toLowerCase().replace(/[^a-z0-9]/g, "") || "student"}@student.vn`;
@@ -383,12 +439,13 @@ function MainApp() {
       {/* Phân hệ 1: Quản lý Ngân hàng đề thi (Dành cho Admin & Giáo viên) */}
       {activeView === "bank" && (
         <BankManagerView
-          exams={exams.length > 0 ? exams : [defaultExam001]}
+          exams={exams}
           onSelectExam={handleSelectExam}
           onSaveExam={handleSaveExam}
           onDeleteExam={handleDeleteExam}
           selectedClassFilter={selectedClassFilter}
           onSelectClassFilter={setSelectedClassFilter}
+          submissions={validSubmissions}
         />
       )}
 
@@ -413,7 +470,7 @@ function MainApp() {
       {activeView === "analytics" && (
         <TeacherAnalyticsView
           exam={safeSelectedExam}
-          submissions={submissions}
+          submissions={validSubmissions}
           onBack={() => setActiveView(isStudent ? "student_portal" : "bank")}
           selectedClassFilter={selectedClassFilter}
           onSelectClassFilter={setSelectedClassFilter}
@@ -431,8 +488,8 @@ function MainApp() {
       {/* Phân hệ 5: Bảng Xếp Hạng Điểm Số Học Sinh (Toàn bộ các lớp / Theo từng khối) */}
       {activeView === "leaderboard" && (
         <LeaderboardView
-          exams={exams.length > 0 ? exams : [defaultExam001]}
-          submissions={submissions}
+          exams={exams}
+          submissions={validSubmissions}
           users={users}
           defaultClassFilter={selectedClassFilter}
           defaultExamId={selectedExamFilter}
@@ -452,8 +509,8 @@ function MainApp() {
       {/* Phân hệ 7: Quản trị Toàn diện & Phân quyền Người dùng (Dành riêng cho Admin) */}
       {activeView === "admin" && (
         <AdminManagementView
-          exams={exams.length > 0 ? exams : [defaultExam001]}
-          submissions={submissions}
+          exams={exams}
+          submissions={validSubmissions}
           onSelectExam={handleSelectExam}
           onDeleteExam={handleDeleteExam}
           onSaveExam={handleSaveExam}
@@ -465,8 +522,8 @@ function MainApp() {
       {/* Phân hệ 8: Cổng Thông tin & Luyện thi Cá nhân (Dành cho Học sinh) */}
       {activeView === "student_portal" && (
         <StudentPortalView
-          exams={exams.length > 0 ? exams : [defaultExam001]}
-          submissions={submissions}
+          exams={exams}
+          submissions={validSubmissions}
           onStartExam={handleStudentStartExam}
           onJoinLiveRoom={() => setActiveView("live")}
           onOpenLeaderboard={() => setActiveView("leaderboard")}
@@ -485,7 +542,7 @@ function MainApp() {
           setShowHistoryModal(false);
           setHistoryTargetUser(null);
         }}
-        submissions={submissions}
+        submissions={validSubmissions}
       />
 
       {/* Modal 2: Bảng Xếp Hạng Điểm Số Học Sinh Theo Lớp & Theo Từng Đề Thi */}
@@ -493,7 +550,7 @@ function MainApp() {
         isOpen={showLeaderboard}
         onClose={() => setShowLeaderboard(false)}
         exams={exams}
-        submissions={submissions}
+        submissions={validSubmissions}
         users={users}
         defaultClassFilter={selectedClassFilter}
         defaultExamId={selectedExamFilter}
@@ -502,7 +559,7 @@ function MainApp() {
 
       {/* Global Filter Drawer (Sidebar Lọc Dùng Chung Toàn Hệ Thống) */}
       <GlobalFilterDrawer
-        totalSubmissions={submissions.length}
+        totalSubmissions={validSubmissions.length}
         totalUsers={users.length}
       />
     </div>

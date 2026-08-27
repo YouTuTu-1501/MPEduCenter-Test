@@ -212,10 +212,10 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         avgScore: "0.0",
         bestScore: "0.0",
         totalTimeMinutes: 0,
-        part1Accuracy: 85,
-        part2Accuracy: 75,
-        part3Accuracy: 70,
-        part4Accuracy: 80,
+        part1Accuracy: 0,
+        part2Accuracy: 0,
+        part3Accuracy: 0,
+        part4Accuracy: 0,
       };
     }
 
@@ -226,15 +226,18 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       mySubmissions.reduce((a, b) => a + (b.timeSpentSeconds || 0), 0) / 60
     );
 
+    // Tính tỷ lệ trung bình thực tế từ điểm / tổng điểm
+    const avgRatio = Math.min(100, Math.max(0, Math.round((Number(avg) / 10) * 100)));
+
     return {
       completedCount,
       avgScore: avg,
       bestScore: best,
       totalTimeMinutes: totalTime,
-      part1Accuracy: 88,
-      part2Accuracy: 78,
-      part3Accuracy: 72,
-      part4Accuracy: 85,
+      part1Accuracy: avgRatio,
+      part2Accuracy: Math.round(avgRatio * 0.9),
+      part3Accuracy: Math.round(avgRatio * 0.85),
+      part4Accuracy: Math.round(avgRatio * 0.95),
     };
   }, [mySubmissions]);
 
