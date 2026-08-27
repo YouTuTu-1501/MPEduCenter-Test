@@ -639,6 +639,66 @@ export function parseCoordinateValue(coordStr: string, coordsMap: Map<string, Po
   return null;
 }
 
+export interface CoordToken {
+  raw: string;
+  full: string;
+  startIndex: number;
+  endIndex: number;
+  isCircleRadius: boolean;
+  pt: Point2D | null;
+}
+
+export interface TikzDot {
+  name: string;
+  x: number;
+  y: number;
+  fill?: string;
+  stroke?: string;
+  radius?: number;
+}
+
+/**
+ * Trích xuất toàn bộ các khối tọa độ (...) trong chuỗi lệnh, tự động nhận diện
+ * các biểu thức tọa độ phức tạp, lồng nhau (như ($(B)+(90:3mm)$) hoặc ($(D)+(C)-(B)$))
+ * và phân biệt với bán kính hình tròn circle (1.5pt)
+ */
+export function extractCoordinateTokens(text: string, coordsMap: Map<string, Point2D>): CoordToken[] {
+  const tokens: CoordToken[] = [];
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "(") {
+      const bal = extractBalancedParens(text, i);
+      if (bal) {
+        const full = text.substring(i, bal.endIndex + 1);
+        const raw = bal.content.trim();
+
+        // Kiểm tra xem phía trước dấu ( có phải là lệnh circle hay không
+        const prefix = text.substring(0, i).trim();
+        const isCircleRadius = /circle\s*(?:\[[^\]]*\])?$/i.test(prefix);
+
+        let pt: Point2D | null = null;
+        if (!isCircleRadius) {
+          pt = parseCoordinateValue(raw, coordsMap);
+        }
+
+        tokens.push({
+          raw,
+          full,
+          startIndex: i,
+          endIndex: bal.endIndex,
+          isCircleRadius,
+          pt,
+        });
+
+        i = bal.endIndex + 1;
+        continue;
+      }
+    }
+    i++;
+  }
+  return tokens;
+}
+
 /**
  * Loại bỏ các khối node[...] {...} và pic[...] {...} lồng nhau ra khỏi chuỗi lệnh TikZ
  */
@@ -728,7 +788,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
   }
 
   const coordsMap = new Map<string, Point2D>();
-  const explicitDots = new Map<string, Point2D>(); // Chỉ những điểm được \fill hoặc \draw circle mới chấm đen
+  const explicitDots = new Map<string, TikzDot>(); // Chỉ những điểm được \fill hoặc \draw circle mới chấm đen
   const nodes: TikzNode[] = [];
   const paths: TikzPath[] = [];
   const angleMarks: AngleMark[] = [];
@@ -784,7 +844,16 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     const names = match[2].split(",").map((s) => s.trim());
     for (const name of names) {
       const pt = coordsMap.get(name);
-      if (pt) explicitDots.set(name, pt);
+      if (pt) {
+        explicitDots.set(name, {
+          name,
+          x: pt.x,
+          y: pt.y,
+          fill: "#1e293b",
+          stroke: "#ffffff",
+          radius: 2.8,
+        });
+      }
     }
   }
 
@@ -962,6 +1031,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     // 2. \coordinate (Name) at (coord)
     const coordMatches = cmd.matchAll(/\\coordinate\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)\s*at\s*/g);
     for (const match of coordMatches) {
+      const optStr = match[1] || "";
       const name = match[2].trim();
       const coordStartIndex = (match.index ?? 0) + match[0].length;
       let coordStr = "";
@@ -974,7 +1044,21 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         coordStr = endIdx !== -1 ? rest.substring(0, endIdx) : rest;
       }
       const pt = parseCoordinateValue(coordStr, coordsMap);
-      if (pt) coordsMap.set(name, pt);
+      if (pt) {
+        coordsMap.set(name, pt);
+        if (optStr.includes("label=")) {
+          const lblMatch = optStr.match(/label\s*=\s*(?:([^:]+):)?\{?([^}\]]+)\}?/);
+          if (lblMatch) {
+            nodes.push({
+              id: `coord_lbl_${name}`,
+              x: pt.x,
+              y: pt.y,
+              pos: (lblMatch[1] || "above").trim(),
+              label: lblMatch[2].trim(),
+            });
+          }
+        }
+      }
     }
 
     // 3. \draw pic[...] {angle=C--B--A} hoặc \pic ["$30^\circ$", draw, angle radius=6mm] {angle=C--B--A} hoặc {right angle=c--O--b}
@@ -1076,7 +1160,14 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
           const basePt = parseCoordinateValue(ptName, coordsMap);
           if (basePt) {
-            explicitDots.set(ptName, basePt);
+            explicitDots.set(ptName, {
+              name: ptName,
+              x: basePt.x,
+              y: basePt.y,
+              fill: "#1e293b",
+              stroke: "#ffffff",
+              radius: 2.8,
+            });
             const rad = (angleDeg * Math.PI) / 180;
             const nodePt: Point2D = {
               x: basePt.x + dist * Math.cos(rad),
@@ -1187,13 +1278,27 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     if (cmd.includes("circle")) {
       const circleMatches = cmd.matchAll(/\\(?:draw|fill|filldraw)\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)\s*circle\s*(?:\(([^)]+)\)|\{([^}]+)\})/g);
       for (const cm of circleMatches) {
+        const drawOpt = (cm[1] || "").toLowerCase();
         const ptName = cm[2].trim();
         const radStr = cm[3] || cm[4] || "1.5pt";
         const rad = evaluateExpr(radStr);
         const pt = parseCoordinateValue(ptName, coordsMap);
         if (pt) {
           if (rad <= 0.2 || (radStr.includes("pt") && rad <= 5)) {
-            explicitDots.set(ptName, pt);
+            let fill = "#1e293b";
+            let stroke = "#ffffff";
+            if (drawOpt.includes("fill=white") || drawOpt.includes("fill = white") || drawOpt.includes("fill=none")) {
+              fill = "#ffffff";
+              stroke = "#1e293b";
+            }
+            explicitDots.set(ptName, {
+              name: ptName,
+              x: pt.x,
+              y: pt.y,
+              fill,
+              stroke,
+              radius: 2.8,
+            });
           }
         }
       }
@@ -1205,6 +1310,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     // - \draw [<->](6,-.6)--(8,-.6)node[midway,below]{$30\text{m}$};
     // - \draw (A) to node[midway,above]{$\vec{v}$} (B);
     // - \draw (A) -- (B) node[midway,above]{$\vec{u}$};
+    // - \draw[fill=white](\i) circle (1.5pt) ($(\i)+(\g:3mm)$) node[scale=1]{$\i$};
     if (cmd.includes("node") && !cmd.startsWith("\\node")) {
       let scanIdx = 0;
       while (scanIdx < cmd.length) {
@@ -1240,9 +1346,13 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         const afterBraceIdx = bal.endIndex + 1;
         scanIdx = afterBraceIdx;
 
-        // Tìm các cặp điểm xung quanh node
-        const prevParens = Array.from(beforeNode.matchAll(/\(([^)]+)\)/g));
-        const nextParens = Array.from(cmd.substring(afterBraceIdx).matchAll(/\(([^)]+)\)/g));
+        // Trích xuất chính xác các tọa độ điểm (bỏ qua bán kính circle)
+        const prevTokens = extractCoordinateTokens(beforeNode, coordsMap).filter(
+          (t) => !t.isCircleRadius && t.pt !== null
+        );
+        const nextTokens = extractCoordinateTokens(cmd.substring(afterBraceIdx), coordsMap).filter(
+          (t) => !t.isCircleRadius && t.pt !== null
+        );
 
         let posFactor = 0.5;
         const posMatch = optStr.match(/pos\s*=\s*([0-9.]+)/i);
@@ -1259,25 +1369,9 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           beforeNode.endsWith("-|") ||
           beforeNode.endsWith("|-")
         ) {
-          if (prevParens.length > 0 && nextParens.length > 0) {
-            const p1 = parseCoordinateValue(`(${prevParens[prevParens.length - 1][1]})`, coordsMap);
-            const p2 = parseCoordinateValue(`(${nextParens[0][1]})`, coordsMap);
-            if (p1 && p2) {
-              nodePt = {
-                x: p1.x + (p2.x - p1.x) * posFactor,
-                y: p1.y + (p2.y - p1.y) * posFactor,
-              };
-            }
-          }
-        }
-
-        // TH 2: Node nằm sau đường nối: (P1) -- (P2) node[...]
-        if (!nodePt && prevParens.length >= 2) {
-          const lastP2 = prevParens[prevParens.length - 1];
-          const lastP1 = prevParens[prevParens.length - 2];
-          const p1 = parseCoordinateValue(`(${lastP1[1]})`, coordsMap);
-          const p2 = parseCoordinateValue(`(${lastP2[1]})`, coordsMap);
-          if (p1 && p2) {
+          if (prevTokens.length > 0 && nextTokens.length > 0) {
+            const p1 = prevTokens[prevTokens.length - 1].pt!;
+            const p2 = nextTokens[0].pt!;
             nodePt = {
               x: p1.x + (p2.x - p1.x) * posFactor,
               y: p1.y + (p2.y - p1.y) * posFactor,
@@ -1285,12 +1379,21 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           }
         }
 
-        // TH 3: Node đặt trực tiếp tại một điểm: (P) node[...]
-        if (!nodePt && prevParens.length >= 1) {
-          const singleP = prevParens[prevParens.length - 1];
-          const p = parseCoordinateValue(`(${singleP[1]})`, coordsMap);
-          if (p) {
-            nodePt = { ...p };
+        // TH 2: Node nằm sau đường nối: (P1) -- (P2) node[midway...]
+        if (!nodePt && prevTokens.length >= 2 && (optStr.includes("midway") || optStr.includes("pos="))) {
+          const p1 = prevTokens[prevTokens.length - 2].pt!;
+          const p2 = prevTokens[prevTokens.length - 1].pt!;
+          nodePt = {
+            x: p1.x + (p2.x - p1.x) * posFactor,
+            y: p1.y + (p2.y - p1.y) * posFactor,
+          };
+        }
+
+        // TH 3: Node đặt trực tiếp tại một điểm / tọa độ: (P) node[...] hoặc ($(P)+(90:3mm)$) node[...]
+        if (!nodePt && prevTokens.length >= 1) {
+          const lastToken = prevTokens[prevTokens.length - 1];
+          if (lastToken.pt) {
+            nodePt = { ...lastToken.pt };
           }
         }
 
@@ -1379,6 +1482,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
   // Thu thập tất cả điểm hiển thị để tính Bounding Box
   const allPoints: Point2D[] = [];
   coordsMap.forEach((pt) => allPoints.push(pt));
+  explicitDots.forEach((d) => allPoints.push({ x: d.x, y: d.y }));
   nodes.forEach((n) => allPoints.push({ x: n.x, y: n.y }));
   paths.forEach((p) => {
     if (p.points) p.points.forEach((pt) => allPoints.push(pt));
@@ -1553,16 +1657,21 @@ export function parseTikzToSvg(rawTikzCode: string): string {
   });
 
   // 4. Render các điểm chấm tròn rõ ràng (Explicit Dots)
-  explicitDots.forEach((pt, name) => {
-    const cx = toSvgX(pt.x);
-    const cy = toSvgY(pt.y);
-    svgElements += `<circle id="tikz-dot-${name}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2.8" fill="#1e293b" stroke="#ffffff" stroke-width="1" />`;
+  explicitDots.forEach((dot, name) => {
+    const cx = toSvgX(dot.x);
+    const cy = toSvgY(dot.y);
+    const r = dot.radius || 2.8;
+    const fill = dot.fill || "#1e293b";
+    const stroke = dot.stroke || "#ffffff";
+    svgElements += `<circle id="tikz-dot-${name}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="1" />`;
   });
 
-  // 5. Render các nhãn đỉnh và góc (Nodes & Labels)
+  // 5. Render các nhãn đỉnh và góc (Nodes & Labels) với cơ chế phân giải vị trí & chống đè
+  const placedLabels: { x: number; y: number }[] = [];
+
   nodes.forEach((node, nIdx) => {
-    const cx = toSvgX(node.x);
-    const cy = toSvgY(node.y);
+    let cx = toSvgX(node.x);
+    let cy = toSvgY(node.y);
 
     let offsetX = 0;
     let offsetY = 0;
@@ -1580,14 +1689,27 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       if (pos.includes("below")) offsetY = 14;
     }
 
+    let finalX = cx + offsetX;
+    let finalY = cy + offsetY;
+
+    // Kiểm tra và tránh chồng đè giữa các nhãn điểm gần nhau
+    for (const placed of placedLabels) {
+      const dist = Math.hypot(finalX - placed.x, finalY - placed.y);
+      if (dist < 18) {
+        // Dịch chuyển nhẹ theo trục Y để không đè chữ
+        finalY += (finalY >= placed.y ? 12 : -12);
+      }
+    }
+    placedLabels.push({ x: finalX, y: finalY });
+
     const renderedHtml = renderLatexLabel(node.label);
 
     if (node.isBadge) {
       svgElements += `
         <foreignObject 
           id="tikz-node-badge-${nIdx}"
-          x="${(cx + offsetX - 45).toFixed(1)}" 
-          y="${(cy + offsetY - 16).toFixed(1)}" 
+          x="${(finalX - 45).toFixed(1)}" 
+          y="${(finalY - 16).toFixed(1)}" 
           width="90" 
           height="32"
           style="overflow: visible; pointer-events: none;"
@@ -1600,8 +1722,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       svgElements += `
         <foreignObject 
           id="tikz-node-label-${nIdx}"
-          x="${(cx + offsetX - 40).toFixed(1)}" 
-          y="${(cy + offsetY - 18).toFixed(1)}" 
+          x="${(finalX - 40).toFixed(1)}" 
+          y="${(finalY - 18).toFixed(1)}" 
           width="80" 
           height="36"
           style="overflow: visible; pointer-events: none;"
