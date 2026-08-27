@@ -1194,81 +1194,104 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
     // 5. \node [options] (Name) at (coord) [trailing_options] {$Label$}
     if (cmd.includes("\\node")) {
-      const nodeRegex = /\\node\s*(?:\[([^\]]*)\])?\s*(?:\(([^)]+)\))?\s*at\s*/g;
+      const nodeRegex = /\\node\b/g;
       let match: RegExpExecArray | null;
       while ((match = nodeRegex.exec(cmd)) !== null) {
-        let optStr = match[1] || "";
-        const name = (match[2] || "").trim();
-        const coordStartIndex = nodeRegex.lastIndex;
+        let cursor = nodeRegex.lastIndex;
+        let optParts: string[] = [];
+        let explicitPt: Point2D | null = null;
+        let nodeName = "";
 
-        // Bóc tách tọa độ sau "at "
-        if (cmd[coordStartIndex] === "(") {
-          const bal = extractBalancedParens(cmd, coordStartIndex);
-          if (bal) {
-            const coordStr = bal.content;
-            let afterCoordIdx = bal.endIndex + 1;
+        // Tên node tùy chọn dạng (node_name)
+        const nameMatch = cmd.substring(cursor).match(/^\s*\(([^)]+)\)/);
+        if (nameMatch && !cmd.substring(cursor).trim().startsWith("(0,") && !cmd.substring(cursor).trim().startsWith("(-") && !cmd.substring(cursor).trim().startsWith("(1") && !cmd.substring(cursor).trim().startsWith("(2") && !cmd.substring(cursor).trim().startsWith("(3") && !cmd.substring(cursor).trim().startsWith("(4")) {
+          nodeName = nameMatch[1].trim();
+          cursor += nameMatch[0].length;
+        }
 
-            // Kiểm tra tùy chọn phía sau tọa độ ví dụ: [left], [below], [above right]
-            const trailingOptMatch = cmd.substring(afterCoordIdx).match(/^\s*\[([^\]]*)\]/);
-            if (trailingOptMatch) {
-              optStr = optStr ? `${optStr},${trailingOptMatch[1]}` : trailingOptMatch[1];
-              afterCoordIdx += trailingOptMatch[0].length;
-            }
+        // Lặp lấy options [...] và at (...)
+        let loop = true;
+        while (loop && cursor < cmd.length) {
+          const rest = cmd.substring(cursor);
+          const optM = rest.match(/^\s*\[([^\]]*)\]/);
+          if (optM) {
+            optParts.push(optM[1].trim());
+            cursor += optM[0].length;
+            continue;
+          }
 
-            // Tìm nhãn { ... }
-            const braceIdx = cmd.indexOf("{", afterCoordIdx);
-            let label = "";
-            if (braceIdx !== -1) {
-              const labelBrace = extractBalancedBraces(cmd, braceIdx);
-              if (labelBrace) label = labelBrace.content.trim();
-            }
-
-            const pt = parseCoordinateValue(coordStr, coordsMap);
-            if (pt) {
-              if (optStr.includes("rectangle") || optStr.includes("minimum width") || optStr.includes("pattern=")) {
-                let width = 1.0;
-                let height = 1.0;
-                const wMatch = optStr.match(/minimum width\s*=\s*([0-9.]+\s*(?:cm|mm|pt)?)/);
-                if (wMatch) width = evaluateExpr(wMatch[1]) || 1.0;
-                const hMatch = optStr.match(/minimum height\s*=\s*([0-9.]+\s*(?:cm|mm|pt)?)/);
-                if (hMatch) height = evaluateExpr(hMatch[1]) || 1.0;
-
-                let pattern: "north west lines" | "dots" | "crosshatch" | "grid" | "none" = "none";
-                if (optStr.includes("pattern=north west lines") || optStr.includes("north west")) {
-                  pattern = "north west lines";
-                } else if (optStr.includes("pattern=dots") || optStr.includes("dots")) {
-                  pattern = "dots";
-                } else if (optStr.includes("pattern=crosshatch")) {
-                  pattern = "crosshatch";
-                } else if (optStr.includes("pattern=grid")) {
-                  pattern = "grid";
-                }
-
-                rectShapes.push({
-                  id: name || `rect_${rectShapes.length}`,
-                  x: pt.x,
-                  y: pt.y,
-                  width,
-                  height,
-                  pattern,
-                  strokeColor: optStr.includes("draw") ? "#1e293b" : undefined,
-                  strokeWidth: 1.2,
-                });
-              } else if (label) {
-                const isDup = nodes.some(
-                  (n) => Math.abs(n.x - pt.x) < 0.05 && Math.abs(n.y - pt.y) < 0.05 && n.label === label
-                );
-                if (!isDup) {
-                  nodes.push({
-                    id: name || `node_${nodes.length}`,
-                    x: pt.x,
-                    y: pt.y,
-                    pos: optStr || "above",
-                    label,
-                  });
-                }
+          const atM = rest.match(/^\s*at\s*/);
+          if (atM) {
+            cursor += atM[0].length;
+            const atRest = cmd.substring(cursor);
+            if (atRest.startsWith("(")) {
+              const bal = extractBalancedParens(cmd, cursor);
+              if (bal) {
+                explicitPt = parseCoordinateValue(bal.content, coordsMap);
+                cursor = bal.endIndex + 1;
+                continue;
+              }
+            } else {
+              const ptNameM = atRest.match(/^([a-zA-Z0-9_']+)/);
+              if (ptNameM) {
+                explicitPt = parseCoordinateValue(ptNameM[1], coordsMap);
+                cursor += ptNameM[0].length;
+                continue;
               }
             }
+          }
+          loop = false;
+        }
+
+        const optStr = optParts.join(",");
+        const braceIdx = cmd.indexOf("{", cursor);
+        let label = "";
+        if (braceIdx !== -1) {
+          const labelBrace = extractBalancedBraces(cmd, braceIdx);
+          if (labelBrace) {
+            label = labelBrace.content.trim();
+            nodeRegex.lastIndex = labelBrace.endIndex + 1;
+          }
+        }
+
+        if (explicitPt) {
+          if (optStr.includes("rectangle") || optStr.includes("minimum width") || optStr.includes("pattern=")) {
+            let width = 1.0;
+            let height = 1.0;
+            const wMatch = optStr.match(/minimum width\s*=\s*([0-9.]+\s*(?:cm|mm|pt)?)/);
+            if (wMatch) width = evaluateExpr(wMatch[1]) || 1.0;
+            const hMatch = optStr.match(/minimum height\s*=\s*([0-9.]+\s*(?:cm|mm|pt)?)/);
+            if (hMatch) height = evaluateExpr(hMatch[1]) || 1.0;
+
+            let pattern: "north west lines" | "dots" | "crosshatch" | "grid" | "none" = "none";
+            if (optStr.includes("pattern=north west lines") || optStr.includes("north west")) {
+              pattern = "north west lines";
+            } else if (optStr.includes("pattern=dots") || optStr.includes("dots")) {
+              pattern = "dots";
+            } else if (optStr.includes("pattern=crosshatch")) {
+              pattern = "crosshatch";
+            } else if (optStr.includes("pattern=grid")) {
+              pattern = "grid";
+            }
+
+            rectShapes.push({
+              id: nodeName || `rect_${rectShapes.length}`,
+              x: explicitPt.x,
+              y: explicitPt.y,
+              width,
+              height,
+              pattern,
+              strokeColor: optStr.includes("draw") ? "#1e293b" : undefined,
+              strokeWidth: 1.2,
+            });
+          } else if (label) {
+            nodes.push({
+              id: nodeName || `node_${nodes.length}`,
+              x: explicitPt.x,
+              y: explicitPt.y,
+              pos: optStr || "above",
+              label,
+            });
           }
         }
       }
@@ -1306,7 +1329,9 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
     // 7. Inline / path nodes:
     // Hỗ trợ:
-    // - \path (O)--(a) node[pos=0.5,left]{$\vec{F_1}$} (O)--(b) node[pos=0.5,above]{$\vec{F_2}$} (O)--(c) node[pos=0.5,above left]{$\vec{F_3}$};
+    // - \coordinate (A) at (0,0) node at (A) [left] {$A$};
+    // - \coordinate (B) at (-1,-1) node at (B) [left] {$B$};
+    // - \path (O)--(a) node[pos=0.5,left]{$\vec{F_1}$} (O)--(b) node[pos=0.5,above]{$\vec{F_2}$};
     // - \draw [<->](6,-.6)--(8,-.6)node[midway,below]{$30\text{m}$};
     // - \draw (A) to node[midway,above]{$\vec{v}$} (B);
     // - \draw (A) -- (B) node[midway,above]{$\vec{u}$};
@@ -1320,19 +1345,59 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
         const nodePos = scanIdx + nodeMatch.index;
         const beforeNode = cmd.substring(0, nodePos).trim();
-        let afterNodeIdx = nodePos + 4; // length of 'node'
+        let cursor = nodePos + 4; // length of 'node'
 
-        let optStr = "";
-        let braceSearchIdx = afterNodeIdx;
-        const optBracketMatch = cmd.substring(afterNodeIdx).match(/^\s*\[([^\]]*)\]/);
-        if (optBracketMatch) {
-          optStr = optBracketMatch[1].trim();
-          braceSearchIdx = afterNodeIdx + optBracketMatch[0].length;
+        let optParts: string[] = [];
+        let explicitAtPt: Point2D | null = null;
+        let nodeName = "";
+
+        // Kiểm tra tên node tùy chọn (tên nhãn định danh)
+        const nameM = cmd.substring(cursor).match(/^\s*\(([a-zA-Z0-9_']+)\)/);
+        if (nameM && !cmd.substring(cursor).trim().startsWith("(0,") && !cmd.substring(cursor).trim().startsWith("(-") && !cmd.substring(cursor).trim().startsWith("(1") && !cmd.substring(cursor).trim().startsWith("(2") && !cmd.substring(cursor).trim().startsWith("(3") && !cmd.substring(cursor).trim().startsWith("(4")) {
+          // Chỉ coi là tên nếu phía trước không có từ "at"
+          nodeName = nameM[1].trim();
+          cursor += nameM[0].length;
         }
 
-        const braceStart = cmd.indexOf("{", braceSearchIdx);
+        // Lặp trích xuất options [...] và at (...)
+        let loop = true;
+        while (loop && cursor < cmd.length) {
+          const rest = cmd.substring(cursor);
+          const optBracketMatch = rest.match(/^\s*\[([^\]]*)\]/);
+          if (optBracketMatch) {
+            optParts.push(optBracketMatch[1].trim());
+            cursor += optBracketMatch[0].length;
+            continue;
+          }
+
+          const atMatch = rest.match(/^\s*at\s*/);
+          if (atMatch) {
+            cursor += atMatch[0].length;
+            const atRest = cmd.substring(cursor);
+            if (atRest.startsWith("(")) {
+              const bal = extractBalancedParens(cmd, cursor);
+              if (bal) {
+                explicitAtPt = parseCoordinateValue(bal.content, coordsMap);
+                cursor = bal.endIndex + 1;
+                continue;
+              }
+            } else {
+              const ptNameMatch = atRest.match(/^([a-zA-Z0-9_']+)/);
+              if (ptNameMatch) {
+                explicitAtPt = parseCoordinateValue(ptNameMatch[1], coordsMap);
+                cursor += ptNameMatch[0].length;
+                continue;
+              }
+            }
+          }
+          loop = false;
+        }
+
+        const optStr = optParts.join(",");
+
+        const braceStart = cmd.indexOf("{", cursor);
         if (braceStart === -1) {
-          scanIdx = braceSearchIdx + 1;
+          scanIdx = cursor + 1;
           continue;
         }
 
@@ -1346,7 +1411,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         const afterBraceIdx = bal.endIndex + 1;
         scanIdx = afterBraceIdx;
 
-        // Trích xuất chính xác các tọa độ điểm (bỏ qua bán kính circle)
+        // Trích xuất các tọa độ trước và sau node (nếu không có explicit at)
         const prevTokens = extractCoordinateTokens(beforeNode, coordsMap).filter(
           (t) => !t.isCircleRadius && t.pt !== null
         );
@@ -1360,14 +1425,15 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           posFactor = parseFloat(posMatch[1]) || 0.5;
         }
 
-        let nodePt: Point2D | null = null;
+        let nodePt: Point2D | null = explicitAtPt;
 
         // TH 1: Node nằm giữa (P1) -- node (P2) hoặc (P1) to node (P2)
         if (
-          beforeNode.endsWith("--") ||
-          beforeNode.endsWith("to") ||
-          beforeNode.endsWith("-|") ||
-          beforeNode.endsWith("|-")
+          !nodePt &&
+          (beforeNode.endsWith("--") ||
+            beforeNode.endsWith("to") ||
+            beforeNode.endsWith("-|") ||
+            beforeNode.endsWith("|-"))
         ) {
           if (prevTokens.length > 0 && nextTokens.length > 0) {
             const p1 = prevTokens[prevTokens.length - 1].pt!;
@@ -1398,19 +1464,14 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         }
 
         if (nodePt && label) {
-          const isDup = nodes.some(
-            (n) => Math.abs(n.x - nodePt!.x) < 0.05 && Math.abs(n.y - nodePt!.y) < 0.05 && n.label === label
-          );
-          if (!isDup) {
-            nodes.push({
-              id: `path_node_${nodes.length}`,
-              x: nodePt.x,
-              y: nodePt.y,
-              pos: optStr || "above",
-              label,
-              isBadge: optStr.includes("midway"),
-            });
-          }
+          nodes.push({
+            id: nodeName || `path_node_${nodes.length}`,
+            x: nodePt.x,
+            y: nodePt.y,
+            pos: optStr || "above",
+            label,
+            isBadge: optStr.includes("midway"),
+          });
         }
       }
     }
@@ -1448,10 +1509,9 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
       const isCycle = cleanDrawBody.includes("cycle");
 
-      // Tách các phân đoạn đường nét nối bằng --
-      // Ví dụ: (S)--(A)  (S)--(D) (S)--(E) (A)--(E) (D)--(E)
-      // Tách thành từng cụm liên tục
-      const subPaths = cleanDrawBody.split(/\s+(?=\([a-zA-Z0-9_.,+-]+\)\s*--)/).filter((s) => s.trim().length > 0);
+      // Tách các phân đoạn đường nét nối bằng -- (hỗ trợ cả tên có dấu nháy đơn như A', B', D')
+      // Ví dụ: (B)--(A)--(D) (A')--(A) hoặc (A')--(B')--(C')--(D')--(A') (B')--(B) (C')--(C) (D')--(D)
+      const subPaths = cleanDrawBody.split(/\s+(?=\([a-zA-Z0-9_.,'+-\s]+\)\s*--)/).filter((s) => s.trim().length > 0);
 
       for (const sp of subPaths) {
         const pointTokenMatches = Array.from(sp.matchAll(/\(([^)]+)\)/g));
@@ -1666,70 +1726,201 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     svgElements += `<circle id="tikz-dot-${name}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="1" />`;
   });
 
-  // 5. Render các nhãn đỉnh và góc (Nodes & Labels) với cơ chế phân giải vị trí & chống đè
-  const placedLabels: { x: number; y: number }[] = [];
+  // 5. Render các nhãn đỉnh và góc (Nodes & Labels) với thuật toán tự động gán tọa độ, kiểm tra khoảng cách tối thiểu & chống trùng đè
+  // A. Khử trùng lặp node theo tọa độ hình học & nhãn
+  const uniqueNodes: TikzNode[] = [];
+  for (const n of nodes) {
+    const isDuplicate = uniqueNodes.some(
+      (un) =>
+        Math.hypot(un.x - n.x, un.y - n.y) < 0.08 &&
+        (un.label === n.label || un.label.replace(/[{}$]/g, "") === n.label.replace(/[{}$]/g, ""))
+    );
+    if (!isDuplicate) {
+      uniqueNodes.push(n);
+    }
+  }
 
-  nodes.forEach((node, nIdx) => {
-    let cx = toSvgX(node.x);
-    let cy = toSvgY(node.y);
+  // B. Khởi tạo vị trí & hướng vector offset ban đầu
+  interface LayoutNode {
+    id: string;
+    origVx: number;
+    origVy: number;
+    initDx: number;
+    initDy: number;
+    x: number;
+    y: number;
+    label: string;
+    isBadge?: boolean;
+  }
+
+  const layoutNodes: LayoutNode[] = uniqueNodes.map((node, idx) => {
+    const vx = toSvgX(node.x);
+    const vy = toSvgY(node.y);
 
     let offsetX = 0;
     let offsetY = 0;
-    const pos = node.pos.toLowerCase();
+    const pos = (node.pos || "").toLowerCase();
 
     const numAngle = parseFloat(pos);
     if (!isNaN(numAngle) && !pos.includes("above") && !pos.includes("below") && !pos.includes("left") && !pos.includes("right")) {
       const rad = (numAngle * Math.PI) / 180;
-      offsetX = Math.cos(rad) * 14;
-      offsetY = -Math.sin(rad) * 14;
+      offsetX = Math.cos(rad) * 17;
+      offsetY = -Math.sin(rad) * 17;
     } else {
-      if (pos.includes("left")) offsetX = -14;
-      if (pos.includes("right")) offsetX = 14;
-      if (pos.includes("above")) offsetY = -14;
-      if (pos.includes("below")) offsetY = 14;
-    }
+      if (pos.includes("left")) offsetX -= 17;
+      if (pos.includes("right")) offsetX += 17;
+      if (pos.includes("above")) offsetY -= 17;
+      if (pos.includes("below")) offsetY += 17;
 
-    let finalX = cx + offsetX;
-    let finalY = cy + offsetY;
+      // Nếu không có hướng rõ ràng, tìm hướng ra ngoài dựa trên các đường nối tới đỉnh
+      if (offsetX === 0 && offsetY === 0) {
+        let sumDx = 0;
+        let sumDy = 0;
+        let edgeCount = 0;
+        paths.forEach((p) => {
+          if (p.points) {
+            for (let i = 0; i < p.points.length; i++) {
+              const pt = p.points[i];
+              if (Math.hypot(pt.x - node.x, pt.y - node.y) < 0.05) {
+                if (i > 0) {
+                  const prev = p.points[i - 1];
+                  const dX = toSvgX(prev.x) - vx;
+                  const dY = toSvgY(prev.y) - vy;
+                  const len = Math.hypot(dX, dY) || 1;
+                  sumDx += dX / len;
+                  sumDy += dY / len;
+                  edgeCount++;
+                }
+                if (i < p.points.length - 1) {
+                  const next = p.points[i + 1];
+                  const dX = toSvgX(next.x) - vx;
+                  const dY = toSvgY(next.y) - vy;
+                  const len = Math.hypot(dX, dY) || 1;
+                  sumDx += dX / len;
+                  sumDy += dY / len;
+                  edgeCount++;
+                }
+              }
+            }
+          }
+        });
 
-    // Kiểm tra và tránh chồng đè giữa các nhãn điểm gần nhau
-    for (const placed of placedLabels) {
-      const dist = Math.hypot(finalX - placed.x, finalY - placed.y);
-      if (dist < 18) {
-        // Dịch chuyển nhẹ theo trục Y để không đè chữ
-        finalY += (finalY >= placed.y ? 12 : -12);
+        if (edgeCount > 0 && Math.hypot(sumDx, sumDy) > 0.05) {
+          // Hướng ra phía ngoài ngược với các cạnh nối
+          const len = Math.hypot(sumDx, sumDy);
+          offsetX = -(sumDx / len) * 17;
+          offsetY = -(sumDy / len) * 17;
+        } else {
+          offsetY = -17; // Mặc định phía trên
+        }
       }
     }
-    placedLabels.push({ x: finalX, y: finalY });
 
-    const renderedHtml = renderLatexLabel(node.label);
+    return {
+      id: node.id || `node_${idx}`,
+      origVx: vx,
+      origVy: vy,
+      initDx: offsetX,
+      initDy: offsetY,
+      x: vx + offsetX,
+      y: vy + offsetY,
+      label: node.label,
+      isBadge: node.isBadge,
+    };
+  });
 
-    if (node.isBadge) {
+  // C. Thuật toán kiểm tra và phân giải khoảng cách tối thiểu (Minimum Distance & Repulsion Relaxation)
+  const MIN_NODE_DIST = 26; // Khoảng cách tối thiểu giữa 2 nhãn điểm
+  const MIN_VERTEX_DIST = 14; // Khoảng cách tối thiểu từ nhãn tới bất kỳ đỉnh nào khác
+
+  for (let iter = 0; iter < 10; iter++) {
+    // 1. Đẩy lùi va chạm giữa các nhãn điểm
+    for (let i = 0; i < layoutNodes.length; i++) {
+      for (let j = i + 1; j < layoutNodes.length; j++) {
+        const n1 = layoutNodes[i];
+        const n2 = layoutNodes[j];
+        const dX = n2.x - n1.x;
+        const dY = n2.y - n1.y;
+        const dist = Math.hypot(dX, dY) || 0.001;
+        if (dist < MIN_NODE_DIST) {
+          const overlap = MIN_NODE_DIST - dist;
+          const uX = dX / dist;
+          const uY = dY / dist;
+          n1.x -= uX * overlap * 0.5;
+          n1.y -= uY * overlap * 0.5;
+          n2.x += uX * overlap * 0.5;
+          n2.y += uY * overlap * 0.5;
+        }
+      }
+    }
+
+    // 2. Tránh đè lên các đỉnh khác trong hình vẽ
+    for (let i = 0; i < layoutNodes.length; i++) {
+      const item = layoutNodes[i];
+      for (const pt of allPoints) {
+        const pSvgX = toSvgX(pt.x);
+        const pSvgY = toSvgY(pt.y);
+        // Không xét đỉnh gốc của chính nó
+        if (Math.hypot(pSvgX - item.origVx, pSvgY - item.origVy) > 6) {
+          const dX = item.x - pSvgX;
+          const dY = item.y - pSvgY;
+          const dist = Math.hypot(dX, dY) || 0.001;
+          if (dist < MIN_VERTEX_DIST) {
+            const push = (MIN_VERTEX_DIST - dist) * 0.6;
+            item.x += (dX / dist) * push;
+            item.y += (dY / dist) * push;
+          }
+        }
+      }
+    }
+
+    // 3. Neo giữ khoảng cách tự nhiên với đỉnh gốc của chính nó
+    for (let i = 0; i < layoutNodes.length; i++) {
+      const item = layoutNodes[i];
+      const dX = item.x - item.origVx;
+      const dY = item.y - item.origVy;
+      const dist = Math.hypot(dX, dY) || 0.001;
+      if (dist < 12) {
+        const lenDir = Math.hypot(item.initDx, item.initDy) || 1;
+        item.x = item.origVx + (item.initDx / lenDir) * 16;
+        item.y = item.origVy + (item.initDy / lenDir) * 16;
+      } else if (dist > 32) {
+        item.x = item.origVx + (dX / dist) * 28;
+        item.y = item.origVy + (dY / dist) * 28;
+      }
+    }
+  }
+
+  // D. Render các nhãn KaTeX lên SVG
+  layoutNodes.forEach((ln, nIdx) => {
+    const renderedHtml = renderLatexLabel(ln.label);
+
+    if (ln.isBadge) {
       svgElements += `
         <foreignObject 
           id="tikz-node-badge-${nIdx}"
-          x="${(finalX - 45).toFixed(1)}" 
-          y="${(finalY - 16).toFixed(1)}" 
+          x="${(ln.x - 45).toFixed(1)}" 
+          y="${(ln.y - 16).toFixed(1)}" 
           width="90" 
           height="32"
           style="overflow: visible; pointer-events: none;"
         >
           <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-800 font-bold text-[13px] whitespace-nowrap leading-none">
-            <span class="px-2 py-0.5 bg-white rounded border border-slate-200 shadow-2xs">${renderedHtml}</span>
+            <span class="px-2 py-0.5 bg-white/95 rounded border border-slate-200 shadow-2xs">${renderedHtml}</span>
           </div>
         </foreignObject>`;
     } else {
       svgElements += `
         <foreignObject 
           id="tikz-node-label-${nIdx}"
-          x="${(finalX - 40).toFixed(1)}" 
-          y="${(finalY - 18).toFixed(1)}" 
+          x="${(ln.x - 40).toFixed(1)}" 
+          y="${(ln.y - 18).toFixed(1)}" 
           width="80" 
           height="36"
           style="overflow: visible; pointer-events: none;"
         >
           <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-900 font-bold text-[14px] whitespace-nowrap leading-none">
-            <span class="px-1 py-0.5 drop-shadow-xs">${renderedHtml}</span>
+            <span class="px-1 py-0.5 bg-white/85 backdrop-blur-[0.5px] rounded drop-shadow-xs" style="text-shadow: 0 0 3px #ffffff, 0 0 5px #ffffff;">${renderedHtml}</span>
           </div>
         </foreignObject>`;
     }
