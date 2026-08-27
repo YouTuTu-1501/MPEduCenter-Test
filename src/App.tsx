@@ -1,7 +1,6 @@
 import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from "react";
 import { Exam, StudentSubmission } from "./types/exam";
 import { User } from "./types/auth";
-import { defaultExam001, initialSampleExams } from "./data/defaultExam";
 import { Navbar, ActiveView } from "./components/Navbar";
 import { BankManagerView } from "./components/BankManagerView";
 import { PresentationView } from "./components/PresentationView";
@@ -150,12 +149,21 @@ function MainApp({ currentUser }: { currentUser: User }) {
         }
       }
     } catch {}
-    return initialSampleExams.filter((e) => !deleted.has(e.id));
+    return [];
   });
-  const [selectedExam, setSelectedExam] = useState<Exam>(() => {
+  const [selectedExam, setSelectedExam] = useState<Exam | null>(() => {
     const deleted = getDeletedExamIds();
-    const available = initialSampleExams.filter((e) => !deleted.has(e.id));
-    return available[0] || defaultExam001;
+    try {
+      const saved = localStorage.getItem("edutest_exams");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const available = parsed.filter((e: Exam) => e && e.id && !deleted.has(e.id));
+          return available[0] || null;
+        }
+      }
+    } catch {}
+    return null;
   });
   const [activeView, setActiveView] = useState<ActiveView>(() => {
     return isStudent ? "student_portal" : "bank";
@@ -192,8 +200,9 @@ function MainApp({ currentUser }: { currentUser: User }) {
         const filtered = firestoreExams.filter((e) => e && e.id && !deleted.has(e.id));
         setExams(filtered);
         setSelectedExam((current) => {
+          if (!current) return filtered[0] || null;
           const match = filtered.find((e) => e.id === current?.id);
-          return match || filtered[0] || defaultExam001;
+          return match || filtered[0] || null;
         });
       }
     });
@@ -249,7 +258,7 @@ function MainApp({ currentUser }: { currentUser: User }) {
   }, [submissions, users]);
 
   // Đảm bảo selectedExam luôn hợp lệ
-  const safeSelectedExam = selectedExam || exams[0] || defaultExam001;
+  const safeSelectedExam = selectedExam || (exams.length > 0 ? exams[0] : null);
 
   // Lưu đề thi vào danh sách & đẩy lên Firestore
   const handleSaveExam = (newExam: Exam) => {
@@ -295,11 +304,9 @@ function MainApp({ currentUser }: { currentUser: User }) {
       } catch {}
       return updated;
     });
-    if (safeSelectedExam.id === examId) {
+    if (safeSelectedExam?.id === examId) {
       const remaining = exams.filter((e) => e.id !== examId);
-      if (remaining.length > 0) {
-        setSelectedExam(remaining[0]);
-      }
+      setSelectedExam(remaining[0] || null);
     }
     deleteExamFromFirestore(examId).catch((e) => console.warn(e));
     toast.info(
@@ -424,8 +431,8 @@ function MainApp({ currentUser }: { currentUser: User }) {
         <Navbar
           activeView={activeView}
           setActiveView={setActiveView}
-          examTitle={safeSelectedExam.title}
-          examCode={safeSelectedExam.code}
+          examTitle={safeSelectedExam?.title || "EduTest Pro"}
+          examCode={safeSelectedExam?.code || ""}
           selectedClassFilter={selectedClassFilter}
           onSelectClassFilter={setSelectedClassFilter}
           onOpenLeaderboard={() => setActiveView("leaderboard")}
@@ -451,38 +458,74 @@ function MainApp({ currentUser }: { currentUser: User }) {
 
       {/* Phân hệ 2: Trình chiếu câu hỏi chuyên nghiệp (Admin & Giáo viên) */}
       {activeView === "presentation" && (
-        <PresentationView
-          exam={safeSelectedExam}
-          onExit={() => setActiveView(isStudent ? "student_portal" : "bank")}
-        />
+        safeSelectedExam ? (
+          <PresentationView
+            exam={safeSelectedExam}
+            onExit={() => setActiveView(isStudent ? "student_portal" : "bank")}
+          />
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <p className="text-slate-500 font-semibold mb-3">Chưa có đề thi nào được chọn để trình chiếu</p>
+            <button
+              onClick={() => setActiveView(isStudent ? "student_portal" : "bank")}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs"
+            >
+              Quay lại danh sách đề thi
+            </button>
+          </div>
+        )
       )}
 
       {/* Phân hệ 3: Làm bài thi trực tuyến cho Học sinh (4 dạng thức) */}
       {activeView === "exam" && (
-        <StudentExamView
-          exam={safeSelectedExam}
-          onExit={() => setActiveView(isStudent ? "student_portal" : "bank")}
-          onSubmissionComplete={handleSubmissionComplete}
-        />
+        safeSelectedExam ? (
+          <StudentExamView
+            exam={safeSelectedExam}
+            onExit={() => setActiveView(isStudent ? "student_portal" : "bank")}
+            onSubmissionComplete={handleSubmissionComplete}
+          />
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <p className="text-slate-500 font-semibold mb-3">Chưa có đề thi nào được chọn để làm bài</p>
+            <button
+              onClick={() => setActiveView(isStudent ? "student_portal" : "bank")}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs"
+            >
+              Quay lại danh sách đề thi
+            </button>
+          </div>
+        )
       )}
 
       {/* Phân hệ 4: Bảng điều khiển phân tích & Chấm thi cho Giáo viên / Admin */}
       {activeView === "analytics" && (
-        <TeacherAnalyticsView
-          exam={safeSelectedExam}
-          submissions={validSubmissions}
-          onBack={() => setActiveView(isStudent ? "student_portal" : "bank")}
-          selectedClassFilter={selectedClassFilter}
-          onSelectClassFilter={setSelectedClassFilter}
-          allExams={exams}
-          onSelectExam={(exam) => {
-            handleSelectExam(exam, "analytics");
-            setSelectedExamFilter(exam.id);
-          }}
-          onOpenLeaderboard={() => setActiveView("leaderboard")}
-          onOpenStudentHistory={handleOpenStudentHistory}
-          users={users}
-        />
+        safeSelectedExam ? (
+          <TeacherAnalyticsView
+            exam={safeSelectedExam}
+            submissions={validSubmissions}
+            onBack={() => setActiveView(isStudent ? "student_portal" : "bank")}
+            selectedClassFilter={selectedClassFilter}
+            onSelectClassFilter={setSelectedClassFilter}
+            allExams={exams}
+            onSelectExam={(exam) => {
+              handleSelectExam(exam, "analytics");
+              setSelectedExamFilter(exam.id);
+            }}
+            onOpenLeaderboard={() => setActiveView("leaderboard")}
+            onOpenStudentHistory={handleOpenStudentHistory}
+            users={users}
+          />
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <p className="text-slate-500 font-semibold mb-3">Chưa có đề thi nào để phân tích</p>
+            <button
+              onClick={() => setActiveView(isStudent ? "student_portal" : "bank")}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs"
+            >
+              Quay lại danh sách đề thi
+            </button>
+          </div>
+        )
       )}
 
       {/* Phân hệ 5: Bảng Xếp Hạng Điểm Số Học Sinh (Toàn bộ các lớp / Theo từng khối) */}
@@ -500,10 +543,22 @@ function MainApp({ currentUser }: { currentUser: User }) {
 
       {/* Phân hệ 6: Phòng thi trực tiếp đồng bộ thời gian thực */}
       {activeView === "live" && (
-        <RealtimeLiveRoomView
-          exam={safeSelectedExam}
-          onExit={() => setActiveView(isStudent ? "student_portal" : "bank")}
-        />
+        safeSelectedExam ? (
+          <RealtimeLiveRoomView
+            exam={safeSelectedExam}
+            onExit={() => setActiveView(isStudent ? "student_portal" : "bank")}
+          />
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <p className="text-slate-500 font-semibold mb-3">Chưa có đề thi nào để tạo phòng thi trực tiếp</p>
+            <button
+              onClick={() => setActiveView(isStudent ? "student_portal" : "bank")}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs"
+            >
+              Quay lại danh sách đề thi
+            </button>
+          </div>
+        )
       )}
 
       {/* Phân hệ 7: Quản trị Toàn diện & Phân quyền Người dùng (Dành riêng cho Admin) */}

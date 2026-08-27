@@ -13,7 +13,7 @@ import { Exam, StudentSubmission, STANDARD_CLASSES } from "../types/exam";
 import { ExamEditorModal } from "./ExamEditorModal";
 import { useToast } from "../context/ToastContext";
 import { useFilter } from "../context/FilterContext";
-import { wipeAndResetAllData, clearAllSubmissions } from "../services/firestoreService";
+import { wipeAndResetAllData, clearAllSubmissions, clearAllExams } from "../services/firestoreService";
 import {
   ShieldCheck,
   Users,
@@ -180,6 +180,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState<boolean>(false);
   const [examToDelete, setExamToDelete] = useState<Exam | null>(null);
+  const [showClearAllExamsConfirm, setShowClearAllExamsConfirm] = useState<boolean>(false);
   const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
 
   // Helper chuyển tên tiếng Việt sang email không dấu
@@ -1611,7 +1612,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
       {/* TAB 2: EXAMS GOVERNANCE */}
       {activeTab === "exams" && (
         <div className="space-y-4">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-slate-900">
                 Toàn bộ Ngân hàng Đề thi THPT ({exams.length} đề)
@@ -1620,103 +1621,127 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 Admin có quyền duyệt đề, sao lưu đề và phân bổ đề thi cho học sinh toàn trường.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleExportExamsJson}
-              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-xs"
-            >
-              <Download className="w-4 h-4" />
-              <span>Sao lưu toàn bộ ngân hàng đề (JSON)</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredExams.map((exam) => {
-              const questionCount = exam.questions.length;
-              return (
-                <div
-                  key={exam.id}
-                  className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition space-y-4"
+            <div className="flex items-center gap-2">
+              {exams.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowClearAllExamsConfirm(true)}
+                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                 >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-1 flex-wrap">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-extrabold rounded-md border border-indigo-100">
-                          {exam.grade || "Lớp 12"} • Mã: {exam.code}
-                        </span>
-                        {exam.targetClass && exam.targetClass !== "Tất cả các lớp" && (
-                          <span className="px-2 py-0.5 bg-amber-100 text-amber-900 text-[10px] font-extrabold rounded-md border border-amber-200">
-                            Lớp: {exam.targetClass}
-                          </span>
-                        )}
-                      </div>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-md border border-emerald-200 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                        <span>Đã phê duyệt</span>
-                      </span>
-                    </div>
-
-                    <h4 className="font-bold text-sm text-slate-900 line-clamp-2">{exam.title}</h4>
-                    <p className="text-xs text-slate-500 line-clamp-2">
-                      {exam.description || exam.chapter || "Đề kiểm tra chuẩn cấu trúc GDPT"}
-                    </p>
-
-                    <div className="flex items-center gap-3 text-xs text-slate-600 pt-1">
-                      <span>
-                        ⏱ <strong>{exam.durationMinutes}</strong> phút
-                      </span>
-                      <span>
-                        📝 <strong>{questionCount}</strong> câu hỏi
-                      </span>
-                      <span>
-                        🎯 <strong>{exam.totalScore || 10}</strong> điểm
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setEditingExam(exam)}
-                        className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold transition flex items-center gap-1 border border-amber-200/60"
-                        title="Chỉnh sửa toàn diện đề thi (Mã đề, Thời gian, Nội dung, Câu hỏi...)"
-                      >
-                        <Edit2 className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Sửa đề</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onSelectExam(exam, "presentation")}
-                        className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1"
-                        title="Xem chế độ Trình chiếu"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Trình chiếu</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onSelectExam(exam, "exam")}
-                        className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition flex items-center gap-1"
-                        title="Thi trực tuyến"
-                      >
-                        <span>Thi thử</span>
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setExamToDelete(exam)}
-                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
-                      title="Xóa đề thi"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Xóa toàn bộ đề thi ({exams.length})</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleExportExamsJson}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-xs cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Sao lưu toàn bộ ngân hàng đề (JSON)</span>
+              </button>
+            </div>
           </div>
+
+          {filteredExams.length === 0 ? (
+            <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center shadow-xs space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                <BookOpen className="w-6 h-6" />
+              </div>
+              <h4 className="font-bold text-slate-800 text-sm">Chưa có đề thi nào trong hệ thống</h4>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Ngân hàng đề thi đang trống sạch. Giáo viên hoặc Admin có thể thêm mới hoặc nhập file đề từ giao diện Ngân hàng đề thi.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredExams.map((exam) => {
+                const questionCount = exam.questions.length;
+                return (
+                  <div
+                    key={exam.id}
+                    className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition space-y-4"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-extrabold rounded-md border border-indigo-100">
+                            {exam.grade || "Lớp 12"} • Mã: {exam.code}
+                          </span>
+                          {exam.targetClass && exam.targetClass !== "Tất cả các lớp" && (
+                            <span className="px-2 py-0.5 bg-amber-100 text-amber-900 text-[10px] font-extrabold rounded-md border border-amber-200">
+                              Lớp: {exam.targetClass}
+                            </span>
+                          )}
+                        </div>
+                        <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-md border border-emerald-200 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                          <span>Đã phê duyệt</span>
+                        </span>
+                      </div>
+
+                      <h4 className="font-bold text-sm text-slate-900 line-clamp-2">{exam.title}</h4>
+                      <p className="text-xs text-slate-500 line-clamp-2">
+                        {exam.description || exam.chapter || "Đề kiểm tra chuẩn cấu trúc GDPT"}
+                      </p>
+
+                      <div className="flex items-center gap-3 text-xs text-slate-600 pt-1">
+                        <span>
+                          ⏱ <strong>{exam.durationMinutes}</strong> phút
+                        </span>
+                        <span>
+                          📝 <strong>{questionCount}</strong> câu hỏi
+                        </span>
+                        <span>
+                          🎯 <strong>{exam.totalScore || 10}</strong> điểm
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setEditingExam(exam)}
+                          className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold transition flex items-center gap-1 border border-amber-200/60"
+                          title="Chỉnh sửa toàn diện đề thi (Mã đề, Thời gian, Nội dung, Câu hỏi...)"
+                        >
+                          <Edit2 className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Sửa đề</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onSelectExam(exam, "presentation")}
+                          className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1"
+                          title="Xem chế độ Trình chiếu"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Trình chiếu</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onSelectExam(exam, "exam")}
+                          className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition flex items-center gap-1"
+                          title="Thi trực tuyến"
+                        >
+                          <span>Thi thử</span>
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setExamToDelete(exam)}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+                        title="Xóa đề thi"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -3090,6 +3115,54 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
               >
                 <Trash2 className="w-4 h-4" />
                 <span>Xóa đề thi</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL XÁC NHẬN XÓA TẤT CẢ ĐỀ THI */}
+      {showClearAllExamsConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-5">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-3 bg-rose-50 rounded-2xl border border-rose-100">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Xóa toàn bộ ngân hàng đề thi</h3>
+                <p className="text-xs text-slate-500">Xác nhận dọn dẹp sạch sẽ</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Bạn có chắc chắn muốn xóa toàn bộ <strong>{exams.length} đề thi</strong> khỏi cơ sở dữ liệu Firebase và bộ nhớ hệ thống? Hành động này sẽ đưa ngân hàng đề về trạng thái trống hoàn toàn và không thể hoàn tác.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearAllExamsConfirm(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                id="btn-confirm-clear-all-exams"
+                type="button"
+                onClick={async () => {
+                  try {
+                    await clearAllExams();
+                    toast.success("Đã xóa sạch ngân hàng đề", "Toàn bộ đề thi đã được dọn dẹp khỏi cơ sở dữ liệu.");
+                  } catch (e) {
+                    toast.error("Lỗi khi xóa", "Không thể xóa đề thi. Vui lòng thử lại.");
+                  }
+                  setShowClearAllExamsConfirm(false);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-sm flex items-center gap-2 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác nhận xóa sạch {exams.length} đề</span>
               </button>
             </div>
           </div>

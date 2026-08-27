@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { Exam, Question, StudentSubmission, EssayAnswer, checkExamAccessStatus } from "../types/exam";
 import { MathRenderer } from "./MathRenderer";
 import { EssayAnswerInput } from "./EssayAnswerInput";
@@ -80,6 +81,13 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
 
   // Câu hỏi hiện tại & câu trả lời
   const [currentIdx, setCurrentIdx] = useState<number>(0);
+  const [direction, setDirection] = useState<number>(0);
+
+  const goToQuestion = (nextIdx: number) => {
+    if (nextIdx === currentIdx || nextIdx < 0 || nextIdx >= exam.questions.length) return;
+    setDirection(nextIdx > currentIdx ? 1 : -1);
+    setCurrentIdx(nextIdx);
+  };
   const [userAnswers, setUserAnswers] = useState<Record<string, any>>({});
   const [flaggedQuestions, setFlaggedQuestions] = useState<Record<string, boolean>>({});
 
@@ -1085,7 +1093,7 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
       {/* Thân làm bài: Cột câu hỏi bên trái + Question Palette bên phải */}
       <div className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-4 gap-5 items-start">
         {/* Cột trái: Nội dung câu hỏi (3 cột) Bento Card */}
-        <div className="lg:col-span-3 bg-white rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200 flex flex-col min-h-[540px] relative">
+        <div className="lg:col-span-3 bg-white rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200 flex flex-col min-h-[540px] relative overflow-hidden">
           {/* Lớp viết vẽ nháp trực tiếp trên màn hình */}
           <StudentScratchpad
             questionId={currentQ.id}
@@ -1093,182 +1101,220 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
             onToggleDrawingActive={setIsDrawingActive}
           />
 
-          {/* Header câu hỏi */}
-          <div className="flex justify-between items-center pb-3 mb-4 border-b border-slate-100">
-            <div className="flex items-center gap-2">
-              <span className="px-3.5 py-1 rounded-full bg-indigo-50 text-indigo-700 font-bold text-xs uppercase tracking-wider border border-indigo-100">
-                {currentQ.partName}
-              </span>
-              <span className="text-xs font-semibold text-slate-500">
-                (Điểm: {currentQ.score}đ)
-              </span>
-            </div>
+          {/* Vùng hiển thị câu hỏi có hiệu ứng chuyển động mượt mà */}
+          <div className="flex-1 flex flex-col min-h-[380px] relative">
+            <AnimatePresence mode="wait" custom={direction}>
+              <motion.div
+                key={currentQ.id}
+                custom={direction}
+                initial={{
+                  opacity: 0,
+                  x: direction > 0 ? 32 : direction < 0 ? -32 : 0,
+                  scale: 0.99,
+                }}
+                animate={{
+                  opacity: 1,
+                  x: 0,
+                  scale: 1,
+                  transition: {
+                    duration: 0.24,
+                    ease: [0.22, 1, 0.36, 1],
+                  },
+                }}
+                exit={{
+                  opacity: 0,
+                  x: direction > 0 ? -32 : direction < 0 ? 32 : 0,
+                  scale: 0.99,
+                  transition: {
+                    duration: 0.16,
+                    ease: [0.4, 0, 1, 1],
+                  },
+                }}
+                className="flex-1 flex flex-col"
+              >
+                {/* Header câu hỏi */}
+                <div className="flex justify-between items-center pb-3 mb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <span className="px-3.5 py-1 rounded-full bg-indigo-50 text-indigo-700 font-bold text-xs uppercase tracking-wider border border-indigo-100">
+                      {currentQ.partName}
+                    </span>
+                    <span className="text-xs font-semibold text-slate-500">
+                      (Điểm: {currentQ.score}đ)
+                    </span>
+                  </div>
 
-            <button
-              type="button"
-              onClick={() => toggleFlag(currentQ.id)}
-              className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1 transition ${
-                flaggedQuestions[currentQ.id]
-                  ? "bg-amber-100 text-amber-800 border border-amber-300"
-                  : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-              }`}
-            >
-              <Flag className="w-3.5 h-3.5" />
-              <span>{flaggedQuestions[currentQ.id] ? "Đã gắn cờ" : "Cần xem lại"}</span>
-            </button>
-          </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleFlag(currentQ.id)}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1 transition ${
+                      flaggedQuestions[currentQ.id]
+                        ? "bg-amber-100 text-amber-800 border border-amber-300"
+                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                    }`}
+                  >
+                    <Flag className="w-3.5 h-3.5" />
+                    <span>{flaggedQuestions[currentQ.id] ? "Đã gắn cờ" : "Cần xem lại"}</span>
+                  </button>
+                </div>
 
-          {/* Đề bài */}
-          <div className="font-semibold text-slate-800 leading-relaxed text-sm sm:text-base mb-4">
-            <span className="font-black text-blue-600 mr-2">{currentQ.title}:</span>
-            <MathRenderer content={cleanQuestionContent(currentQ.content)} inline />
-          </div>
+                {/* Đề bài */}
+                <div className="font-semibold text-slate-800 leading-relaxed text-sm sm:text-base mb-4">
+                  <span className="font-black text-blue-600 mr-2">{currentQ.title}:</span>
+                  <MathRenderer content={cleanQuestionContent(currentQ.content)} inline />
+                </div>
 
-          {/* Ảnh câu hỏi nếu có */}
-          {currentQ.image && (
-            <InteractiveFigureViewer
-              src={currentQ.image}
-              alt={`Hình minh họa ${currentQ.title}`}
-              caption="Hình vẽ minh họa đề bài • Dùng thanh công cụ hoặc cuộn chuột để Phóng to / Thu nhỏ"
-              className="my-3"
-            />
-          )}
+                {/* Ảnh câu hỏi nếu có */}
+                {currentQ.image && (
+                  <InteractiveFigureViewer
+                    src={currentQ.image}
+                    alt={`Hình minh họa ${currentQ.title}`}
+                    caption="Hình vẽ minh họa đề bài • Dùng thanh công cụ hoặc cuộn chuột để Phóng to / Thu nhỏ"
+                    className="my-3"
+                  />
+                )}
 
-          {/* Khu vực chọn đáp án theo 4 dạng thức */}
-          <div className="my-4 flex-1">
-            {/* DẠNG 1: Trắc nghiệm 4 lựa chọn */}
-            {currentQ.type === "single_choice" && currentQ.options && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {currentQ.options.map((opt) => {
-                  const isChecked = userAnswers[currentQ.id] === opt.label;
-                  return (
-                    <button
-                      key={opt.label}
-                      type="button"
-                      onClick={() =>
-                        setUserAnswers((prev) => ({ ...prev, [currentQ.id]: opt.label }))
-                      }
-                      className={`p-3.5 rounded-2xl border-2 text-left font-semibold flex items-center gap-3 transition ${
-                        isChecked
-                          ? "border-blue-600 bg-blue-50 text-blue-900 shadow-sm"
-                          : "border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800"
-                      }`}
-                    >
-                      <div
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm flex-shrink-0 ${
-                          isChecked ? "bg-blue-600 text-white" : "bg-white border border-slate-300 text-slate-700"
-                        }`}
-                      >
-                        {opt.label}
-                      </div>
-                      <div className="flex-1 text-xs sm:text-sm">
-                        <MathRenderer content={opt.text} inline />
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* DẠNG 2: Đúng / Sai 4 ý */}
-            {currentQ.type === "true_false" && currentQ.tfItems && (
-              <div className="flex flex-col gap-2.5">
-                {currentQ.tfItems.map((item) => {
-                  const currTF = userAnswers[currentQ.id] || {};
-                  const currentVal = currTF[item.label];
-
-                  return (
-                    <div
-                      key={item.label}
-                      className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200"
-                    >
-                      <div className="flex-1 font-semibold text-xs sm:text-sm text-slate-800">
-                        <span className="font-extrabold text-blue-700 mr-2">{item.label})</span>
-                        <MathRenderer content={item.text} inline />
-                      </div>
-
-                      <div className="flex items-center gap-2 self-end sm:self-center">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setUserAnswers((prev) => ({
-                              ...prev,
-                              [currentQ.id]: {
-                                ...(prev[currentQ.id] || {}),
-                                [item.label]: true,
-                              },
-                            }))
-                          }
-                          className={`px-4 py-1.5 rounded-xl font-black text-xs border transition ${
-                            currentVal === true
-                              ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                          }`}
-                        >
-                          ĐÚNG
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setUserAnswers((prev) => ({
-                              ...prev,
-                              [currentQ.id]: {
-                                ...(prev[currentQ.id] || {}),
-                                [item.label]: false,
-                              },
-                            }))
-                          }
-                          className={`px-4 py-1.5 rounded-xl font-black text-xs border transition ${
-                            currentVal === false
-                              ? "bg-red-600 text-white border-red-600 shadow-sm"
-                              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                          }`}
-                        >
-                          SAI
-                        </button>
-                      </div>
+                {/* Khu vực chọn đáp án theo 4 dạng thức */}
+                <div className="my-4 flex-1">
+                  {/* DẠNG 1: Trắc nghiệm 4 lựa chọn */}
+                  {currentQ.type === "single_choice" && currentQ.options && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {currentQ.options.map((opt) => {
+                        const isChecked = userAnswers[currentQ.id] === opt.label;
+                        return (
+                          <motion.button
+                            key={opt.label}
+                            type="button"
+                            whileHover={{ scale: 1.012 }}
+                            whileTap={{ scale: 0.985 }}
+                            onClick={() =>
+                              setUserAnswers((prev) => ({ ...prev, [currentQ.id]: opt.label }))
+                            }
+                            className={`p-3.5 rounded-2xl border-2 text-left font-semibold flex items-center gap-3 transition-colors ${
+                              isChecked
+                                ? "border-blue-600 bg-blue-50 text-blue-900 shadow-sm ring-1 ring-blue-500/30"
+                                : "border-slate-200 bg-slate-50 hover:bg-slate-100/90 text-slate-800 hover:border-slate-300"
+                            }`}
+                          >
+                            <div
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm flex-shrink-0 transition-all ${
+                                isChecked ? "bg-blue-600 text-white shadow-xs" : "bg-white border border-slate-300 text-slate-700"
+                              }`}
+                            >
+                              {opt.label}
+                            </div>
+                            <div className="flex-1 text-xs sm:text-sm">
+                              <MathRenderer content={opt.text} inline />
+                            </div>
+                          </motion.button>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  )}
 
-            {/* DẠNG 3: Trả lời ngắn */}
-            {currentQ.type === "short_answer" && (
-              <div className="flex flex-col items-center my-6">
-                <input
-                  id="student-short-input"
-                  type="text"
-                  value={userAnswers[currentQ.id] || ""}
-                  onChange={(e) =>
-                    setUserAnswers((prev) => ({ ...prev, [currentQ.id]: e.target.value }))
-                  }
-                  placeholder="Nhập câu trả lời hoặc số thập phân..."
-                  className="w-full max-w-sm py-3 px-4 rounded-2xl border-2 border-slate-300 focus:border-blue-500 font-extrabold text-xl text-center outline-none bg-slate-50 focus:bg-white text-slate-800 shadow-sm"
-                />
-                <p className="text-xs text-slate-400 font-semibold mt-2">
-                  (Ví dụ: 4.2 hoặc 4,2 hoặc phân số 5/3)
-                </p>
-              </div>
-            )}
+                  {/* DẠNG 2: Đúng / Sai 4 ý */}
+                  {currentQ.type === "true_false" && currentQ.tfItems && (
+                    <div className="flex flex-col gap-2.5">
+                      {currentQ.tfItems.map((item) => {
+                        const currTF = userAnswers[currentQ.id] || {};
+                        const currentVal = currTF[item.label];
 
-            {/* DẠNG 4: Tự luận (Gõ văn bản / công thức hoặc đính kèm tệp tin / ảnh chụp) */}
-            {currentQ.type === "essay" && (
-              <EssayAnswerInput
-                questionId={currentQ.id}
-                value={userAnswers[currentQ.id]}
-                onChange={(newVal) =>
-                  setUserAnswers((prev) => ({ ...prev, [currentQ.id]: newVal }))
-                }
-              />
-            )}
+                        return (
+                          <div
+                            key={item.label}
+                            className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200 hover:border-slate-300 transition-colors"
+                          >
+                            <div className="flex-1 font-semibold text-xs sm:text-sm text-slate-800">
+                              <span className="font-extrabold text-blue-700 mr-2">{item.label})</span>
+                              <MathRenderer content={item.text} inline />
+                            </div>
+
+                            <div className="flex items-center gap-2 self-end sm:self-center">
+                              <motion.button
+                                type="button"
+                                whileTap={{ scale: 0.94 }}
+                                onClick={() =>
+                                  setUserAnswers((prev) => ({
+                                    ...prev,
+                                    [currentQ.id]: {
+                                      ...(prev[currentQ.id] || {}),
+                                      [item.label]: true,
+                                    },
+                                  }))
+                                }
+                                className={`px-4 py-1.5 rounded-xl font-black text-xs border transition ${
+                                  currentVal === true
+                                    ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                                }`}
+                              >
+                                ĐÚNG
+                              </motion.button>
+                              <motion.button
+                                type="button"
+                                whileTap={{ scale: 0.94 }}
+                                onClick={() =>
+                                  setUserAnswers((prev) => ({
+                                    ...prev,
+                                    [currentQ.id]: {
+                                      ...(prev[currentQ.id] || {}),
+                                      [item.label]: false,
+                                    },
+                                  }))
+                                }
+                                className={`px-4 py-1.5 rounded-xl font-black text-xs border transition ${
+                                  currentVal === false
+                                    ? "bg-red-600 text-white border-red-600 shadow-sm"
+                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                                }`}
+                              >
+                                SAI
+                              </motion.button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* DẠNG 3: Trả lời ngắn */}
+                  {currentQ.type === "short_answer" && (
+                    <div className="flex flex-col items-center my-6">
+                      <input
+                        id="student-short-input"
+                        type="text"
+                        value={userAnswers[currentQ.id] || ""}
+                        onChange={(e) =>
+                          setUserAnswers((prev) => ({ ...prev, [currentQ.id]: e.target.value }))
+                        }
+                        placeholder="Nhập câu trả lời hoặc số thập phân..."
+                        className="w-full max-w-sm py-3 px-4 rounded-2xl border-2 border-slate-300 focus:border-blue-500 font-extrabold text-xl text-center outline-none bg-slate-50 focus:bg-white text-slate-800 shadow-sm transition"
+                      />
+                      <p className="text-xs text-slate-400 font-semibold mt-2">
+                        (Ví dụ: 4.2 hoặc 4,2 hoặc phân số 5/3)
+                      </p>
+                    </div>
+                  )}
+
+                  {/* DẠNG 4: Tự luận (Gõ văn bản / công thức hoặc đính kèm tệp tin / ảnh chụp) */}
+                  {currentQ.type === "essay" && (
+                    <EssayAnswerInput
+                      questionId={currentQ.id}
+                      value={userAnswers[currentQ.id]}
+                      onChange={(newVal) =>
+                        setUserAnswers((prev) => ({ ...prev, [currentQ.id]: newVal }))
+                      }
+                    />
+                  )}
+                </div>
+              </motion.div>
+            </AnimatePresence>
           </div>
 
           {/* Footer chuyển câu */}
           <div className="flex justify-between items-center pt-4 border-t border-slate-100 mt-auto">
             <button
               type="button"
-              onClick={() => setCurrentIdx((prev) => Math.max(0, prev - 1))}
+              onClick={() => goToQuestion(currentIdx - 1)}
               disabled={currentIdx === 0}
               className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-30 text-slate-700 font-bold text-xs flex items-center gap-1 transition"
             >
@@ -1282,7 +1328,7 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
 
             <button
               type="button"
-              onClick={() => setCurrentIdx((prev) => Math.min(exam.questions.length - 1, prev + 1))}
+              onClick={() => goToQuestion(currentIdx + 1)}
               disabled={currentIdx === exam.questions.length - 1}
               className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-30 text-white font-bold text-xs flex items-center gap-1 transition shadow-sm"
             >
@@ -1425,13 +1471,15 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
                   : !!ans && String(ans).trim() !== "";
 
               return (
-                <button
+                <motion.button
                   key={q.id}
                   type="button"
-                  onClick={() => setCurrentIdx(idx)}
+                  whileHover={{ scale: 1.06 }}
+                  whileTap={{ scale: 0.94 }}
+                  onClick={() => goToQuestion(idx)}
                   className={`h-9 rounded-xl font-black text-xs flex items-center justify-center transition border ${
                     isCurrent
-                      ? "bg-blue-600 text-white border-blue-600 shadow-md scale-105"
+                      ? "bg-blue-600 text-white border-blue-600 shadow-md ring-2 ring-blue-400/40"
                       : isFlagged
                       ? "bg-amber-100 text-amber-900 border-amber-400 font-extrabold"
                       : isAnswered
@@ -1440,7 +1488,7 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
                   }`}
                 >
                   {idx + 1}
-                </button>
+                </motion.button>
               );
             })}
           </div>

@@ -6,6 +6,7 @@ import {
   STANDARD_GRADES,
   STANDARD_CLASSES,
   STANDARD_CHAPTERS_BY_GRADE,
+  getAvailableClassesForGrade,
   checkExamAccessStatus,
 } from "../types/exam";
 import {
@@ -97,7 +98,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
       if (u.schoolClass && u.schoolClass.trim()) set.add(u.schoolClass.trim());
     });
     exams.forEach((e) => {
-      if (e.targetClass && e.targetClass !== "Tất cả các lớp" && !e.targetClass.startsWith("Lớp ")) {
+      if (e.targetClass && e.targetClass !== "Tất cả các lớp") {
         set.add(e.targetClass);
       }
     });
@@ -147,6 +148,11 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   const [editAttemptNumber, setEditAttemptNumber] = useState<string>("01");
   const [editDuration, setEditDuration] = useState<number>(90);
   const [editCustomCode, setEditCustomCode] = useState<string>("");
+
+  // Danh sách các lớp khả dụng theo khối lớp đang chọn cho Import Modal
+  const importAvailableClasses = useMemo(() => {
+    return getAvailableClassesForGrade(importGrade, users, exams);
+  }, [importGrade, users, exams]);
 
   // Tính mã đề chuẩn dự kiến cho Import Modal
   const computedImportCode = useMemo(() => {
@@ -1220,7 +1226,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                       handleDownloadLatex={handleDownloadLatex}
                       handleDownloadPresentationHtml={handleDownloadPresentationHtml}
                       getGradeBadgeStyle={getGradeBadgeStyle}
-                      canDelete={exams.length > 1}
+                      canDelete={true}
                     />
                   ))}
                 </div>
@@ -1242,7 +1248,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 handleDownloadLatex={handleDownloadLatex}
                 handleDownloadPresentationHtml={handleDownloadPresentationHtml}
                 getGradeBadgeStyle={getGradeBadgeStyle}
-                canDelete={exams.length > 1}
+                canDelete={true}
               />
             ))}
           </div>
@@ -1320,6 +1326,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                       const stds = STANDARD_CHAPTERS_BY_GRADE[newGrade] || [];
                       setImportChapter(stds[0] || "");
                       setIsCustomChapter(false);
+                      setImportTargetClass("Tất cả các lớp");
                     }}
                     className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500"
                   >
@@ -1341,8 +1348,8 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                     onChange={(e) => setImportTargetClass(e.target.value)}
                     className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500"
                   >
-                    <option value="Tất cả các lớp">🏫 Tất cả các lớp</option>
-                    {STANDARD_CLASSES.map((cls) => (
+                    <option value="Tất cả các lớp">🏫 Tất cả các lớp ({importGrade})</option>
+                    {importAvailableClasses.map((cls) => (
                       <option key={cls} value={cls}>
                         Lớp {cls}
                       </option>

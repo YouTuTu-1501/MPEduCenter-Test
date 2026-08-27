@@ -10,6 +10,7 @@ import {
   STANDARD_GRADES,
   STANDARD_CLASSES,
   STANDARD_CHAPTERS_BY_GRADE,
+  getAvailableClassesForGrade,
 } from "../types/exam";
 import {
   generateStandardExamCode,
@@ -82,6 +83,11 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
   const [subject, setSubject] = useState<string>("Toán học THPT");
   const [grade, setGrade] = useState<string>("Lớp 12");
   const [targetClass, setTargetClass] = useState<string>("Tất cả các lớp");
+
+  // Danh sách các lớp theo Khối đang chọn
+  const editorAvailableClasses = useMemo(() => {
+    return getAvailableClassesForGrade(grade);
+  }, [grade]);
   const [chapter, setChapter] = useState<string>("");
   const [customChapter, setCustomChapter] = useState<string>("");
   const [isCustomChapter, setIsCustomChapter] = useState<boolean>(false);
@@ -721,8 +727,8 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
                       onChange={(e) => setTargetClass(e.target.value)}
                       className="w-full py-2 px-3 rounded-xl border border-slate-300 font-bold bg-white text-xs text-slate-800 outline-none focus:border-indigo-500"
                     >
-                      <option value="Tất cả các lớp">🏫 Tất cả các lớp trong khối</option>
-                      {STANDARD_CLASSES.map((cls) => (
+                      <option value="Tất cả các lớp">🏫 Tất cả các lớp ({grade})</option>
+                      {editorAvailableClasses.map((cls) => (
                         <option key={cls} value={cls}>
                           Lớp {cls}
                         </option>

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Exam, STANDARD_CLASSES, checkExamAccessStatus } from "../types/exam";
+import { Exam, STANDARD_CLASSES, getAvailableClassesForGrade, checkExamAccessStatus } from "../types/exam";
 import { parseStandardExamCode } from "../utils/examCodeHelper";
 import { useToast } from "../context/ToastContext";
 import {
@@ -49,6 +49,10 @@ export const ExamScheduleModal: React.FC<ExamScheduleModalProps> = ({
   const [targetClass, setTargetClass] = useState<string>(
     exam.targetClass || "Tất cả các lớp"
   );
+
+  const scheduleAvailableClasses = useMemo(() => {
+    return getAvailableClassesForGrade(exam.grade || "Lớp 12");
+  }, [exam.grade]);
   const [examPassword, setExamPassword] = useState<string>(exam.password || "");
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
   const [copiedSummary, setCopiedSummary] = useState<boolean>(false);
@@ -414,8 +418,8 @@ ${examPassword ? `🔒 Mật khẩu vào đề: ${examPassword}\n` : ""}
               onChange={(e) => setTargetClass(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 font-bold text-slate-800 bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
             >
-              <option value="Tất cả các lớp">Tất cả các lớp ({exam.grade})</option>
-              {STANDARD_CLASSES.map((cls) => (
+              <option value="Tất cả các lớp">🏫 Tất cả các lớp ({exam.grade || "Toàn khối"})</option>
+              {scheduleAvailableClasses.map((cls) => (
                 <option key={cls} value={cls}>
                   Lớp {cls}
                 </option>

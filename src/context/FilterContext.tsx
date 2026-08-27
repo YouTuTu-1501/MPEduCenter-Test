@@ -67,7 +67,7 @@ interface FilterContextType {
 
 const FilterContext = createContext<FilterContextType | undefined>(undefined);
 
-export const STANDARD_CLASSES_LIST: readonly string[] = [];
+export const STANDARD_CLASSES_LIST: readonly string[] = ["12", "11", "10"];
 
 export const FilterProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>("all");

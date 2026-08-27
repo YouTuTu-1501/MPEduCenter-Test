@@ -205,7 +205,89 @@ export const checkExamAccessStatus = (exam: Exam): ExamAccessStatus => {
 // Cấu trúc danh mục Khối Lớp và Lớp học chuẩn
 export const STANDARD_GRADES = ["Lớp 12", "Lớp 11", "Lớp 10"] as const;
 
-export const STANDARD_CLASSES: readonly string[] = [];
+// Danh mục mã lớp cơ bản đại diện cho từng khối
+export const STANDARD_CLASSES: readonly string[] = ["12", "11", "10"];
+
+/**
+ * Lấy danh sách lớp học THỰC TẾ khả dụng cho một khối lớp cụ thể
+ * Chỉ hiển thị các lớp thực có trong hệ thống (từ tài khoản học sinh `users`, hoặc đề thi `exams`)
+ * Tuyệt đối không sinh lớp ảo (như 10A1, 10A2... khi hệ thống chưa có các lớp này)
+ */
+export const getAvailableClassesForGrade = (
+  gradeStr?: string,
+  existingUsers?: { schoolClass?: string }[],
+  existingExams?: { targetClass?: string; grade?: string }[]
+): string[] => {
+  const currentGrade = gradeStr || "Lớp 12";
+  const gradeNumMatch = currentGrade.match(/\d+/);
+  const gradeNum = gradeNumMatch ? gradeNumMatch[0] : "";
+
+  // 1. Quét danh sách người dùng thực tế từ props hoặc localStorage
+  let userList = existingUsers;
+  if (!userList || userList.length === 0) {
+    try {
+      const localUsers = typeof localStorage !== "undefined" ? localStorage.getItem("mpeducenter_users") : null;
+      if (localUsers) {
+        userList = JSON.parse(localUsers);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Quét danh sách đề thi thực tế từ props hoặc localStorage
+  let examList = existingExams;
+  if (!examList || examList.length === 0) {
+    try {
+      const localExams = typeof localStorage !== "undefined" ? localStorage.getItem("edutest_exams") : null;
+      if (localExams) {
+        examList = JSON.parse(localExams);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const set = new Set<string>();
+
+  // Trích xuất lớp từ danh sách tài khoản học sinh / người dùng thực tế
+  if (userList && Array.isArray(userList)) {
+    userList.forEach((u) => {
+      let cls = u.schoolClass?.trim();
+      if (cls && cls !== "Tất cả các lớp" && cls !== "Chưa xếp lớp") {
+        if (cls.startsWith("Lớp ")) {
+          cls = cls.replace(/^Lớp\s+/, "");
+        }
+        if (!gradeNum || cls.startsWith(gradeNum) || cls.includes(gradeNum) || cls === currentGrade) {
+          set.add(cls);
+        }
+      }
+    });
+  }
+
+  // Trích xuất lớp từ các đề thi đã tạo thực tế
+  if (examList && Array.isArray(examList)) {
+    examList.forEach((e) => {
+      let cls = e.targetClass?.trim();
+      if (cls && cls !== "Tất cả các lớp" && cls !== "Chưa xếp lớp") {
+        if (cls.startsWith("Lớp ")) {
+          cls = cls.replace(/^Lớp\s+/, "");
+        }
+        if (!gradeNum || cls.startsWith(gradeNum) || cls.includes(gradeNum) || e.grade === currentGrade) {
+          set.add(cls);
+        }
+      }
+    });
+  }
+
+  // Nếu trong hệ thống chưa có lớp con cụ thể nào của khối này,
+  // chỉ đưa ra đúng lớp gốc thực có đại diện cho khối (ví dụ Khối 10 là lớp "10", Khối 11 là "11", Khối 12 là "12")
+  if (set.size === 0 && gradeNum) {
+    set.add(gradeNum);
+  }
+
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
+};
 
 export const STANDARD_CHAPTERS_BY_GRADE: Record<string, string[]> = {
   "Lớp 12": [

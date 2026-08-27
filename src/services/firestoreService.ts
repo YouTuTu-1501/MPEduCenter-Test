@@ -15,7 +15,6 @@ import {
 import { db } from "../lib/firebase";
 import { User, INITIAL_USERS } from "../types/auth";
 import { Exam, StudentSubmission, LiveRoom } from "../types/exam";
-import { initialSampleExams } from "../data/defaultExam";
 import { initialSampleSubmissions } from "../data/sampleSubmissions";
 
 /**
@@ -276,12 +275,15 @@ export const subscribeExams = (
       if (Array.isArray(parsed)) {
         const filtered = parsed.filter((e: Exam) => e && e.id && !deletedExamIds.has(e.id));
         callback(filtered);
+      } else {
+        callback([]);
       }
     } else {
-      const initialFiltered = initialSampleExams.filter((e) => !deletedExamIds.has(e.id));
-      callback(initialFiltered);
+      callback([]);
     }
-  } catch {}
+  } catch {
+    callback([]);
+  }
 
   try {
     const q = query(collection(db, EXAMS_COLLECTION));
@@ -290,14 +292,10 @@ export const subscribeExams = (
       (snapshot) => {
         const currentDeleted = getDeletedExamIds();
         if (snapshot.empty) {
-          const local = localStorage.getItem("edutest_exams");
-          if (!local && currentDeleted.size === 0) {
-            seedInitialExams().then(() => {
-              callback(initialSampleExams);
-            });
-          } else {
-            callback([]);
-          }
+          try {
+            localStorage.setItem("edutest_exams", JSON.stringify([]));
+          } catch {}
+          callback([]);
           return;
         }
 
@@ -358,18 +356,21 @@ export const deleteExamFromFirestore = async (examId: string): Promise<void> => 
   }
 };
 
-export const seedInitialExams = async (): Promise<void> => {
+export const clearAllExams = async (): Promise<void> => {
   try {
-    const deleted = getDeletedExamIds();
-    const toSeed = initialSampleExams.filter((e) => !deleted.has(e.id));
-    for (const exam of toSeed) {
-      const cleanExam = cleanForFirestore(exam);
-      const ref = doc(db, EXAMS_COLLECTION, exam.id);
-      await setDoc(ref, cleanExam, { merge: true });
+    localStorage.setItem("edutest_exams", JSON.stringify([]));
+    const examDocs = await getDocs(collection(db, EXAMS_COLLECTION));
+    for (const d of examDocs.docs) {
+      await deleteDoc(d.ref);
     }
   } catch (err) {
-    console.warn("Lỗi nạp đề thi mẫu:", err);
+    console.warn("Lỗi khi xóa toàn bộ đề thi:", err);
   }
+};
+
+export const seedInitialExams = async (): Promise<void> => {
+  // Không tự động tạo dữ liệu mẫu ảo
+  return;
 };
 
 // ----------------------------------------------------
