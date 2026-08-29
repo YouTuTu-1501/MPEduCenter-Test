@@ -74,30 +74,14 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
   }, [isOpen, defaultExamId, defaultClassFilter]);
 
   // Đồng bộ hóa toàn bộ danh sách bài nộp với danh sách người dùng thực tế (users)
-  // và loại bỏ vĩnh viễn các học sinh đã bị xóa
+  // và bảo toàn 100% bài làm của tất cả học sinh
   const syncedSubmissions = useMemo(() => {
     const deletedUserIds = getDeletedUserIds();
-    const studentUsers = (users || []).filter((u) => u.role === "student" || !u.role);
-    const validUserIds = new Set((users || []).map((u) => u.id));
-    const validEmails = new Set((users || []).map((u) => u.email.toLowerCase()));
-    const validNames = new Set((users || []).map((u) => u.name.trim().toLowerCase()));
-
-    // Nếu hệ thống không có học sinh nào (chỉ có Admin), danh sách bài nộp sẽ là 0
-    if (users && users.length > 0 && studentUsers.length === 0) {
-      return [];
-    }
 
     return submissions
       .filter((s) => {
         if (!s || !s.id) return false;
         if (s.studentId && deletedUserIds.has(s.studentId)) return false;
-        if (users && users.length > 0) {
-          const isMatched =
-            (s.studentId && validUserIds.has(s.studentId)) ||
-            (s.studentEmail && validEmails.has(s.studentEmail.toLowerCase())) ||
-            (s.studentName && validNames.has(s.studentName.trim().toLowerCase()));
-          if (!isMatched) return false;
-        }
         return true;
       })
       .map((s) => {

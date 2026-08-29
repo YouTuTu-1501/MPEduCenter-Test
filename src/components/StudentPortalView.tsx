@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { motion } from "motion/react";
 import { useAuth } from "../context/AuthContext";
 import { Exam, StudentSubmission, checkExamAccessStatus } from "../types/exam";
 import { MathRenderer } from "./MathRenderer";
@@ -98,6 +99,7 @@ interface StudentPortalViewProps {
   onJoinLiveRoom: () => void;
   onOpenLeaderboard?: () => void;
   onOpenHistory?: () => void;
+  onOpenPractice?: () => void;
 }
 
 export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
@@ -107,6 +109,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   onJoinLiveRoom,
   onOpenLeaderboard,
   onOpenHistory,
+  onOpenPractice,
 }) => {
   const { currentUser } = useAuth();
   const { toast } = useToast();
@@ -335,6 +338,17 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {onOpenPractice && (
+              <button
+                type="button"
+                onClick={onOpenPractice}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-sky-500 hover:from-indigo-600 hover:to-sky-600 text-white text-xs sm:text-sm font-black shadow-lg hover:shadow-indigo-500/25 transition flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300" />
+                <span>Luyện Chuyên Đề</span>
+              </button>
+            )}
+
             {/* Nút Nhập mã đề thi nhanh */}
             <button
               type="button"
@@ -548,15 +562,44 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
           </div>
 
           {/* Exams Grid Bento */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <motion.div
+            key={`student-exams-${gradeFilter}-${searchQuery}`}
+            initial="hidden"
+            animate="visible"
+            variants={{
+              hidden: { opacity: 0 },
+              visible: {
+                opacity: 1,
+                transition: {
+                  staggerChildren: 0.06,
+                  delayChildren: 0.04,
+                },
+              },
+            }}
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+          >
             {filteredExams.map((exam) => {
               const questionCount = exam.questions.length;
               const previousSub = mySubmissions.find((s) => s.examId === exam.id);
               const accessStatus = checkExamAccessStatus(exam);
 
               return (
-                <div
+                <motion.div
                   key={exam.id}
+                  variants={{
+                    hidden: { opacity: 0, y: 16, scale: 0.98 },
+                    visible: {
+                      opacity: 1,
+                      y: 0,
+                      scale: 1,
+                      transition: {
+                        type: "spring",
+                        damping: 24,
+                        stiffness: 280,
+                      },
+                    },
+                  }}
+                  layout
                   className={`bg-white rounded-3xl border p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition group space-y-4 ${
                     accessStatus.status === "locked"
                       ? "border-rose-200 bg-rose-50/15"
@@ -665,10 +708,10 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                       )}
                     </button>
                   </div>
-                </div>
+                </motion.div>
               );
             })}
-          </div>
+          </motion.div>
 
           {filteredExams.length === 0 && (
             <div className="bg-white rounded-3xl p-12 text-center text-slate-400 border border-slate-200 text-xs">
@@ -689,12 +732,34 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
               <span className="text-xs text-slate-500">Bấm vào bài thi để xem chi tiết đáp án & lời giải</span>
             </div>
 
-            <div className="divide-y divide-slate-100">
+            <motion.div
+              initial="hidden"
+              animate="visible"
+              variants={{
+                hidden: { opacity: 0 },
+                visible: {
+                  opacity: 1,
+                  transition: {
+                    staggerChildren: 0.05,
+                    delayChildren: 0.03,
+                  },
+                },
+              }}
+              className="divide-y divide-slate-100"
+            >
               {mySubmissions.map((sub) => {
                 const timeMinutes = Math.round((sub.timeSpentSeconds || 0) / 60);
                 return (
-                  <div
+                  <motion.div
                     key={sub.id}
+                    variants={{
+                      hidden: { opacity: 0, x: -10 },
+                      visible: {
+                        opacity: 1,
+                        x: 0,
+                        transition: { duration: 0.25 },
+                      },
+                    }}
                     className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 transition"
                   >
                     <div className="space-y-1.5">
@@ -744,7 +809,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                       <Eye className="w-4 h-4" />
                       <span>Xem lại bài làm</span>
                     </button>
-                  </div>
+                  </motion.div>
                 );
               })}
 
@@ -753,7 +818,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                   Bạn chưa thực hiện bài thi nào. Hãy chọn một đề thi từ danh sách để bắt đầu luyện tập!
                 </div>
               )}
-            </div>
+            </motion.div>
           </div>
         </div>
       )}

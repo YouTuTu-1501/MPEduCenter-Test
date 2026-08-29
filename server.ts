@@ -178,10 +178,15 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
   app.post("/api/submissions", (req, res) => {
     const submission = {
       ...req.body,
-      id: "sub_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6),
-      submittedAt: new Date().toISOString(),
+      id: req.body.id || ("sub_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6)),
+      submittedAt: req.body.submittedAt || new Date().toISOString(),
     };
-    userSubmissions.push(submission);
+    const existingIndex = userSubmissions.findIndex((s) => s.id === submission.id);
+    if (existingIndex >= 0) {
+      userSubmissions[existingIndex] = submission;
+    } else {
+      userSubmissions.push(submission);
+    }
     res.json({ success: true, submission });
   });
 

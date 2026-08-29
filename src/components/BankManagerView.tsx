@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   Exam,
   Question,
@@ -1185,10 +1186,19 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
           </div>
         ) : viewGrouping === "by_chapter" ? (
           /* ================= CHẾ ĐỘ XEM GOM THEO CHƯƠNG ================= */
-          <div className="space-y-6">
+          <motion.div
+            key={`chapter-groups-${activeClassFilter}-${selectedChapterFilter}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-6"
+          >
             {examsGroupedByChapter.map((group, grpIdx) => (
-              <div
+              <motion.div
                 key={grpIdx}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: grpIdx * 0.08 }}
                 className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4"
               >
                 {/* Header Chương */}
@@ -1213,7 +1223,21 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 </div>
 
                 {/* Danh sách đề trong chương */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <motion.div
+                  initial="hidden"
+                  animate="visible"
+                  variants={{
+                    hidden: { opacity: 0 },
+                    visible: {
+                      opacity: 1,
+                      transition: {
+                        staggerChildren: 0.06,
+                        delayChildren: 0.05,
+                      },
+                    },
+                  }}
+                  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+                >
                   {group.exams.map((exam) => (
                     <ExamCardItem
                       key={exam.id}
@@ -1229,13 +1253,28 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                       canDelete={true}
                     />
                   ))}
-                </div>
-              </div>
+                </motion.div>
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         ) : (
           /* ================= CHẾ ĐỘ XEM LƯỚI BENTO CARDS ================= */
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <motion.div
+            key={`grid-${activeClassFilter}-${selectedChapterFilter}-${searchQuery}`}
+            initial="hidden"
+            animate="visible"
+            variants={{
+              hidden: { opacity: 0 },
+              visible: {
+                opacity: 1,
+                transition: {
+                  staggerChildren: 0.06,
+                  delayChildren: 0.04,
+                },
+              },
+            }}
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
+          >
             {filteredExams.map((exam) => (
               <ExamCardItem
                 key={exam.id}
@@ -1251,7 +1290,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 canDelete={true}
               />
             ))}
-          </div>
+          </motion.div>
         )}
       </div>
 
@@ -1707,7 +1746,21 @@ const ExamCardItem: React.FC<ExamCardItemProps> = ({
   };
 
   return (
-    <div
+    <motion.div
+      variants={{
+        hidden: { opacity: 0, y: 18, scale: 0.98 },
+        visible: {
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          transition: {
+            type: "spring",
+            damping: 24,
+            stiffness: 280,
+          },
+        },
+      }}
+      layout
       className={`bg-white rounded-3xl p-5 sm:p-6 border shadow-xs hover:shadow-md transition-all flex flex-col justify-between group ${
         exam.isLocked ? "border-rose-200 bg-rose-50/20" : "border-slate-200"
       }`}
@@ -1901,6 +1954,6 @@ const ExamCardItem: React.FC<ExamCardItemProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };

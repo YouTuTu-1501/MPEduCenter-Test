@@ -1,4 +1,5 @@
 import katex from "katex";
+import { parseTkzTab } from "./tableParser";
 
 export interface Point2D {
   x: number;
@@ -767,6 +768,12 @@ export function renderLatexLabel(rawLabel: string): string {
  */
 export function parseTikzToSvg(rawTikzCode: string): string {
   if (!rawTikzCode) return "";
+
+  // 0. Nếu là bảng biến thiên / bảng xét dấu tkz-tab, phân tích bảng trực tiếp
+  if (rawTikzCode.includes("\\tkzTabInit")) {
+    const tableHtml = parseTkzTab(rawTikzCode);
+    if (tableHtml) return tableHtml;
+  }
 
   // 1. Mở rộng tất cả vòng lặp \foreach trước khi phân tích
   const expandedCode = expandTikzForeach(rawTikzCode);

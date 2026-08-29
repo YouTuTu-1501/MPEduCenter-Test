@@ -108,6 +108,7 @@ export function renderCellMath(raw: string): string {
       text
     );
 
+  // Thử render trực tiếp qua KaTeX nếu có ký hiệu toán học
   if (hasMathDelim) {
     // Nếu cả cell được bọc bởi $...$
     if (text.startsWith("$") && text.endsWith("$") && text.length >= 2) {
@@ -145,30 +146,24 @@ export function renderCellMath(raw: string): string {
         .join("");
     }
 
-    // Thử render trực tiếp như math nếu chứa các ký tự toán như \infty, -\infty, +
-    if (
-      /^[a-zA-Z0-9+\-*\/_^\\]+$/.test(text) ||
-      text.includes("\\infty") ||
-      text.includes("f'(") ||
-      text.includes("y'")
-    ) {
-      try {
-        return katex.renderToString(text, {
-          displayMode: false,
-          throwOnError: false,
-          strict: false,
-        });
-      } catch {
-        return text;
-      }
+    // Render trực tiếp qua KaTeX
+    try {
+      return katex.renderToString(text, {
+        displayMode: false,
+        throwOnError: false,
+        strict: false,
+      });
+    } catch {
+      return `<span class="font-mono text-xs">${text}</span>`;
     }
   }
 
-  // Kiểm tra nếu là biểu thức toán ngắn không có $ (ví dụ: x, y, -1, 2, f'(x), y', [0; 2), 5, 12...)
+  // Thử render số hoặc biểu thức ngắn qua KaTeX
   if (
     /^(?:-?\d+(?:\.\d+)?|[a-zA-Z]|f'\([a-zA-Z]\)|y'|\[[\d\s;,]+\]|\([\d\s;,]+\)|\[[\d\s;,]+\)|\([\d\s;,]+\])$/.test(
       text
-    )
+    ) ||
+    /^[a-zA-Z0-9+\-*\/_^\\]+$/.test(text)
   ) {
     try {
       return katex.renderToString(text, {
@@ -436,111 +431,600 @@ function renderParsedTableToHtml(
 }
 
 /**
+ * Trích xuất nội dung của một cặp ngoặc nhọn { ... } có cân bằng (hỗ trợ ngoặc nhọn lồng nhau như \frac{a}{b})
+ */
+export function extractBalancedBraces(
+  str: string,
+  searchStart: number = 0
+): { content: string; startIndex: number; endIndex: number } | null {
+  const openIndex = str.indexOf("{", searchStart);
+  if (openIndex === -1) return null;
+
+  let depth = 0;
+  let inMath = false;
+
+  for (let i = openIndex; i < str.length; i++) {
+    const ch = str[i];
+    const prev = i > 0 ? str[i - 1] : "";
+
+    // Bỏ qua ký tự escaped: \{ hoặc \}
+    if (prev === "\\") continue;
+
+    if (ch === "$" && prev !== "\\") {
+      inMath = !inMath;
+    }
+
+    if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return {
+          content: str.substring(openIndex + 1, i),
+          startIndex: openIndex,
+          endIndex: i,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Tách một chuỗi theo ký tự phân cách (delimiter) nhưng bỏ qua các dấu phân cách nằm trong { ... } hoặc $ ... $
+ */
+export function splitTopLevel(str: string, delimiter: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let braceDepth = 0;
+  let inDollar = false;
+
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    const prev = i > 0 ? str[i - 1] : "";
+
+    if (ch === "$" && prev !== "\\") {
+      inDollar = !inDollar;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "{" && prev !== "\\") {
+      braceDepth++;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "}" && prev !== "\\") {
+      if (braceDepth > 0) braceDepth--;
+      current += ch;
+      continue;
+    }
+
+    if (ch === delimiter && braceDepth === 0 && !inDollar) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+
+  if (current.trim().length > 0 || str.endsWith(delimiter)) {
+    result.push(current.trim());
+  }
+
+  return result;
+}
+
+/**
+ * Render mũi tên biến thiên dạng vector SVG chuẩn xác nối từ mức độ cao nguồn sang mức độ cao đích
+ */
+function renderSvgVariationArrow(
+  fromHeight: "high" | "low" | "mid",
+  toHeight: "high" | "low" | "mid",
+  arrowId: string
+): string {
+  const yMap = {
+    high: 13,
+    mid: 30,
+    low: 47,
+  };
+  const y1 = yMap[fromHeight] ?? 30;
+  const y2 = yMap[toHeight] ?? 30;
+
+  // Xác định xu hướng: tăng (đồng biến), giảm (nghịch biến), ngang
+  let strokeClass = "text-indigo-600 dark:text-indigo-400";
+  let strokeColor = "#4f46e5";
+  if (y1 < y2) {
+    // Từ trên xuống dưới -> nghịch biến (giảm)
+    strokeClass = "text-rose-600 dark:text-rose-400";
+    strokeColor = "#e11d48";
+  } else if (y1 === y2) {
+    // Ngang
+    strokeClass = "text-slate-400 dark:text-slate-500";
+    strokeColor = "#94a3b8";
+  }
+
+  const markerId = `bbt-arr-${arrowId}`;
+
+  return `
+    <div class="w-full min-w-[56px] sm:min-w-[72px] h-14 sm:h-16 flex items-center justify-center px-1">
+      <svg class="w-full h-full overflow-visible ${strokeClass}" viewBox="0 0 100 60" preserveAspectRatio="none">
+        <defs>
+          <marker
+            id="${markerId}"
+            viewBox="0 0 10 10"
+            refX="7"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto"
+          >
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="currentColor" />
+          </marker>
+        </defs>
+        <line
+          x1="6"
+          y1="${y1}"
+          x2="90"
+          y2="${y2}"
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          marker-end="url(#${markerId})"
+        />
+      </svg>
+    </div>
+  `;
+}
+
+/**
  * Xử lý môi trường tkz-tab (bảng biến thiên / bảng xét dấu tạo bởi gói tkz-tab)
  */
 export function parseTkzTab(tkzCode: string): string | null {
   if (!tkzCode.includes("\\tkzTabInit")) return null;
 
   try {
-    const initMatch = tkzCode.match(/\\tkzTabInit(?:\[[^\]]*\])?\{([^}]+)\}\{([^}]+)\}/);
-    if (!initMatch) return null;
+    // 1. Phân tích \tkzTabInit[options]{row_defs}{x_defs} sử dụng balanced brace extraction
+    const initIdx = tkzCode.indexOf("\\tkzTabInit");
+    if (initIdx === -1) return null;
 
-    const rowDefs = initMatch[1].split(",").map((s) => {
-      const parts = s.trim().split("/");
+    // Tìm cặp ngoặc nhọn thứ nhất: rowDefs
+    const rowDefsArg = extractBalancedBraces(tkzCode, initIdx);
+    if (!rowDefsArg) return null;
+
+    // Tìm cặp ngoặc nhọn thứ hai: colHeaders
+    const colHeadersArg = extractBalancedBraces(tkzCode, rowDefsArg.endIndex + 1);
+    if (!colHeadersArg) return null;
+
+    // Phân tích các hàng định nghĩa: ví dụ {$x$ /0.7, $y'$ /0.7} hoặc {$x$/1, $f'(x)$/1, $y$/2}
+    const rawRowDefs = splitTopLevel(rowDefsArg.content, ",").filter((s) => s.length > 0);
+
+    const rowDefs = rawRowDefs.map((s) => {
+      const parts = splitTopLevel(s, "/");
       return {
-        label: parts[0]?.trim() || "",
+        label: parts[0] || "",
         height: parts[1] ? parseFloat(parts[1]) : 1,
       };
     });
 
-    const colHeaders = initMatch[2].split(",").map((s) => s.trim());
-    const lineMatches = Array.from(tkzCode.matchAll(/\\tkzTabLine\{([^}]+)\}/g));
-    const varMatches = Array.from(tkzCode.matchAll(/\\tkzTabVar\{([^}]+)\}/g));
+    // Phân tích các mốc $x$: ví dụ {$-\infty$, $-2$, $+\infty$}
+    const colHeaders = splitTopLevel(colHeadersArg.content, ",").filter((s) => s.length > 0);
 
-    const rows: ParsedTableRow[] = [];
+    if (colHeaders.length === 0) return null;
 
-    // Hàng 1: Hàng $x$
-    const xCells: ParsedTableCell[] = [
-      { content: rowDefs[0]?.label || "$x$", align: "center" },
-    ];
-    colHeaders.forEach((h) => {
-      xCells.push({ content: h, align: "center" });
-    });
-    rows.push({ cells: xCells, hasBottomBorder: true });
+    const numPoints = colHeaders.length;
+    const numCols = 2 * numPoints - 1; // Số cột dữ liệu: xen kẽ Điểm và Khoảng
+
+    // Trích xuất toàn bộ các khối \tkzTabLine và \tkzTabVar bằng balanced brace
+    const lineContents: string[] = [];
+    let searchPos = 0;
+    while (true) {
+      const linePos = tkzCode.indexOf("\\tkzTabLine", searchPos);
+      if (linePos === -1) break;
+      const arg = extractBalancedBraces(tkzCode, linePos);
+      if (!arg) break;
+      lineContents.push(arg.content);
+      searchPos = arg.endIndex + 1;
+    }
+
+    const varContents: string[] = [];
+    searchPos = 0;
+    while (true) {
+      const varPos = tkzCode.indexOf("\\tkzTabVar", searchPos);
+      if (varPos === -1) break;
+      const arg = extractBalancedBraces(tkzCode, varPos);
+      if (!arg) break;
+      varContents.push(arg.content);
+      searchPos = arg.endIndex + 1;
+    }
 
     let lineIdx = 0;
     let varIdx = 0;
+    const tableUid = Math.random().toString(36).substring(2, 7);
 
-    for (let r = 1; r < rowDefs.length; r++) {
-      const rowDef = rowDefs[r];
-      const rowLabel = rowDef.label;
+    const renderedRowsHtml: string[] = [];
 
-      if (
-        lineIdx < lineMatches.length &&
-        (rowLabel.includes("'") || rowLabel.includes("f'") || rowLabel.includes("y'"))
-      ) {
-        const lineContent = lineMatches[lineIdx][1];
-        lineIdx++;
-
-        const tokens = lineContent.split(",").map((t) => t.trim());
-        const cells: ParsedTableCell[] = [{ content: rowLabel, align: "center" }];
-
-        tokens.forEach((tok) => {
-          if (tok === "d" || tok === "||" || tok === "| |") {
-            cells.push({ content: "||", align: "center" });
-          } else if (tok === "z" || tok === "0") {
-            cells.push({ content: "0", align: "center" });
-          } else if (tok === "+" || tok === "-") {
-            cells.push({ content: tok, align: "center" });
-          } else if (tok === "") {
-            cells.push({ content: "", align: "center" });
-          } else {
-            cells.push({ content: tok, align: "center" });
-          }
-        });
-
-        rows.push({ cells, hasBottomBorder: true });
-      } else if (varIdx < varMatches.length) {
-        const varContent = varMatches[varIdx][1];
-        varIdx++;
-
-        const varTokens = varContent.split(",").map((t) => t.trim());
-        const cells: ParsedTableCell[] = [{ content: rowLabel, align: "center" }];
-
-        varTokens.forEach((vt) => {
-          if (vt.startsWith("+/")) {
-            const val = vt.substring(2).trim();
-            cells.push({
-              content: `<div class="text-center"><span class="text-xs text-indigo-600 block">▲</span>${renderCellMath(
-                val
-              )}</div>`,
-              align: "center",
-            });
-          } else if (vt.startsWith("-/")) {
-            const val = vt.substring(2).trim();
-            cells.push({
-              content: `<div class="text-center">${renderCellMath(
-                val
-              )}<span class="text-xs text-rose-500 block">▼</span></div>`,
-              align: "center",
-            });
-          } else if (vt.startsWith("R/")) {
-            cells.push({ content: "→", align: "center" });
-          } else {
-            cells.push({ content: renderCellMath(vt), align: "center" });
-          }
-        });
-
-        rows.push({ cells, hasBottomBorder: true });
+    // =========================================================================
+    // HÀNG 1: Hàng biến số x
+    // =========================================================================
+    const xCells: string[] = [];
+    for (let i = 0; i < numPoints; i++) {
+      // Cột mốc điểm x_i
+      const valHtml = renderCellMath(colHeaders[i]);
+      xCells.push(
+        `<td class="py-2.5 px-3 text-center font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap min-w-[36px]">${valHtml}</td>`
+      );
+      // Cột khoảng giữa x_i và x_{i+1}
+      if (i < numPoints - 1) {
+        xCells.push(
+          `<td class="py-2.5 px-4 text-center text-slate-400 text-xs sm:text-sm min-w-[56px] sm:min-w-[72px]">&nbsp;</td>`
+        );
       }
     }
 
-    const colCount = Math.max(...rows.map((r) => r.cells.length), colHeaders.length + 1);
-    const aligns: Array<"left" | "center" | "right"> = Array(colCount).fill("center");
-    const borders: boolean[] = Array(colCount + 1).fill(true);
+    const xLabel = renderCellMath(rowDefs[0]?.label || "$x$");
+    renderedRowsHtml.push(`
+      <tr class="border-b border-slate-300 dark:border-slate-600">
+        <th class="py-2.5 px-4 text-center font-bold text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-800/80 border-r-2 border-slate-300 dark:border-slate-600 whitespace-nowrap text-xs sm:text-sm w-20 min-w-[70px]">
+          ${xLabel}
+        </th>
+        ${xCells.join("")}
+      </tr>
+    `);
 
-    return renderParsedTableToHtml(rows, aligns, borders);
-  } catch {
+    // =========================================================================
+    // CÁC HÀNG TIẾP THEO (y', f'(x), y, f(x)...)
+    // =========================================================================
+    for (let r = 1; r < rowDefs.length; r++) {
+      const rowDef = rowDefs[r];
+      const rowLabel = rowDef.label;
+      const labelHtml = renderCellMath(rowLabel);
+
+      // Kiểm tra xem hàng này là bảng xét dấu (\tkzTabLine) hay bảng biến thiên (\tkzTabVar)
+      const isSignLine =
+        rowLabel.includes("'") ||
+        rowLabel.toLowerCase().includes("f'") ||
+        rowLabel.toLowerCase().includes("y'") ||
+        (lineIdx < lineContents.length && varIdx >= varContents.length);
+
+      if (isSignLine && lineIdx < lineContents.length) {
+        // Xử lý \tkzTabLine{,+,0,-,0,+,}
+        const lineContent = lineContents[lineIdx];
+        lineIdx++;
+
+        const rawTokens = splitTopLevel(lineContent, ",").map((t) => t.trim());
+
+        // Chuẩn hóa token cho đủ numCols (2N - 1)
+        const tokens: string[] = [];
+        if (rawTokens.length === numCols) {
+          tokens.push(...rawTokens);
+        } else if (rawTokens.length === numPoints - 1) {
+          // Chỉ có các dấu khoảng (+, -, +)
+          for (let i = 0; i < numPoints; i++) {
+            tokens.push(""); // điểm
+            if (i < numPoints - 1) {
+              tokens.push(rawTokens[i] || ""); // khoảng
+            }
+          }
+        } else {
+          // Bổ sung hoặc cắt bớt cho vừa vặn
+          for (let c = 0; c < numCols; c++) {
+            tokens.push(rawTokens[c] ?? "");
+          }
+        }
+
+        const cellsHtml: string[] = tokens.map((tok, cIdx) => {
+          const isPointCol = cIdx % 2 === 0;
+          let content = "";
+          let extraClass = "";
+
+          if (tok === "d" || tok === "||" || tok === "| |" || tok === "\\parallel" || tok === "D") {
+            content = `
+              <div class="flex items-center justify-center h-full py-0.5">
+                <div class="w-1.5 h-6 sm:h-7 flex justify-between border-l-2 border-r-2 border-slate-700 dark:border-slate-300 select-none"></div>
+              </div>
+            `;
+          } else if (tok === "t" || tok === "|") {
+            content = `
+              <div class="flex items-center justify-center h-full py-0.5">
+                <div class="w-px h-6 sm:h-7 bg-slate-400 dark:bg-slate-500 select-none"></div>
+              </div>
+            `;
+          } else if (tok === "z" || tok === "0" || tok === "$0$") {
+            content = `<span class="font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm select-none font-mono">0</span>`;
+          } else if (tok === "+" || tok === "$+$" || tok === "\\text{+}") {
+            content = `<span class="font-black text-indigo-600 dark:text-indigo-400 text-sm sm:text-base select-none font-mono">+</span>`;
+          } else if (tok === "-" || tok === "$-$" || tok === "–" || tok === "\\text{-}") {
+            content = `<span class="font-black text-rose-600 dark:text-rose-400 text-sm sm:text-base select-none font-mono">−</span>`;
+          } else if (tok === "h" || tok === "H") {
+            content = `<span class="text-slate-300 dark:text-slate-600 select-none font-bold">///</span>`;
+          } else if (tok) {
+            content = renderCellMath(tok);
+          }
+
+          const minWidthClass = isPointCol ? "min-w-[36px]" : "min-w-[56px] sm:min-w-[72px]";
+          return `<td class="py-2.5 px-3 text-center text-xs sm:text-sm whitespace-nowrap ${minWidthClass} ${extraClass}">${content || "&nbsp;"}</td>`;
+        });
+
+        const isLastRow = r === rowDefs.length - 1;
+        const borderBottomClass = isLastRow ? "" : "border-b border-slate-300 dark:border-slate-600";
+
+        renderedRowsHtml.push(`
+          <tr class="${borderBottomClass}">
+            <th class="py-2.5 px-4 text-center font-bold text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-800/80 border-r-2 border-slate-300 dark:border-slate-600 whitespace-nowrap text-xs sm:text-sm w-20 min-w-[70px]">
+              ${labelHtml}
+            </th>
+            ${cellsHtml.join("")}
+          </tr>
+        `);
+      } else if (varIdx < varContents.length) {
+        // Xử lý \tkzTabVar{ -/$\frac{5}{2}$ / , +D-/ $+\infty$ /$-\infty$  , +/ $\frac{5}{2}$/}
+        const varContent = varContents[varIdx];
+        varIdx++;
+
+        // Tách các phần tử của \tkzTabVar bằng splitTopLevel (bỏ qua dấu phẩy trong công thức)
+        const rawVarItems = splitTopLevel(varContent, ",").filter((s) => s.length > 0);
+
+        interface ParsedVarItem {
+          type:
+            | "high"
+            | "low"
+            | "mid"
+            | "disc_high_low"
+            | "disc_low_high"
+            | "disc_high_high"
+            | "disc_low_low"
+            | "disc";
+          val1: string;
+          val2?: string;
+          exitHeight: "high" | "low" | "mid";
+          entryHeight: "high" | "low" | "mid";
+        }
+
+        const parsedItems: ParsedVarItem[] = rawVarItems.map((itemStr) => {
+          let str = itemStr.trim();
+
+          // Nhận diện tiền tố biến thiên: ví dụ +D-, -D+, +D+, -D-, +DH-, -DH+, +CD-, -CD+, +V-, -V+, +, -, R, D...
+          // Hỗ trợ cả trường hợp có khoảng trắng giữa các ký tự tiền tố (ví dụ: + D - / hoặc + /)
+          const prefixMatch = str.match(/^([+\-RCVDH\s]+)\s*\/\s*(.*)$/s);
+          if (prefixMatch) {
+            const prefix = prefixMatch[1].replace(/\s+/g, "");
+            const rest = prefixMatch[2].trim();
+            const parts = splitTopLevel(rest, "/").map((p) => p.trim());
+
+            if (prefix === "+D-" || prefix === "+DH-" || prefix === "+CD-" || prefix === "+V-") {
+              return {
+                type: "disc_high_low",
+                val1: parts[0] || "",
+                val2: parts[1] || "",
+                entryHeight: "high",
+                exitHeight: "low",
+              };
+            }
+            if (prefix === "-D+" || prefix === "-DH+" || prefix === "-CD+" || prefix === "-V+") {
+              return {
+                type: "disc_low_high",
+                val1: parts[0] || "",
+                val2: parts[1] || "",
+                entryHeight: "low",
+                exitHeight: "high",
+              };
+            }
+            if (prefix === "+D+" || prefix === "+DH+") {
+              return {
+                type: "disc_high_high",
+                val1: parts[0] || "",
+                val2: parts[1] || "",
+                entryHeight: "high",
+                exitHeight: "high",
+              };
+            }
+            if (prefix === "-D-" || prefix === "-DH-") {
+              return {
+                type: "disc_low_low",
+                val1: parts[0] || "",
+                val2: parts[1] || "",
+                entryHeight: "low",
+                exitHeight: "low",
+              };
+            }
+            if (prefix === "D" || prefix === "DH" || prefix === "V") {
+              return {
+                type: "disc",
+                val1: parts[0] || "",
+                val2: parts[1] || "",
+                entryHeight: "mid",
+                exitHeight: "mid",
+              };
+            }
+            if (prefix === "+") {
+              return {
+                type: "high",
+                val1: parts[0] || "",
+                entryHeight: "high",
+                exitHeight: "high",
+              };
+            }
+            if (prefix === "-") {
+              return {
+                type: "low",
+                val1: parts[0] || "",
+                entryHeight: "low",
+                exitHeight: "low",
+              };
+            }
+            if (prefix === "R" || prefix === "C") {
+              return {
+                type: "mid",
+                val1: parts[0] || "",
+                entryHeight: "mid",
+                exitHeight: "mid",
+              };
+            }
+          }
+
+          // Fallback nếu không khớp prefix regex
+          if (str.startsWith("+/")) {
+            const sub = str.substring(2).trim();
+            const val = splitTopLevel(sub, "/")[0] || "";
+            return { type: "high", val1: val, entryHeight: "high", exitHeight: "high" };
+          }
+          if (str.startsWith("-/")) {
+            const sub = str.substring(2).trim();
+            const val = splitTopLevel(sub, "/")[0] || "";
+            return { type: "low", val1: val, entryHeight: "low", exitHeight: "low" };
+          }
+          return { type: "mid", val1: str, entryHeight: "mid", exitHeight: "mid" };
+        });
+
+        // Tạo các ô cho hàng biến thiên: xen kẽ Điểm và Mũi tên khoảng
+        const cellsHtml: string[] = [];
+        for (let i = 0; i < numPoints; i++) {
+          const item = parsedItems[i] || {
+            type: "mid",
+            val1: "",
+            entryHeight: "mid",
+            exitHeight: "mid",
+          };
+          const val1Html = renderCellMath(item.val1);
+          const val2Html = item.val2 ? renderCellMath(item.val2) : "";
+
+          let pointCellContent = "";
+          if (item.type === "high") {
+            pointCellContent = `
+              <div class="flex flex-col items-center justify-start h-14 sm:h-16 pt-1">
+                <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val1Html}</span>
+              </div>
+            `;
+          } else if (item.type === "low") {
+            pointCellContent = `
+              <div class="flex flex-col items-center justify-end h-14 sm:h-16 pb-1">
+                <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val1Html}</span>
+              </div>
+            `;
+          } else if (item.type === "disc_high_low") {
+            pointCellContent = `
+              <div class="flex items-stretch justify-center gap-1.5 h-14 sm:h-16 px-1">
+                <div class="flex flex-col items-center justify-start pt-1 min-w-[20px]">
+                  <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val1Html}</span>
+                </div>
+                <div class="flex items-center justify-center px-0.5">
+                  <div class="w-1.5 h-12 sm:h-14 flex justify-between border-l-2 border-r-2 border-slate-700 dark:border-slate-300 select-none"></div>
+                </div>
+                <div class="flex flex-col items-center justify-end pb-1 min-w-[20px]">
+                  <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val2Html}</span>
+                </div>
+              </div>
+            `;
+          } else if (item.type === "disc_low_high") {
+            pointCellContent = `
+              <div class="flex items-stretch justify-center gap-1.5 h-14 sm:h-16 px-1">
+                <div class="flex flex-col items-center justify-end pb-1 min-w-[20px]">
+                  <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val1Html}</span>
+                </div>
+                <div class="flex items-center justify-center px-0.5">
+                  <div class="w-1.5 h-12 sm:h-14 flex justify-between border-l-2 border-r-2 border-slate-700 dark:border-slate-300 select-none"></div>
+                </div>
+                <div class="flex flex-col items-center justify-start pt-1 min-w-[20px]">
+                  <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val2Html}</span>
+                </div>
+              </div>
+            `;
+          } else if (item.type === "disc_high_high") {
+            pointCellContent = `
+              <div class="flex items-stretch justify-center gap-1.5 h-14 sm:h-16 px-1">
+                <div class="flex flex-col items-center justify-start pt-1 min-w-[20px]">
+                  <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val1Html}</span>
+                </div>
+                <div class="flex items-center justify-center px-0.5">
+                  <div class="w-1.5 h-12 sm:h-14 flex justify-between border-l-2 border-r-2 border-slate-700 dark:border-slate-300 select-none"></div>
+                </div>
+                <div class="flex flex-col items-center justify-start pt-1 min-w-[20px]">
+                  <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val2Html}</span>
+                </div>
+              </div>
+            `;
+          } else if (item.type === "disc_low_low") {
+            pointCellContent = `
+              <div class="flex items-stretch justify-center gap-1.5 h-14 sm:h-16 px-1">
+                <div class="flex flex-col items-center justify-end pb-1 min-w-[20px]">
+                  <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val1Html}</span>
+                </div>
+                <div class="flex items-center justify-center px-0.5">
+                  <div class="w-1.5 h-12 sm:h-14 flex justify-between border-l-2 border-r-2 border-slate-700 dark:border-slate-300 select-none"></div>
+                </div>
+                <div class="flex flex-col items-center justify-end pb-1 min-w-[20px]">
+                  <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val2Html}</span>
+                </div>
+              </div>
+            `;
+          } else if (item.type === "disc") {
+            pointCellContent = `
+              <div class="flex items-center justify-center h-14 sm:h-16 px-1">
+                <div class="w-1.5 h-12 sm:h-14 flex justify-between border-l-2 border-r-2 border-slate-700 dark:border-slate-300 select-none"></div>
+              </div>
+            `;
+          } else {
+            pointCellContent = `
+              <div class="flex items-center justify-center h-14 sm:h-16">
+                <span class="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap">${val1Html}</span>
+              </div>
+            `;
+          }
+
+          cellsHtml.push(
+            `<td class="py-1 px-3 text-center align-middle whitespace-nowrap min-w-[36px]">${pointCellContent}</td>`
+          );
+
+          // Cột Mũi tên giữa 2 điểm (sử dụng SVG vector chuẩn xác)
+          if (i < numPoints - 1) {
+            const nextItem = parsedItems[i + 1] || {
+              type: "mid",
+              val1: "",
+              entryHeight: "mid",
+              exitHeight: "mid",
+            };
+            const arrowSvg = renderSvgVariationArrow(
+              item.exitHeight,
+              nextItem.entryHeight,
+              `${tableUid}-${r}-${i}`
+            );
+
+            cellsHtml.push(
+              `<td class="py-1 px-1 text-center align-middle min-w-[56px] sm:min-w-[72px]">${arrowSvg}</td>`
+            );
+          }
+        }
+
+        const isLastRow = r === rowDefs.length - 1;
+        const borderBottomClass = isLastRow ? "" : "border-b border-slate-300 dark:border-slate-600";
+
+        renderedRowsHtml.push(`
+          <tr class="${borderBottomClass}">
+            <th class="py-2.5 px-4 text-center font-bold text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-800/80 border-r-2 border-slate-300 dark:border-slate-600 whitespace-nowrap text-xs sm:text-sm w-20 min-w-[70px]">
+              ${labelHtml}
+            </th>
+            ${cellsHtml.join("")}
+          </tr>
+        `);
+      }
+    }
+
+    return `
+<div class="my-4 w-full flex flex-col items-center justify-center overflow-x-auto select-text scrollbar-thin scrollbar-thumb-slate-300">
+  <div class="inline-block max-w-full rounded-2xl shadow-xs border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 overflow-hidden">
+    <table class="border-collapse text-xs sm:text-sm text-slate-800 dark:text-slate-200 table-auto m-0">
+      <tbody>
+        ${renderedRowsHtml.join("")}
+      </tbody>
+    </table>
+  </div>
+</div>
+    `.trim();
+  } catch (error) {
+    console.error("Lỗi parseTkzTab:", error);
     return null;
   }
 }

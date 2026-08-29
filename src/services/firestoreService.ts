@@ -397,7 +397,7 @@ export const getLocalSubmissions = (): StudentSubmission[] => {
 };
 
 /**
- * Xóa sạch 100% kết quả thi (Submissions) trên cả Firestore và LocalStorage
+ * Xóa sạch 100% kết quả thi (Submissions) trên cả Firestore và LocalStorage khi Admin chủ động yêu cầu
  */
 export const clearAllSubmissions = async (): Promise<void> => {
   try {
@@ -413,97 +413,41 @@ export const clearAllSubmissions = async (): Promise<void> => {
 };
 
 /**
- * Quét và loại bỏ vĩnh viễn các bản ghi submission không thuộc về bất kỳ userId nào đang tồn tại
- * Đồng bộ làm sạch triệt để cả trên Firestore và LocalStorage
+ * Đồng bộ và bảo vệ an toàn toàn bộ dữ liệu bài nộp của học sinh.
+ * Tuyệt đối không tự động xóa bất kỳ bài thi nào của học sinh.
  */
 export const clearOrphanedData = async (existingUsers?: User[]): Promise<void> => {
+  // Không thực hiện xóa tự động để bảo vệ toàn vẹn bài làm của học sinh
   try {
-    const validUserIds = new Set<string>();
-    const validEmails = new Set<string>();
-    const validNames = new Set<string>();
-
     if (existingUsers && existingUsers.length > 0) {
+      // Tự động chuẩn hóa đồng bộ họ tên/lớp nếu học sinh đã có tài khoản
+      const userMap = new Map<string, User>();
       existingUsers.forEach((u) => {
-        if (u) {
-          if (u.id) validUserIds.add(u.id);
-          if (u.email) validEmails.add(u.email.toLowerCase());
-          if (u.name) validNames.add(u.name.trim().toLowerCase());
-        }
+        if (u && u.id) userMap.set(u.id, u);
       });
-    } else {
-      // Truy vấn trực tiếp danh sách users từ Firestore và local cache
-      const userDocs = await getDocs(collection(db, USERS_COLLECTION));
-      userDocs.forEach((docSnap) => {
-        validUserIds.add(docSnap.id);
-        const data = docSnap.data() as User;
-        if (data) {
-          if (data.id) validUserIds.add(data.id);
-          if (data.email) validEmails.add(data.email.toLowerCase());
-          if (data.name) validNames.add(data.name.trim().toLowerCase());
-        }
-      });
-
-      try {
-        const local = localStorage.getItem("mpeducenter_users");
-        if (local) {
-          const parsed = JSON.parse(local);
-          if (Array.isArray(parsed)) {
-            parsed.forEach((u: User) => {
-              if (u && u.id) validUserIds.add(u.id);
-              if (u && u.email) validEmails.add(u.email.toLowerCase());
-              if (u && u.name) validNames.add(u.name.trim().toLowerCase());
-            });
+      const localSubs = getLocalSubmissions();
+      let hasChanges = false;
+      const updated = localSubs.map((s) => {
+        if (s.studentId && userMap.has(s.studentId)) {
+          const u = userMap.get(s.studentId)!;
+          if (u.schoolClass && u.schoolClass !== s.studentClass) {
+            hasChanges = true;
+            return { ...s, studentClass: u.schoolClass, studentName: u.name || s.studentName };
           }
         }
-      } catch {}
-    }
-
-    const deletedUserIds = getDeletedUserIds();
-
-    // 1. Quét và loại bỏ vĩnh viễn trên Firestore
-    const subDocs = await getDocs(collection(db, SUBMISSIONS_COLLECTION));
-    for (const docSnap of subDocs.docs) {
-      const sub = docSnap.data() as StudentSubmission;
-      const studentId = sub.studentId || (sub as any).userId;
-
-      const hasValidId = studentId && validUserIds.has(studentId) && !deletedUserIds.has(studentId);
-      const hasValidEmail = sub.studentEmail && validEmails.has(sub.studentEmail.toLowerCase());
-      const hasValidName = sub.studentName && validNames.has(sub.studentName.trim().toLowerCase());
-
-      const isBelongingToExistingUser = Boolean(
-        hasValidId || (validUserIds.size === 0 ? false : (hasValidEmail || hasValidName))
-      );
-
-      if (!isBelongingToExistingUser) {
-        addDeletedSubmissionId(docSnap.id);
-        await deleteDoc(docSnap.ref).catch(() => {});
+        return s;
+      });
+      if (hasChanges) {
+        localStorage.setItem("edutest_submissions", JSON.stringify(updated));
       }
     }
-
-    // 2. Dọn dẹp trên LocalStorage
-    try {
-      const raw = localStorage.getItem("edutest_submissions");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const cleaned = parsed.filter((s: StudentSubmission) => {
-            const sid = s.studentId || (s as any).userId;
-            const hasValidId = sid && validUserIds.has(sid) && !deletedUserIds.has(sid);
-            const hasValidEmail = s.studentEmail && validEmails.has(s.studentEmail.toLowerCase());
-            const hasValidName = s.studentName && validNames.has(s.studentName.trim().toLowerCase());
-            return Boolean(hasValidId || (validUserIds.size === 0 ? false : (hasValidEmail || hasValidName)));
-          });
-          localStorage.setItem("edutest_submissions", JSON.stringify(cleaned));
-        }
-      }
-    } catch {}
   } catch (err) {
-    console.warn("Lỗi khi dọn dẹp submission mồ côi (clearOrphanedData):", err);
+    console.warn("Lỗi đồng bộ dữ liệu bài nộp:", err);
   }
 };
 
 /**
- * Tự động làm sạch các bài nộp mồ côi (không thuộc về bất kỳ tài khoản học sinh nào hiện có)
+ * Tự động đồng bộ bài nộp học sinh (không xóa bài nộp)
  */
 export const cleanupOrphanedSubmissions = async (validUsers: User[]): Promise<void> => {
   return clearOrphanedData(validUsers);
@@ -581,9 +525,35 @@ export const subscribeSubmissions = (
   callback: (subs: StudentSubmission[]) => void,
   onError?: (error: Error) => void
 ) => {
-  // 1. Nạp từ LocalStorage
+  // 1. Nạp từ LocalStorage trước để giao diện hiển thị ngay lập tức
   const initialLocal = getLocalSubmissions();
   callback(initialLocal);
+
+  // Đồng thời thử phục hồi từ backend server nếu có
+  try {
+    fetch("/api/submissions")
+      .then((res) => res.json())
+      .then((serverSubs) => {
+        if (Array.isArray(serverSubs) && serverSubs.length > 0) {
+          const currentLocal = getLocalSubmissions();
+          const merged = new Map<string, StudentSubmission>();
+          serverSubs.forEach((s: any) => {
+            if (s && s.id) merged.set(s.id, s);
+          });
+          currentLocal.forEach((s) => {
+            if (s && s.id) merged.set(s.id, s);
+          });
+          const combined = Array.from(merged.values()).sort(
+            (a, b) => new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime()
+          );
+          try {
+            localStorage.setItem("edutest_submissions", JSON.stringify(combined));
+          } catch {}
+          callback(combined);
+        }
+      })
+      .catch(() => {});
+  } catch {}
 
   try {
     const q = query(collection(db, SUBMISSIONS_COLLECTION));
@@ -592,14 +562,6 @@ export const subscribeSubmissions = (
       (snapshot) => {
         const currentDeleted = getDeletedSubmissionIds();
         const currentDeletedUsers = getDeletedUserIds();
-        if (snapshot.empty) {
-          // Khi Database chưa có bài nộp nào, đồng bộ chính xác về 0 lượt thi
-          try {
-            localStorage.setItem("edutest_submissions", JSON.stringify([]));
-          } catch {}
-          callback([]);
-          return;
-        }
 
         const firestoreSubs: StudentSubmission[] = [];
         snapshot.forEach((docSnap) => {
@@ -614,18 +576,30 @@ export const subscribeSubmissions = (
           }
         });
 
+        // Hợp nhất dữ liệu Firestore với LocalStorage (đảm bảo không bị mất bài nộp offline/mới nộp)
+        const localSubs = getLocalSubmissions();
+        const mergedMap = new Map<string, StudentSubmission>();
+        firestoreSubs.forEach((s) => mergedMap.set(s.id, s));
+        localSubs.forEach((s) => {
+          if (!mergedMap.has(s.id) && !currentDeleted.has(s.id) && (!s.studentId || !currentDeletedUsers.has(s.studentId))) {
+            mergedMap.set(s.id, s);
+          }
+        });
+
+        const combinedSubs = Array.from(mergedMap.values());
+
         // Sắp xếp bài nộp mới nhất lên đầu (theo submittedAt)
-        firestoreSubs.sort(
+        combinedSubs.sort(
           (a, b) =>
             new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime()
         );
 
         // Lưu bền vững vào LocalStorage
         try {
-          localStorage.setItem("edutest_submissions", JSON.stringify(firestoreSubs));
+          localStorage.setItem("edutest_submissions", JSON.stringify(combinedSubs));
         } catch {}
 
-        callback(firestoreSubs);
+        callback(combinedSubs);
       },
       (err) => {
         console.warn("Firestore subscribeSubmissions fallback to local:", err);

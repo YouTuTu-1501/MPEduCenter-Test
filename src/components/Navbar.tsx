@@ -27,6 +27,7 @@ export type ActiveView =
   | "bank"
   | "presentation"
   | "exam"
+  | "practice"
   | "analytics"
   | "leaderboard"
   | "live"
@@ -98,6 +99,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (isAdmin) {
       return [
         { id: "bank", label: "Ngân hàng đề", icon: BookOpen },
+        { id: "practice", label: "Luyện chuyên đề", icon: Sparkles },
         { id: "live", label: "Phòng thi Live", icon: Layers },
         { id: "analytics", label: "Báo cáo & Chấm thi", icon: BarChart3 },
         { id: "leaderboard", label: "Bảng xếp hạng", icon: Trophy },
@@ -108,6 +110,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (isTeacher) {
       return [
         { id: "bank", label: "Ngân hàng đề", icon: BookOpen },
+        { id: "practice", label: "Luyện chuyên đề", icon: Sparkles },
         { id: "live", label: "Phòng thi Live", icon: Layers },
         { id: "analytics", label: "Báo cáo & Chấm thi", icon: BarChart3 },
         { id: "leaderboard", label: "Bảng xếp hạng", icon: Trophy },
@@ -117,6 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     // Học sinh
     return [
       { id: "student_portal", label: "Cổng Luyện Thi", icon: GraduationCap },
+      { id: "practice", label: "Luyện chuyên đề", icon: Sparkles },
       { id: "exam", label: "Làm bài thi", icon: Edit3 },
       { id: "live", label: "Vào phòng thi Live", icon: Layers },
       { id: "leaderboard", label: "Bảng xếp hạng", icon: Trophy },

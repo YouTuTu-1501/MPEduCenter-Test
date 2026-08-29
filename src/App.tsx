@@ -9,6 +9,7 @@ import { TeacherAnalyticsView } from "./components/TeacherAnalyticsView";
 import { RealtimeLiveRoomView } from "./components/RealtimeLiveRoomView";
 import { AdminManagementView } from "./components/AdminManagementView";
 import { StudentPortalView } from "./components/StudentPortalView";
+import { PracticeModeView } from "./components/PracticeModeView";
 import { AuthModal } from "./components/AuthModal";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { StudentResultHistoryModal } from "./components/StudentResultHistoryModal";
@@ -177,11 +178,6 @@ function MainApp({ currentUser }: { currentUser: User }) {
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
   const [historyTargetUser, setHistoryTargetUser] = useState<User | null>(null);
 
-  // 1. Quét và loại bỏ vĩnh viễn các bản ghi submission không thuộc về userId nào đang tồn tại
-  useEffect(() => {
-    clearOrphanedData().catch(() => {});
-  }, []);
-
   // Tự động điều chỉnh tab điều hướng khi đổi vai trò (RBAC Route Guard)
   useEffect(() => {
     if (isStudent && (activeView === "bank" || activeView === "presentation" || activeView === "analytics" || activeView === "admin")) {
@@ -222,39 +218,36 @@ function MainApp({ currentUser }: { currentUser: User }) {
     };
   }, []);
 
-  // Tự động quét và dọn dẹp các bài nộp không thuộc về bất kỳ tài khoản học sinh nào hiện có
-  useEffect(() => {
-    if (users && users.length > 0) {
-      clearOrphanedData(users).catch(() => {});
-    }
-  }, [users]);
-
-  // Lọc danh sách bài nộp hợp lệ: chỉ giữ lại bài nộp của học sinh thực tế còn tồn tại trong hệ thống
+  // Lọc danh sách bài nộp hợp lệ: bảo toàn 100% bài nộp của học sinh
   const validSubmissions = React.useMemo(() => {
     const deletedUserIds = getDeletedUserIds();
     const deletedSubs = getDeletedSubmissionIds();
-    const studentUsers = users.filter((u) => u.role === "student" || !u.role);
-    const validUserIds = new Set(users.map((u) => u.id));
-    const validEmails = new Set(users.map((u) => u.email.toLowerCase()));
-    const validNames = new Set(users.map((u) => u.name.trim().toLowerCase()));
 
-    // Nếu hệ thống không có học sinh nào, danh sách lượt thi chắc chắn là 0
-    if (users.length > 0 && studentUsers.length === 0) {
-      return [];
-    }
-
-    return submissions.filter((s) => {
-      if (!s || !s.id || deletedSubs.has(s.id)) return false;
-      if (s.studentId && deletedUserIds.has(s.studentId)) return false;
-      if (users.length > 0) {
-        const isMatched =
-          (s.studentId && validUserIds.has(s.studentId)) ||
-          (s.studentEmail && validEmails.has(s.studentEmail.toLowerCase())) ||
-          (s.studentName && validNames.has(s.studentName.trim().toLowerCase()));
-        return Boolean(isMatched);
-      }
-      return true;
-    });
+    return submissions
+      .filter((s) => {
+        if (!s || !s.id || deletedSubs.has(s.id)) return false;
+        if (s.studentId && deletedUserIds.has(s.studentId)) return false;
+        return true;
+      })
+      .map((s) => {
+        const matchedUser = users?.find(
+          (u) =>
+            (s.studentId && u.id === s.studentId) ||
+            (u.email && s.studentEmail && u.email.toLowerCase() === s.studentEmail.toLowerCase()) ||
+            (u.name && s.studentName && u.name.trim().toLowerCase() === s.studentName.trim().toLowerCase())
+        );
+        if (matchedUser) {
+          return {
+            ...s,
+            studentId: matchedUser.id,
+            studentName: matchedUser.name,
+            studentClass: matchedUser.schoolClass || s.studentClass || "",
+            studentEmail: matchedUser.email || s.studentEmail,
+            studentAvatar: matchedUser.avatar || s.studentAvatar,
+          };
+        }
+        return s;
+      });
   }, [submissions, users]);
 
   // Đảm bảo selectedExam luôn hợp lệ
@@ -582,10 +575,22 @@ function MainApp({ currentUser }: { currentUser: User }) {
           onStartExam={handleStudentStartExam}
           onJoinLiveRoom={() => setActiveView("live")}
           onOpenLeaderboard={() => setActiveView("leaderboard")}
+          onOpenPractice={() => setActiveView("practice")}
           onOpenHistory={() => {
             setHistoryTargetUser(currentUser);
             setShowHistoryModal(true);
           }}
+        />
+      )}
+
+      {/* Phân hệ 9: Chế độ Luyện Tập Độc Lập Theo Chuyên Đề (Kèm Gợi Ý & Lời Giải Tức Thì) */}
+      {activeView === "practice" && (
+        <PracticeModeView
+          allExams={exams}
+          onExit={() => setActiveView(isStudent ? "student_portal" : "bank")}
+          onSaveExam={handleSaveExam}
+          onDeleteExam={handleDeleteExam}
+          onSelectExam={handleSelectExam}
         />
       )}
 
