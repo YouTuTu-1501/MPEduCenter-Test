@@ -51,8 +51,6 @@ export const GlobalFilterDrawer: React.FC<GlobalFilterDrawerProps> = ({
     activeFiltersCount,
   } = useFilter();
 
-  if (!isFilterDrawerOpen) return null;
-
   const displayClasses = React.useMemo(() => {
     if (availableClasses && availableClasses.length > 0) return availableClasses;
     const set = new Set<string>();
@@ -63,6 +61,8 @@ export const GlobalFilterDrawer: React.FC<GlobalFilterDrawerProps> = ({
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
   }, [availableClasses, users]);
+
+  if (!isFilterDrawerOpen) return null;
 
   return (
     <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex justify-end animate-fadeIn">
