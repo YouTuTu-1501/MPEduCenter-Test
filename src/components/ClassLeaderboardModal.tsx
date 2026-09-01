@@ -235,9 +235,9 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
       filteredSubs = filteredSubs.filter((s) => {
         if (!s.studentClass) return false;
         if (s.studentClass === selectedClass) return true;
-        if (selectedClass === "Lớp 12" && s.studentClass.startsWith("12")) return true;
-        if (selectedClass === "Lớp 11" && s.studentClass.startsWith("11")) return true;
-        if (selectedClass === "Lớp 10" && s.studentClass.startsWith("10")) return true;
+        const clsMatch = selectedClass.match(/\d+/);
+        const sMatch = s.studentClass.match(/\d+/);
+        if (clsMatch && sMatch && clsMatch[0] === sMatch[0] && selectedClass.startsWith("Lớp")) return true;
         return false;
       });
     }
@@ -725,12 +725,13 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
                   </label>
 
                   {/* Khối */}
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {[
                       { id: "all", label: "Tất cả khối" },
-                      { id: "Lớp 12", label: "Khối 12" },
-                      { id: "Lớp 11", label: "Khối 11" },
-                      { id: "Lớp 10", label: "Khối 10" },
+                      ...STANDARD_GRADES.map((g) => ({
+                        id: g,
+                        label: g.replace("Lớp ", "Khối "),
+                      })),
                     ].map((gr) => {
                       const isSel = selectedGrade === gr.id;
                       return (

@@ -717,9 +717,10 @@ export const PracticeModeView: React.FC<PracticeModeViewProps> = ({
               <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
                 {[
                   { id: "all", label: "Tất cả khối" },
-                  { id: "Lớp 12", label: "Khối 12" },
-                  { id: "Lớp 11", label: "Khối 11" },
-                  { id: "Lớp 10", label: "Khối 10" },
+                  ...STANDARD_GRADES.map((g) => ({
+                    id: g,
+                    label: g.replace("Lớp ", "Khối "),
+                  })),
                 ].map((tab) => (
                   <button
                     key={tab.id}

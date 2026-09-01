@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { UserRole, ROLE_LABELS } from "../types/auth";
+import { STANDARD_GRADES } from "../types/exam";
 import { BeeLogo } from "./BeeLogo";
 
 export type ActiveView =
@@ -78,10 +79,25 @@ export const Navbar: React.FC<NavbarProps> = ({
     return Array.from(set).sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
   }, [users]);
 
-  const classesGrade12 = realClasses.filter((c) => c.startsWith("12") || c.includes("12"));
-  const classesGrade11 = realClasses.filter((c) => c.startsWith("11") || c.includes("11"));
-  const classesGrade10 = realClasses.filter((c) => c.startsWith("10") || c.includes("10"));
-  const classesOther = realClasses.filter((c) => !classesGrade12.includes(c) && !classesGrade11.includes(c) && !classesGrade10.includes(c));
+  const groupedClassesByGrade = React.useMemo(() => {
+    const map = new Map<string, string[]>();
+    STANDARD_GRADES.forEach((g) => map.set(g, []));
+    const other: string[] = [];
+
+    realClasses.forEach((cls) => {
+      const match = cls.match(/\d+/);
+      if (match) {
+        const gradeKey = `Lớp ${match[0]}`;
+        if (map.has(gradeKey)) {
+          map.get(gradeKey)!.push(cls);
+          return;
+        }
+      }
+      other.push(cls);
+    });
+
+    return { map, other };
+  }, [realClasses]);
 
   // Đóng dropdown khi click bên ngoài
   useEffect(() => {
@@ -201,34 +217,26 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Chọn lớp để lọc dữ liệu toàn hệ thống"
             >
               <option value="all">🏫 Tất cả các lớp {realClasses.length > 0 ? `(${realClasses.length} lớp)` : ""}</option>
-              {classesGrade12.length > 0 && (
-                <optgroup label="Khối 12">
-                  <option value="Lớp 12">Toàn khối 12</option>
-                  {classesGrade12.map((cls) => (
-                    <option key={cls} value={cls}>Lớp {cls}</option>
-                  ))}
-                </optgroup>
-              )}
-              {classesGrade11.length > 0 && (
-                <optgroup label="Khối 11">
-                  <option value="Lớp 11">Toàn khối 11</option>
-                  {classesGrade11.map((cls) => (
-                    <option key={cls} value={cls}>Lớp {cls}</option>
-                  ))}
-                </optgroup>
-              )}
-              {classesGrade10.length > 0 && (
-                <optgroup label="Khối 10">
-                  <option value="Lớp 10">Toàn khối 10</option>
-                  {classesGrade10.map((cls) => (
-                    <option key={cls} value={cls}>Lớp {cls}</option>
-                  ))}
-                </optgroup>
-              )}
-              {classesOther.length > 0 && (
+              {STANDARD_GRADES.map((gr) => {
+                const classList = groupedClassesByGrade.map.get(gr) || [];
+                const label = gr.replace("Lớp ", "Khối ");
+                return (
+                  <optgroup key={gr} label={label}>
+                    <option value={gr}>Toàn {label.toLowerCase()}</option>
+                    {classList.map((cls) => (
+                      <option key={cls} value={cls}>
+                        Lớp {cls}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+              {groupedClassesByGrade.other.length > 0 && (
                 <optgroup label="Lớp khác">
-                  {classesOther.map((cls) => (
-                    <option key={cls} value={cls}>Lớp {cls}</option>
+                  {groupedClassesByGrade.other.map((cls) => (
+                    <option key={cls} value={cls}>
+                      Lớp {cls}
+                    </option>
                   ))}
                 </optgroup>
               )}

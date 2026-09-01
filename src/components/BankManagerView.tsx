@@ -193,9 +193,12 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     if (filter === "all") return true;
     if (filter === exam.grade) return true;
     if (exam.targetClass && (exam.targetClass === filter || exam.targetClass === "Tất cả các lớp")) return true;
-    if (filter.startsWith("12") && exam.grade === "Lớp 12") return true;
-    if (filter.startsWith("11") && exam.grade === "Lớp 11") return true;
-    if (filter.startsWith("10") && exam.grade === "Lớp 10") return true;
+    
+    // Khớp theo tiền tố số lớp (ví dụ: lớp "12A1", "12" khớp với đề "Lớp 12"; "9A2" khớp "Lớp 9")
+    const filterNumMatch = filter.match(/\d+/);
+    const examGradeNumMatch = exam.grade?.match(/\d+/);
+    if (filterNumMatch && examGradeNumMatch && filterNumMatch[0] === examGradeNumMatch[0]) return true;
+
     return exam.grade === filter;
   };
 
@@ -203,16 +206,15 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   const availableChaptersForSelectedGrade = useMemo(() => {
     const chaptersSet = new Set<string>();
 
-    const targetGrade =
-      activeGradeFilter !== "all"
-        ? activeGradeFilter
-        : activeClassFilter.startsWith("12")
-        ? "Lớp 12"
-        : activeClassFilter.startsWith("11")
-        ? "Lớp 11"
-        : activeClassFilter.startsWith("10")
-        ? "Lớp 10"
-        : "all";
+    let targetGrade = "all";
+    if (activeGradeFilter !== "all") {
+      targetGrade = activeGradeFilter;
+    } else if (activeClassFilter !== "all") {
+      const match = activeClassFilter.match(/\d+/);
+      if (match) {
+        targetGrade = `Lớp ${match[0]}`;
+      }
+    }
 
     if (targetGrade !== "all") {
       const standards = STANDARD_CHAPTERS_BY_GRADE[targetGrade] || [];
@@ -356,8 +358,16 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
         return "bg-sky-50 text-sky-700 border-sky-200";
       case "Lớp 10":
         return "bg-emerald-50 text-emerald-700 border-emerald-200";
-      default:
+      case "Lớp 9":
         return "bg-purple-50 text-purple-700 border-purple-200";
+      case "Lớp 8":
+        return "bg-rose-50 text-rose-700 border-rose-200";
+      case "Lớp 7":
+        return "bg-amber-50 text-amber-700 border-amber-200";
+      case "Lớp 6":
+        return "bg-teal-50 text-teal-700 border-teal-200";
+      default:
+        return "bg-slate-50 text-slate-700 border-slate-200";
     }
   };
 

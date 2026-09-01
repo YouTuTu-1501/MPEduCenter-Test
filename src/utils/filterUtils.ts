@@ -100,5 +100,9 @@ export function extractGradeFromClass(cls?: string): string | null {
   if (c.startsWith("12")) return "Lớp 12";
   if (c.startsWith("11")) return "Lớp 11";
   if (c.startsWith("10")) return "Lớp 10";
+  if (c.startsWith("9")) return "Lớp 9";
+  if (c.startsWith("8")) return "Lớp 8";
+  if (c.startsWith("7")) return "Lớp 7";
+  if (c.startsWith("6")) return "Lớp 6";
   return null;
 }

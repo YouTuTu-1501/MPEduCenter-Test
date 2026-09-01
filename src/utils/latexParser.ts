@@ -36,11 +36,28 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     latexContent.match(/\\(?:lop|grade)\{([^}]+)\}/i) ||
     latexContent.match(/%\s*(?:GRADE|LOP|LỚP):\s*([^\n]+)/i);
   if (gradeMatch) {
-    examGrade = gradeMatch[1].trim();
-  } else if (latexContent.includes("Lớp 11") || latexContent.includes("11THPT") || latexContent.includes("Toán 11")) {
+    const gVal = gradeMatch[1].trim();
+    if (/^\d{1,2}$/.test(gVal)) {
+      examGrade = `Lớp ${gVal}`;
+    } else if (!gVal.toLowerCase().startsWith("lớp")) {
+      examGrade = `Lớp ${gVal}`;
+    } else {
+      examGrade = gVal;
+    }
+  } else if (latexContent.match(/Lớp\s*12|12THPT|Toán\s*12/i)) {
+    examGrade = "Lớp 12";
+  } else if (latexContent.match(/Lớp\s*11|11THPT|Toán\s*11/i)) {
     examGrade = "Lớp 11";
-  } else if (latexContent.includes("Lớp 10") || latexContent.includes("10THPT") || latexContent.includes("Toán 10")) {
+  } else if (latexContent.match(/Lớp\s*10|10THPT|Toán\s*10/i)) {
     examGrade = "Lớp 10";
+  } else if (latexContent.match(/Lớp\s*9|9THCS|Toán\s*9/i)) {
+    examGrade = "Lớp 9";
+  } else if (latexContent.match(/Lớp\s*8|8THCS|Toán\s*8/i)) {
+    examGrade = "Lớp 8";
+  } else if (latexContent.match(/Lớp\s*7|7THCS|Toán\s*7/i)) {
+    examGrade = "Lớp 7";
+  } else if (latexContent.match(/Lớp\s*6|6THCS|Toán\s*6/i)) {
+    examGrade = "Lớp 6";
   }
 
   // Trích xuất Chương (Chapter) nếu có (\chuong{...} hoặc % CHUONG: ... hoặc % CHAPTER: ...)

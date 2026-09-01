@@ -284,12 +284,18 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     return users.filter((u) => {
       const matchRole = roleFilter === "all" || u.role === roleFilter;
       const matchStatus = statusFilter === "all" || u.status === statusFilter;
-      const matchClass =
-        adminClassFilter === "all" ||
-        (u.schoolClass && u.schoolClass === adminClassFilter) ||
-        (adminClassFilter === "Lớp 12" && u.schoolClass?.startsWith("12")) ||
-        (adminClassFilter === "Lớp 11" && u.schoolClass?.startsWith("11")) ||
-        (adminClassFilter === "Lớp 10" && u.schoolClass?.startsWith("10"));
+      let matchClass = adminClassFilter === "all";
+      if (!matchClass && u.schoolClass) {
+        if (u.schoolClass === adminClassFilter) {
+          matchClass = true;
+        } else if (adminClassFilter.startsWith("Lớp")) {
+          const admMatch = adminClassFilter.match(/\d+/);
+          const userMatch = u.schoolClass.match(/\d+/);
+          if (admMatch && userMatch && admMatch[0] === userMatch[0]) {
+            matchClass = true;
+          }
+        }
+      }
       const matchSearch =
         searchQuery === "" ||
         u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -365,9 +371,13 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     return exams.filter((e) => {
       if (e.targetClass && e.targetClass === adminClassFilter) return true;
       if (e.grade === adminClassFilter) return true;
-      if (adminClassFilter === "Lớp 12" && (e.grade === "Lớp 12" || e.targetClass?.startsWith("12"))) return true;
-      if (adminClassFilter === "Lớp 11" && (e.grade === "Lớp 11" || e.targetClass?.startsWith("11"))) return true;
-      if (adminClassFilter === "Lớp 10" && (e.grade === "Lớp 10" || e.targetClass?.startsWith("10"))) return true;
+      if (adminClassFilter.startsWith("Lớp")) {
+        const admMatch = adminClassFilter.match(/\d+/);
+        const gradeMatch = e.grade?.match(/\d+/);
+        const targetMatch = e.targetClass?.match(/\d+/);
+        if (admMatch && gradeMatch && admMatch[0] === gradeMatch[0]) return true;
+        if (admMatch && targetMatch && admMatch[0] === targetMatch[0]) return true;
+      }
       return false;
     });
   }, [exams, adminClassFilter]);

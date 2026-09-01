@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { motion } from "motion/react";
 import { useAuth } from "../context/AuthContext";
-import { Exam, StudentSubmission, checkExamAccessStatus } from "../types/exam";
+import { Exam, StudentSubmission, checkExamAccessStatus, STANDARD_GRADES } from "../types/exam";
 import { MathRenderer } from "./MathRenderer";
 import { ExamCodeEntryModal } from "./ExamCodeEntryModal";
 import { isExamCodeMatch, parseStandardExamCode } from "../utils/examCodeHelper";
@@ -544,7 +544,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl text-xs font-bold w-full sm:w-auto overflow-x-auto">
-              {["all", "Lớp 12", "Lớp 11", "Lớp 10"].map((g) => (
+              {["all", ...STANDARD_GRADES].map((g) => (
                 <button
                   key={g}
                   type="button"
@@ -555,7 +555,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                       : "text-slate-600 hover:text-slate-900"
                   }`}
                 >
-                  {g === "all" ? "Tất cả các lớp" : g}
+                  {g === "all" ? "Tất cả các khối" : g}
                 </button>
               ))}
             </div>

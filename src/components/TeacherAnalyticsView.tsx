@@ -402,9 +402,9 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     return filteredSubmissionsByExam.filter((sub) => {
       if (!sub.studentClass) return true;
       if (sub.studentClass === activeClass) return true;
-      if (activeClass === "Lớp 12" && sub.studentClass.startsWith("12")) return true;
-      if (activeClass === "Lớp 11" && sub.studentClass.startsWith("11")) return true;
-      if (activeClass === "Lớp 10" && sub.studentClass.startsWith("10")) return true;
+      const actMatch = activeClass.match(/\d+/);
+      const subMatch = sub.studentClass.match(/\d+/);
+      if (actMatch && subMatch && actMatch[0] === subMatch[0] && activeClass.startsWith("Lớp")) return true;
       return false;
     });
   }, [filteredSubmissionsByExam, activeClass]);
@@ -483,9 +483,9 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     return syncedSubmissions.filter((sub) => {
       if (!sub.studentClass) return true;
       if (sub.studentClass === activeClass) return true;
-      if (activeClass === "Lớp 12" && sub.studentClass.startsWith("12")) return true;
-      if (activeClass === "Lớp 11" && sub.studentClass.startsWith("11")) return true;
-      if (activeClass === "Lớp 10" && sub.studentClass.startsWith("10")) return true;
+      const actMatch = activeClass.match(/\d+/);
+      const subMatch = sub.studentClass.match(/\d+/);
+      if (actMatch && subMatch && actMatch[0] === subMatch[0] && activeClass.startsWith("Lớp")) return true;
       return false;
     });
   }, [syncedSubmissions, activeClass]);

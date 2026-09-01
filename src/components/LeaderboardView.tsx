@@ -285,9 +285,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
       list = list.filter((s) => {
         if (!s.studentClass) return false;
         if (s.studentClass === selectedClass) return true;
-        if (selectedClass === "Lớp 12" && s.studentClass.startsWith("12")) return true;
-        if (selectedClass === "Lớp 11" && s.studentClass.startsWith("11")) return true;
-        if (selectedClass === "Lớp 10" && s.studentClass.startsWith("10")) return true;
+        const clsMatch = selectedClass.match(/\d+/);
+        const sMatch = s.studentClass.match(/\d+/);
+        if (clsMatch && sMatch && clsMatch[0] === sMatch[0] && selectedClass.startsWith("Lớp")) return true;
         return false;
       });
     }
@@ -429,9 +429,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
     };
   }, [leaderboardData]);
 
-  // Thống kê so sánh cả 3 khối (dành cho chế độ Xếp hạng theo khối)
+  // Thống kê so sánh các khối (dành cho chế độ Xếp hạng theo khối)
   const gradeComparisons = useMemo(() => {
-    const grades = ["Lớp 12", "Lớp 11", "Lớp 10"];
+    const grades = STANDARD_GRADES;
     return grades.map((g) => {
       const gRows = computeLeaderboardRows(syncedSubmissions, g);
       const total = gRows.length;
@@ -624,14 +624,15 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
             </button>
           </div>
 
-          {/* Sub-selector for Mode 2: Khối 12 / Khối 11 / Khối 10 / So sánh 3 Khối */}
+          {/* Sub-selector for Mode 2: Từng khối / So sánh tất cả các khối */}
           {rankingMode === "by_grade" && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
               {[
-                { id: "Lớp 12", label: "Khối 12", color: "indigo" },
-                { id: "Lớp 11", label: "Khối 11", color: "sky" },
-                { id: "Lớp 10", label: "Khối 10", color: "emerald" },
-                { id: "compare_all", label: "📊 So sánh 3 Khối", color: "amber" },
+                ...STANDARD_GRADES.map((gr) => ({
+                  id: gr,
+                  label: gr.replace("Lớp ", "Khối "),
+                })),
+                { id: "compare_all", label: "📊 So sánh tất cả Khối" },
               ].map((tab) => {
                 const isSel = activeGradeTab === tab.id;
                 return (
@@ -653,11 +654,11 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           )}
         </div>
 
-        {/* ================= NẾU CHỌN CHẾ ĐỘ "SO SÁNH 3 KHỐI" ================= */}
+        {/* ================= NẾU CHỌN CHẾ ĐỘ "SO SÁNH CÁC KHỐI" ================= */}
         {rankingMode === "by_grade" && activeGradeTab === "compare_all" ? (
           <div className="space-y-6">
-            {/* 3 Bento Cards Comparison */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Bento Cards Comparison */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
               {gradeComparisons.map((item) => (
                 <div
                   key={item.grade}
@@ -1312,12 +1313,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                   </label>
 
                   {/* Khối */}
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {[
                       { id: "all", label: "Tất cả khối" },
-                      { id: "Lớp 12", label: "Khối 12" },
-                      { id: "Lớp 11", label: "Khối 11" },
-                      { id: "Lớp 10", label: "Khối 10" },
+                      ...STANDARD_GRADES.map((g) => ({
+                        id: g,
+                        label: g.replace("Lớp ", "Khối "),
+                      })),
                     ].map((gr) => {
                       const isSel = selectedGrade === gr.id;
                       return (

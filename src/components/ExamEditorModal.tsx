@@ -694,7 +694,7 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
                   {/* Khối lớp */}
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">Khối Lớp:</label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-1.5">
                       {STANDARD_GRADES.map((gr) => (
                         <button
                           key={gr}

@@ -16,6 +16,7 @@ import { useFilter } from "../context/FilterContext";
 import { useAuth } from "../context/AuthContext";
 import { SCORE_TIERS } from "../utils/filterUtils";
 import { ROLE_LABELS } from "../types/auth";
+import { STANDARD_GRADES } from "../types/exam";
 
 interface GlobalFilterDrawerProps {
   availableClasses?: string[];
@@ -123,7 +124,7 @@ export const GlobalFilterDrawer: React.FC<GlobalFilterDrawerProps> = ({
               >
                 Tất cả
               </button>
-              {["Lớp 12", "Lớp 11", "Lớp 10"].map((grade) => (
+              {STANDARD_GRADES.map((grade) => (
                 <button
                   key={grade}
                   type="button"

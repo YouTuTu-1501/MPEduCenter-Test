@@ -202,11 +202,19 @@ export const checkExamAccessStatus = (exam: Exam): ExamAccessStatus => {
   };
 };
 
-// Cấu trúc danh mục Khối Lớp và Lớp học chuẩn
-export const STANDARD_GRADES = ["Lớp 12", "Lớp 11", "Lớp 10"] as const;
+// Cấu trúc danh mục Khối Lớp và Lớp học chuẩn (THPT & THCS)
+export const STANDARD_GRADES = [
+  "Lớp 12",
+  "Lớp 11",
+  "Lớp 10",
+  "Lớp 9",
+  "Lớp 8",
+  "Lớp 7",
+  "Lớp 6",
+] as const;
 
 // Danh mục mã lớp cơ bản đại diện cho từng khối
-export const STANDARD_CLASSES: readonly string[] = ["12", "11", "10"];
+export const STANDARD_CLASSES: readonly string[] = ["12", "11", "10", "9", "8", "7", "6"];
 
 /**
  * Lấy danh sách lớp học THỰC TẾ khả dụng cho một khối lớp cụ thể
@@ -323,6 +331,57 @@ export const STANDARD_CHAPTERS_BY_GRADE: Record<string, string[]> = {
     "Chương 8: Đại số tổ hợp (Quy tắc đếm, Hoán vị, Chỉnh hợp, Tổ hợp, Nhị thức Newton)",
     "Chương 9: Phương pháp tọa độ trong mặt phẳng Oxy",
     "Chương 10: Xác suất",
+    "Ôn tập Học kỳ 1 & Học kỳ 2",
+  ],
+  "Lớp 9": [
+    "Chương 1: Phương trình và hệ hai phương trình bậc nhất hai ẩn",
+    "Chương 2: Bất đẳng thức. Bất phương trình bậc nhất một ẩn",
+    "Chương 3: Căn bậc hai và căn bậc ba",
+    "Chương 4: Hệ thức lượng trong tam giác vuông",
+    "Chương 5: Đường tròn và các yếu tố đường tròn",
+    "Chương 6: Hàm số y = ax² (a ≠ 0). Phương trình bậc hai một ẩn",
+    "Chương 7: Tần số và tần số tương đối (Bảng và Biểu đồ)",
+    "Chương 8: Xác suất của biến cố trong một số mô hình đơn giản",
+    "Chương 9: Đường tròn ngoại tiếp và đường tròn nội tiếp tam giác, đa giác",
+    "Chương 10: Một số hình khối trong không gian thực tiễn (Hình trụ, nón, cầu)",
+    "Ôn tập Học kỳ 1 & Học kỳ 2",
+    "Luyện thi Tuyển sinh vào Lớp 10 THPT",
+  ],
+  "Lớp 8": [
+    "Chương 1: Đa thức nhiều biến. Các phép tính cộng, trừ, nhân, chia đa thức",
+    "Chương 2: Hằng đẳng thức đáng nhớ và ứng dụng phân tích đa thức thành nhân tử",
+    "Chương 3: Tứ giác (Hình thang cân, Hình bình hành, Hình chữ nhật, Hình thoi, Hình vuông)",
+    "Chương 4: Định lí Thalès trong tam giác",
+    "Chương 5: Dữ liệu và biểu đồ (Thu thập, biểu diễn và phân tích dữ liệu)",
+    "Chương 6: Phân thức đại số và các phép tính phân thức",
+    "Chương 7: Phương trình bậc nhất một ẩn và hàm số bậc nhất y = ax + b",
+    "Chương 8: Mở đầu về tính xác suất của biến cố",
+    "Chương 9: Tam giác đồng dạng và hình đồng dạng",
+    "Chương 10: Một số hình khối trong thực tiễn (Hình chóp tam giác đều, tứ giác đều)",
+    "Ôn tập Học kỳ 1 & Học kỳ 2",
+  ],
+  "Lớp 7": [
+    "Chương 1: Số hữu tỉ và các phép tính trong tập hợp số hữu tỉ",
+    "Chương 2: Số thực (Số thập phân vô hạn, Căn bậc hai số học, Giá trị tuyệt đối)",
+    "Chương 3: Góc và hai đường thẳng song song",
+    "Chương 4: Tam giác bằng nhau và các trường hợp bằng nhau của tam giác",
+    "Chương 5: Thu thập và biểu diễn dữ liệu (Biểu đồ đoạn thẳng, biểu đồ hình quạt tròn)",
+    "Chương 6: Tỉ lệ thức và Đại lượng tỉ lệ thuận, tỉ lệ nghịch",
+    "Chương 7: Biểu thức đại số và Đa thức một biến",
+    "Chương 8: Làm quen với biến cố và xác suất của biến cố",
+    "Chương 9: Quan hệ giữa các yếu tố trong một tam giác (Bất đẳng thức tam giác, đường đồng quy)",
+    "Chương 10: Một số hình khối trong thực tiễn (Hình hộp chữ nhật, hình lập phương, hình lăng trụ đứng)",
+    "Ôn tập Học kỳ 1 & Học kỳ 2",
+  ],
+  "Lớp 6": [
+    "Chương 1: Tập hợp các số tự nhiên (Các phép tính, Lũy thừa, Tính chia hết, Số nguyên tố, ƯC và BC)",
+    "Chương 2: Số nguyên (Số nguyên âm, Phép cộng, trừ, nhân, chia số nguyên, Quy tắc dấu ngoặc)",
+    "Chương 3: Hình học trực quan (Tam giác đều, Hình vuông, Lục giác đều, Hình chữ nhật, Hình thoi, Hình bình hành, Hình thang cân)",
+    "Chương 4: Một số yếu tố thống kê (Thu thập dữ liệu, Bảng thống kê, Biểu đồ tranh, Biểu đồ cột, Cột kép)",
+    "Chương 5: Phân số (Khái niệm phân số, Tính chất cơ bản, Các phép tính với phân số, Hỗn số)",
+    "Chương 6: Số thập phân (Khái niệm, Các phép tính với số thập phân, Làm tròn số, Tỉ số và tỉ số phần trăm)",
+    "Chương 7: Hình học phẳng (Điểm, Đường thẳng, Tia, Đoạn thẳng, Độ dài đoạn thẳng, Trung điểm, Góc)",
+    "Chương 8: Một số yếu tố xác suất (Làm quen với xác suất thực nghiệm trong trò chơi đơn giản)",
     "Ôn tập Học kỳ 1 & Học kỳ 2",
   ],
 };
