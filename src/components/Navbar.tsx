@@ -146,11 +146,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   const navItems = getNavItems();
 
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs w-full max-w-full">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 sm:gap-4 w-full min-w-0">
         {/* Brand Logo & Name */}
         <div
-          className="flex items-center gap-3 cursor-pointer group"
+          className="flex items-center gap-3 cursor-pointer group shrink-0"
           onClick={() => setActiveView(isStudent ? "student_portal" : "bank")}
         >
           <BeeLogo size={42} animated={true} />
@@ -170,7 +170,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
             <div className="flex items-center gap-1.5 text-xs text-amber-700 font-semibold mt-0.5">
               <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></span>
-              <span className="truncate max-w-[240px] sm:max-w-[320px]">
+              <span className="truncate max-w-[200px] sm:max-w-[320px]">
                 {examCode ? `Đang mở: ${examCode}` : "Hệ thống kiểm tra 4 dạng thức"}
               </span>
             </div>
@@ -178,7 +178,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Navigation Tabs theo Vai trò */}
-        <nav className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-2xl border border-slate-200 order-3 md:order-2 overflow-x-auto max-w-full">
+        <nav className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-2xl border border-slate-200 order-3 md:order-2 overflow-x-auto max-w-full min-w-0">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
@@ -187,7 +187,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 key={item.id}
                 type="button"
                 onClick={() => setActiveView(item.id as ActiveView)}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 sm:gap-2 whitespace-nowrap transition-all ${
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 sm:gap-2 whitespace-nowrap transition-all shrink-0 ${
                   isActive
                     ? "bg-indigo-600 text-white shadow-xs font-extrabold"
                     : "text-slate-600 hover:text-slate-900 hover:bg-white/80"
@@ -207,7 +207,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Global Class Selector cho Admin & Giáo viên */}
         {(isAdmin || isTeacher) && onSelectClassFilter && (
-          <div className="flex items-center gap-1.5 bg-amber-50/90 hover:bg-amber-100/80 border border-amber-200 py-1 px-2.5 rounded-2xl shadow-2xs transition order-2 md:order-2">
+          <div className="flex items-center gap-1.5 bg-amber-50/90 hover:bg-amber-100/80 border border-amber-200 py-1 px-2.5 rounded-2xl shadow-2xs transition order-2 md:order-2 shrink-0">
             <GraduationCap className="w-4 h-4 text-amber-700 shrink-0" />
             <span className="text-[11px] font-extrabold text-amber-800 hidden sm:inline">Lớp:</span>
             <select
@@ -245,7 +245,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         )}
 
         {/* User Account & Login Menu */}
-        <div className="flex items-center gap-2 order-2 md:order-3 relative" ref={dropdownRef}>
+        <div className="flex items-center gap-2 order-2 md:order-3 relative shrink-0" ref={dropdownRef}>
           {/* Nút bấm vào tên tài khoản để xem Kết quả của tất cả các lần làm bài */}
           <button
             type="button"

@@ -1,7 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Exam } from "../../types/exam";
 import { checkExamAccessStatus } from "../../types/exam";
-import { parseStandardExamCode } from "../../utils/examCodeHelper";
 import { useToast } from "../../context/ToastContext";
 import {
   Presentation,
@@ -16,9 +15,11 @@ import {
   Copy,
   Check,
   Clock,
-  Layers,
   FileCode,
   Bookmark,
+  MoreVertical,
+  Globe,
+  Radio,
 } from "lucide-react";
 
 interface BankTableViewProps {
@@ -48,6 +49,19 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
 }) => {
   const { toast } = useToast();
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
+  const [activeMenuExamId, setActiveMenuExamId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Đóng menu khi click bên ngoài
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setActiveMenuExamId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleCopyCode = (exam: Exam, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -58,37 +72,44 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-visible w-full min-w-0">
+      <div className="overflow-x-auto w-full min-h-[360px] pb-20">
+        <table className="w-full text-left border-collapse min-w-[780px]">
           <thead>
-            <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-black text-slate-500 uppercase tracking-wider">
-              <th className="py-3 px-4">Mã Đề</th>
-              <th className="py-3 px-4">Tên Đề & Chuyên Đề</th>
-              <th className="py-3 px-3">Khối / Lớp</th>
-              <th className="py-3 px-3 text-center">Thời Lượng</th>
-              <th className="py-3 px-3 text-center">Cấu Trúc Câu Hỏi</th>
-              <th className="py-3 px-3 text-center">Trạng Thái</th>
-              <th className="py-3 px-3 text-center">Lượt Nộp</th>
-              <th className="py-3 px-4 text-right">Tác Vụ</th>
+            <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-black text-slate-500 uppercase tracking-wider">
+              <th className="py-3 px-3.5 whitespace-nowrap">Mã Đề</th>
+              <th className="py-3 px-4 min-w-[200px]">Tên Đề & Chuyên Đề</th>
+              <th className="py-3 px-3 whitespace-nowrap text-center">Khối / Lớp</th>
+              <th className="py-3 px-3 whitespace-nowrap text-center">Thời Lượng</th>
+              <th className="py-3 px-3 whitespace-nowrap text-center">Cấu Trúc Câu</th>
+              <th className="py-3 px-3 whitespace-nowrap text-center">Trạng Thái</th>
+              <th className="py-3 px-3 whitespace-nowrap text-center">Lượt Nộp</th>
+              <th className="py-3 px-4 whitespace-nowrap text-right sticky right-0 bg-slate-50 z-20 shadow-[-4px_0_8px_rgba(0,0,0,0.03)]">
+                Tác Vụ Đầy Đủ
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-            {exams.map((exam) => {
+            {exams.map((exam, index) => {
               const accessStatus = checkExamAccessStatus(exam);
               const p1 = exam.questions.filter((q) => q.part === "part_1").length;
               const p2 = exam.questions.filter((q) => q.part === "part_2").length;
               const p3 = exam.questions.filter((q) => q.part === "part_3").length;
               const p4 = exam.questions.filter((q) => q.part === "part_4").length;
               const subs = submissionCountByExamId[exam.id] || submissionCountByExamId[exam.code] || 0;
+              const isMenuOpen = activeMenuExamId === exam.id;
+              // Nếu là 2 dòng cuối của danh sách có từ 3 đề trở lên, xổ menu lên trên
+              const isNearBottom = index >= Math.max(0, exams.length - 2) && exams.length >= 3;
 
               return (
                 <tr
                   key={exam.id}
-                  className="hover:bg-indigo-50/30 transition-colors group"
+                  className={`transition-colors group relative ${
+                    isMenuOpen ? "bg-indigo-50/60 z-30" : "hover:bg-indigo-50/30"
+                  }`}
                 >
                   {/* Cột 1: Mã Đề */}
-                  <td className="py-3 px-4 whitespace-nowrap">
+                  <td className="py-3 px-3.5 whitespace-nowrap">
                     <button
                       type="button"
                       onClick={(e) => handleCopyCode(exam, e)}
@@ -106,12 +127,12 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
                   </td>
 
                   {/* Cột 2: Tên Đề & Chuyên Đề */}
-                  <td className="py-3 px-4 min-w-[220px]">
+                  <td className="py-3 px-4">
                     <div className="font-bold text-slate-900 line-clamp-1 group-hover:text-indigo-600 transition">
                       {exam.title}
                     </div>
                     {exam.chapter && (
-                      <div className="flex items-center gap-1 text-[11px] text-slate-500 font-medium truncate mt-0.5">
+                      <div className="flex items-center gap-1 text-[11px] text-slate-500 font-medium truncate mt-0.5 max-w-sm">
                         <Bookmark className="w-3 h-3 text-indigo-500 shrink-0" />
                         <span className="truncate">{exam.chapter}</span>
                       </div>
@@ -119,8 +140,8 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
                   </td>
 
                   {/* Cột 3: Khối / Lớp */}
-                  <td className="py-3 px-3 whitespace-nowrap">
-                    <div className="flex flex-col gap-1 items-start">
+                  <td className="py-3 px-3 whitespace-nowrap text-center">
+                    <div className="inline-flex flex-col gap-0.5 items-center">
                       <span
                         className={`px-2 py-0.5 rounded-md font-bold text-[11px] border ${getGradeBadgeStyle(
                           exam.grade
@@ -129,8 +150,8 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
                         {exam.grade}
                       </span>
                       {exam.targetClass && exam.targetClass !== "Tất cả các lớp" && (
-                        <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 text-[10px] font-bold">
-                          Lớp: {exam.targetClass}
+                        <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                          Lớp {exam.targetClass}
                         </span>
                       )}
                     </div>
@@ -147,13 +168,13 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
                   {/* Cột 5: Cấu trúc câu hỏi 4 dạng */}
                   <td className="py-3 px-3 whitespace-nowrap text-center">
                     <div className="inline-flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 text-[10px] font-extrabold text-slate-700">
-                      <span title="Phần I - 4 Lựa chọn">P1:{p1}</span>
+                      <span title="Phần I: 4 Lựa chọn">P1:{p1}</span>
                       <span className="text-slate-300">•</span>
-                      <span title="Phần II - Đúng/Sai">P2:{p2}</span>
+                      <span title="Phần II: Đúng/Sai">P2:{p2}</span>
                       <span className="text-slate-300">•</span>
-                      <span title="Phần III - Trả lời ngắn">P3:{p3}</span>
+                      <span title="Phần III: Trả lời ngắn">P3:{p3}</span>
                       <span className="text-slate-300">•</span>
-                      <span title="Phần IV - Tự luận" className="text-amber-700 font-black">
+                      <span title="Phần IV: Tự luận" className="text-amber-700 font-black">
                         P4:{p4}
                       </span>
                     </div>
@@ -182,104 +203,238 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
                     </span>
                   </td>
 
-                  {/* Cột 8: Tác Vụ */}
-                  <td className="py-3 px-4 whitespace-nowrap text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {/* Trình chiếu */}
+                  {/* Cột 8: Tác Vụ CỐ ĐỊNH (STICKY RIGHT) VỚI CÁC NÚT NHANH + MENU THAO TÁC TOÀN DIỆN */}
+                  <td
+                    className={`py-3 px-4 whitespace-nowrap text-right sticky right-0 transition-colors shadow-[-4px_0_8px_rgba(0,0,0,0.03)] ${
+                      isMenuOpen
+                        ? "z-30 bg-white"
+                        : "z-10 bg-white group-hover:bg-slate-50/90"
+                    }`}
+                  >
+                    <div className="flex items-center justify-end gap-1.5">
+                      {/* 1. Nút Trình Chiếu Nhanh */}
                       <button
                         type="button"
                         onClick={() => onSelectExam(exam, "presentation")}
-                        className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-900 hover:text-white text-slate-700 transition"
-                        title="Trình chiếu Slide bài giảng"
+                        className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-900 hover:text-white text-slate-700 font-bold text-[11px] flex items-center gap-1 transition shadow-2xs"
+                        title="Trình chiếu Slide bài giảng tương tác"
                       >
-                        <Presentation className="w-3.5 h-3.5" />
+                        <Presentation className="w-3.5 h-3.5 text-indigo-500 group-hover:text-inherit" />
+                        <span className="hidden xl:inline">Chiếu</span>
                       </button>
 
-                      {/* Vào thi */}
+                      {/* 2. Nút Vào Thi Nhanh */}
                       <button
                         type="button"
                         onClick={() => onSelectExam(exam, "exam")}
-                        className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 transition"
-                        title="Vào làm bài thi thử nghiệm"
+                        className="px-2 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 font-bold text-[11px] flex items-center gap-1 transition shadow-2xs border border-indigo-200/60"
+                        title="Vào làm bài thi thử nghiệm hoặc kiểm tra"
                       >
-                        <Edit className="w-3.5 h-3.5" />
+                        <Edit className="w-3.5 h-3.5 text-indigo-600 group-hover:text-inherit" />
+                        <span className="hidden xl:inline">Thi</span>
                       </button>
 
-                      {/* Phân tích */}
+                      {/* 3. Nút Thống Kê & Chấm Điểm */}
                       <button
                         type="button"
                         onClick={() => onSelectExam(exam, "analytics")}
                         className="p-1.5 rounded-lg bg-slate-100 hover:bg-indigo-100 text-slate-700 hover:text-indigo-800 transition"
-                        title="Xem thống kê & Chấm điểm"
+                        title="Xem thống kê phổ điểm & Chấm bài tự luận"
                       >
                         <BarChart2 className="w-3.5 h-3.5" />
                       </button>
 
-                      {/* Hẹn giờ */}
-                      {onOpenSchedule && (
+                      {/* 4. Menu Thao Tác Mở Rộng Toàn Bộ Chức Năng */}
+                      <div className={`relative ${isMenuOpen ? "z-40" : ""}`}>
                         <button
                           type="button"
-                          onClick={() => onOpenSchedule(exam)}
-                          className="p-1.5 rounded-lg bg-slate-100 hover:bg-amber-100 text-slate-700 hover:text-amber-800 transition"
-                          title="Hẹn giờ giao đề thi"
-                        >
-                          <Calendar className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-
-                      {/* Khóa/Mở */}
-                      {onToggleLock && (
-                        <button
-                          type="button"
-                          onClick={() => onToggleLock(exam)}
-                          className={`p-1.5 rounded-lg transition ${
-                            exam.isLocked
-                              ? "bg-rose-50 hover:bg-rose-100 text-rose-700"
-                              : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuExamId(isMenuOpen ? null : exam.id);
+                          }}
+                          className={`p-1.5 rounded-lg border transition ${
+                            isMenuOpen
+                              ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                              : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
                           }`}
-                          title={exam.isLocked ? "Mở khóa đề" : "Khóa đề"}
+                          title="Tất cả chức năng & tác vụ mở rộng"
                         >
-                          {exam.isLocked ? (
-                            <Lock className="w-3.5 h-3.5" />
-                          ) : (
-                            <Unlock className="w-3.5 h-3.5" />
-                          )}
+                          <MoreVertical className="w-3.5 h-3.5" />
                         </button>
-                      )}
 
-                      {/* Sửa */}
-                      <button
-                        type="button"
-                        onClick={() => onEditMetadata(exam)}
-                        className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
-                        title="Chỉnh sửa toàn diện đề thi"
-                      >
-                        <FileCode className="w-3.5 h-3.5" />
-                      </button>
+                        {/* Dropdown Menu Chức Năng Đầy Đủ */}
+                        {isMenuOpen && (
+                          <div
+                            ref={menuRef}
+                            className={`absolute right-0 w-60 bg-white rounded-2xl shadow-2xl border border-slate-200 py-2 z-50 text-left animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/10 ${
+                              isNearBottom ? "bottom-full mb-2" : "top-full mt-2"
+                            }`}
+                          >
+                            <div className="px-3 py-1.5 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                              Tác Vụ Đề Thi: {exam.code}
+                            </div>
 
-                      {/* Tải file TeX */}
-                      <button
-                        type="button"
-                        onClick={() => handleDownloadLatex(exam)}
-                        className="p-1.5 rounded-lg bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 transition"
-                        title="Tải mã nguồn .tex"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                      </button>
+                            {/* Trình chiếu */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuExamId(null);
+                                onSelectExam(exam, "presentation");
+                              }}
+                              className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2.5 transition text-left"
+                            >
+                              <Presentation className="w-4 h-4 text-indigo-500" />
+                              <span>Trình chiếu Slide bài giảng</span>
+                            </button>
 
-                      {/* Xóa */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (confirm(`Bạn có chắc muốn xóa đề thi "${exam.title}"?`)) {
-                            onDeleteExam(exam.id);
-                          }
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition"
-                        title="Xóa đề thi"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                            {/* Vào thi */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuExamId(null);
+                                onSelectExam(exam, "exam");
+                              }}
+                              className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2.5 transition text-left"
+                            >
+                              <Edit className="w-4 h-4 text-indigo-600" />
+                              <span>Vào làm bài thi (Thí sinh)</span>
+                            </button>
+
+                            {/* Phòng thi trực tiếp (Live) */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuExamId(null);
+                                onSelectExam(exam, "live");
+                              }}
+                              className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2.5 transition text-left"
+                            >
+                              <Radio className="w-4 h-4 text-rose-500" />
+                              <span>Phòng thi trực tuyến Realtime</span>
+                            </button>
+
+                            {/* Thống kê & Chấm điểm */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuExamId(null);
+                                onSelectExam(exam, "analytics");
+                              }}
+                              className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2.5 transition text-left"
+                            >
+                              <BarChart2 className="w-4 h-4 text-emerald-600" />
+                              <span>Phân tích phổ điểm & Chấm bài</span>
+                            </button>
+
+                            <div className="my-1 border-t border-slate-100" />
+
+                            {/* Hẹn giờ giao đề */}
+                            {onOpenSchedule && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveMenuExamId(null);
+                                  onOpenSchedule(exam);
+                                }}
+                                className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-amber-50 hover:text-amber-700 flex items-center gap-2.5 transition text-left"
+                              >
+                                <Calendar className="w-4 h-4 text-amber-500" />
+                                <span>Hẹn giờ giao đề & Phân lớp</span>
+                              </button>
+                            )}
+
+                            {/* Khóa/Mở khóa đề */}
+                            {onToggleLock && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveMenuExamId(null);
+                                  onToggleLock(exam);
+                                }}
+                                className={`w-full px-3 py-2 text-xs font-bold flex items-center gap-2.5 transition text-left ${
+                                  exam.isLocked
+                                    ? "text-emerald-700 hover:bg-emerald-50"
+                                    : "text-rose-700 hover:bg-rose-50"
+                                }`}
+                              >
+                                {exam.isLocked ? (
+                                  <>
+                                    <Unlock className="w-4 h-4 text-emerald-600" />
+                                    <span>Mở khóa đề thi cho học sinh</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Lock className="w-4 h-4 text-rose-600" />
+                                    <span>Khóa đề thi (Ngưng truy cập)</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+
+                            {/* Chỉnh sửa toàn diện */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuExamId(null);
+                                onEditMetadata(exam);
+                              }}
+                              className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2.5 transition text-left"
+                            >
+                              <FileCode className="w-4 h-4 text-blue-600" />
+                              <span>Chỉnh sửa nội dung & Cấu trúc</span>
+                            </button>
+
+                            <div className="my-1 border-t border-slate-100" />
+
+                            {/* Tải LaTeX (.tex) */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuExamId(null);
+                                handleDownloadLatex(exam);
+                              }}
+                              className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2.5 transition text-left"
+                            >
+                              <Download className="w-4 h-4 text-indigo-500" />
+                              <span>Tải mã nguồn LaTeX (.tex)</span>
+                            </button>
+
+                            {/* Tải Presentation HTML Offline */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuExamId(null);
+                                handleDownloadPresentationHtml(exam);
+                              }}
+                              className="w-full px-3 py-2 text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2.5 transition text-left"
+                            >
+                              <Globe className="w-4 h-4 text-sky-500" />
+                              <span>Tải Slide HTML Offline</span>
+                            </button>
+
+                            <div className="my-1 border-t border-slate-100" />
+
+                            {/* Xóa đề */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuExamId(null);
+                                if (
+                                  confirm(
+                                    `Bạn có chắc chắn muốn xóa đề thi "${exam.title}" (Mã: ${exam.code}) khỏi ngân hàng?`
+                                  )
+                                ) {
+                                  onDeleteExam(exam.id);
+                                }
+                              }}
+                              className="w-full px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition text-left"
+                            >
+                              <Trash2 className="w-4 h-4 text-rose-500" />
+                              <span>Xóa vĩnh viễn đề thi</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -291,3 +446,4 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
     </div>
   );
 };
+

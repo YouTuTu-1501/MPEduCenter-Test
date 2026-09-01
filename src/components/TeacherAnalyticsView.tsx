@@ -62,6 +62,8 @@ import {
   Save,
   HelpCircle,
   Calculator,
+  ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
 
 interface TeacherAnalyticsViewProps {
@@ -1673,6 +1675,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                       <th className="p-3 text-center">Phần III</th>
                       <th className="p-3 text-center">Phần IV</th>
                       <th className="p-3 text-center">Tổng điểm</th>
+                      <th className="p-3 text-center">Giám sát</th>
                       <th className="p-3 text-center">Thao tác</th>
                     </tr>
                   </thead>
@@ -1717,6 +1720,25 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                           >
                             {sub.score} / {sub.maxScore}đ
                           </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          {(sub.tabSwitchCount || 0) > 0 ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 font-black text-[11px] border border-rose-200"
+                              title={`Thí sinh đã rời khỏi màn hình làm bài ${sub.tabSwitchCount} lần`}
+                            >
+                              <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+                              <span>{sub.tabSwitchCount} lần</span>
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold text-[11px] border border-emerald-200"
+                              title="Tập trung 100%, không phát hiện rời trang"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>0</span>
+                            </span>
+                          )}
                         </td>
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
@@ -1780,7 +1802,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                     Bài làm của: {selectedSubmission.studentName} ({selectedSubmission.studentId})
                   </h3>
                   <p className="text-xs text-slate-500 font-semibold">
-                    Tổng điểm: <b className="text-blue-700">{selectedSubmission.score}đ</b> • Thời gian: {Math.floor(selectedSubmission.timeSpentSeconds / 60)} phút
+                    Tổng điểm: <b className="text-blue-700">{selectedSubmission.score}đ</b> • Thời gian: {Math.floor(selectedSubmission.timeSpentSeconds / 60)} phút • Lớp: {selectedSubmission.studentClass || "Chưa phân lớp"}
                   </p>
                 </div>
 
@@ -1791,6 +1813,68 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                 >
                   ✕
                 </button>
+              </div>
+
+              {/* Báo cáo Giám sát thi & Nhật ký Rời trang (Proctoring Box) */}
+              <div
+                className={`p-4 rounded-2xl border mb-4 text-xs transition ${
+                  (selectedSubmission.tabSwitchCount || 0) > 0
+                    ? "bg-rose-50 border-rose-200 text-rose-950"
+                    : "bg-emerald-50/70 border-emerald-200 text-emerald-950"
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                      (selectedSubmission.tabSwitchCount || 0) > 0
+                        ? "bg-rose-600 text-white shadow-xs"
+                        : "bg-emerald-600 text-white shadow-xs"
+                    }`}
+                  >
+                    {(selectedSubmission.tabSwitchCount || 0) > 0 ? (
+                      <ShieldAlert className="w-4 h-4" />
+                    ) : (
+                      <ShieldCheck className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <h4 className="font-black text-sm">
+                        {(selectedSubmission.tabSwitchCount || 0) > 0
+                          ? `⚠️ Cảnh báo giám sát: Thí sinh đã rời khỏi màn hình thi ${selectedSubmission.tabSwitchCount} lần!`
+                          : "🛡️ Giám sát trực tuyến: Thí sinh làm bài tập trung (0 lần rời trang)"}
+                      </h4>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                          (selectedSubmission.tabSwitchCount || 0) > 0
+                            ? "bg-rose-200 text-rose-900"
+                            : "bg-emerald-200 text-emerald-900"
+                        }`}
+                      >
+                        {(selectedSubmission.tabSwitchCount || 0) > 0 ? "Phát hiện chuyển tab" : "Chuẩn mực"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] mt-0.5 opacity-90 leading-relaxed">
+                      {(selectedSubmission.tabSwitchCount || 0) > 0
+                        ? "Hệ thống đã tự động bắt sự kiện thí sinh chuyển tab trình duyệt, thu nhỏ ứng dụng hoặc mở tab tra cứu trong lúc đang làm bài."
+                        : "Toàn bộ phiên thi diễn ra trên một cửa sổ duy nhất, không ghi nhận hành vi gian lận chuyển tab."}
+                    </p>
+
+                    {/* Chi tiết từng lần vi phạm */}
+                    {selectedSubmission.tabSwitchLogs && selectedSubmission.tabSwitchLogs.length > 0 && (
+                      <div className="mt-2.5 pt-2.5 border-t border-rose-200 flex flex-wrap gap-1.5">
+                        {selectedSubmission.tabSwitchLogs.map((log, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-1 rounded-lg bg-white border border-rose-200 text-[10px] font-bold text-rose-800 shadow-2xs"
+                          >
+                            Lần #{idx + 1}: {new Date(log.timestamp).toLocaleTimeString("vi-VN")} (~{log.durationSeconds || 1}s)
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Rà soát các câu & Chấm điểm tự luận */}

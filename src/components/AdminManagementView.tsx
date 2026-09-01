@@ -958,7 +958,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   };
 
   return (
-    <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 min-w-0">
       {/* Admin Hero Header - Bento Card */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl border border-slate-800 relative overflow-hidden">
         <div className="absolute right-0 top-0 translate-x-8 -translate-y-8 w-72 h-72 bg-rose-500/10 rounded-full blur-3xl pointer-events-none"></div>

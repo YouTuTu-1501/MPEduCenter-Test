@@ -418,9 +418,9 @@ function MainApp({ currentUser }: { currentUser: User }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] flex flex-col text-slate-800 font-sans">
-      {/* Ẩn Navbar khi đang ở chế độ Trình chiếu toàn màn hình để tối đa không gian */}
-      {activeView !== "presentation" && (
+    <div className="min-h-screen bg-[#f8fafc] flex flex-col text-slate-800 font-sans w-full max-w-full overflow-x-clip">
+      {/* Ẩn Navbar khi đang ở chế độ Làm bài thi hoặc Trình chiếu để tối đa không gian & tránh phân tâm */}
+      {activeView !== "presentation" && activeView !== "exam" && (
         <Navbar
           activeView={activeView}
           setActiveView={setActiveView}

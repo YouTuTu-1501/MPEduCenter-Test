@@ -46,6 +46,24 @@ import {
   Info,
   Maximize2,
   Minimize2,
+  Pin,
+  PinOff,
+  Bookmark,
+  BookmarkCheck,
+  Sliders,
+  Settings2,
+  Star,
+  Trash2,
+  Plus,
+  Check,
+  Flame,
+  Target,
+  Compass,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+  LayoutGrid,
+  X,
 } from "lucide-react";
 
 // Tooltip hiển thị chi tiết khi rê chuột vào cột biểu đồ
@@ -102,6 +120,22 @@ interface StudentPortalViewProps {
   onOpenPractice?: () => void;
 }
 
+export interface DashboardWidgetConfig {
+  showPinnedExams: boolean;
+  showPinnedTopics: boolean;
+  showStudyGoal: boolean;
+  showQuickStats: boolean;
+  targetExamCountWeekly: number;
+}
+
+const DEFAULT_WIDGET_CONFIG: DashboardWidgetConfig = {
+  showPinnedExams: true,
+  showPinnedTopics: true,
+  showStudyGoal: true,
+  showQuickStats: true,
+  targetExamCountWeekly: 5,
+};
+
 export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   exams,
   submissions,
@@ -117,6 +151,101 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const [gradeFilter, setGradeFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedSubmissionReview, setSelectedSubmissionReview] = useState<StudentSubmission | null>(null);
+
+  // Quản lý Dashboard widgets & ghim cá nhân hóa theo học sinh
+  const storagePrefix = `edutest_student_${currentUser.id}`;
+
+  const [pinnedExamIds, setPinnedExamIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${storagePrefix}_pinned_exams`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [pinnedChapters, setPinnedChapters] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${storagePrefix}_pinned_chapters`);
+      if (saved) return JSON.parse(saved);
+      return [
+        "Ứng dụng đạo hàm & Khảo sát hàm số",
+        "Hình học không gian Oxyz",
+      ];
+    } catch {
+      return [
+        "Ứng dụng đạo hàm & Khảo sát hàm số",
+        "Hình học không gian Oxyz",
+      ];
+    }
+  });
+
+  const [widgetConfig, setWidgetConfig] = useState<DashboardWidgetConfig>(() => {
+    try {
+      const saved = localStorage.getItem(`${storagePrefix}_widget_config`);
+      return saved ? { ...DEFAULT_WIDGET_CONFIG, ...JSON.parse(saved) } : DEFAULT_WIDGET_CONFIG;
+    } catch {
+      return DEFAULT_WIDGET_CONFIG;
+    }
+  });
+
+  const [showCustomizerModal, setShowCustomizerModal] = useState<boolean>(false);
+  const [showAddTopicModal, setShowAddTopicModal] = useState<boolean>(false);
+  const [isDashboardCollapsed, setIsDashboardCollapsed] = useState<boolean>(false);
+
+  // Cập nhật và lưu vào LocalStorage
+  const updatePinnedExamIds = (newIds: string[]) => {
+    setPinnedExamIds(newIds);
+    try {
+      localStorage.setItem(`${storagePrefix}_pinned_exams`, JSON.stringify(newIds));
+    } catch {}
+  };
+
+  const updatePinnedChapters = (newChapters: string[]) => {
+    setPinnedChapters(newChapters);
+    try {
+      localStorage.setItem(`${storagePrefix}_pinned_chapters`, JSON.stringify(newChapters));
+    } catch {}
+  };
+
+  const updateWidgetConfig = (newConfig: Partial<DashboardWidgetConfig>) => {
+    setWidgetConfig((prev) => {
+      const updated = { ...prev, ...newConfig };
+      try {
+        localStorage.setItem(`${storagePrefix}_widget_config`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const handleTogglePinExam = (examId: string) => {
+    const isPinned = pinnedExamIds.includes(examId);
+    const exam = exams.find((e) => e.id === examId);
+    const examTitle = exam ? exam.title : "Đề thi";
+
+    if (isPinned) {
+      const next = pinnedExamIds.filter((id) => id !== examId);
+      updatePinnedExamIds(next);
+      toast.info("Đã bỏ ghim đề thi", `Đã xóa "${examTitle}" khỏi Bảng điều khiển cá nhân.`);
+    } else {
+      const next = [...pinnedExamIds, examId];
+      updatePinnedExamIds(next);
+      toast.success("Đã ghim đề thi thành công!", `Đã ghim "${examTitle}" lên Bảng điều khiển trọng tâm.`);
+    }
+  };
+
+  const handleTogglePinChapter = (chapterName: string) => {
+    const isPinned = pinnedChapters.includes(chapterName);
+    if (isPinned) {
+      const next = pinnedChapters.filter((c) => c !== chapterName);
+      updatePinnedChapters(next);
+      toast.info("Đã bỏ ghim chuyên đề", `Đã xóa "${chapterName}" khỏi danh sách theo dõi.`);
+    } else {
+      const next = [...pinnedChapters, chapterName];
+      updatePinnedChapters(next);
+      toast.success("Đã ghim chuyên đề thành công!", `Đã ghim chuyên đề "${chapterName}" lên Bảng điều khiển.`);
+    }
+  };
 
   // Quản lý Modal & Input Nhập mã đề thi nhanh
   const [showCodeModal, setShowCodeModal] = useState<boolean>(false);
@@ -308,8 +437,65 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
     });
   }, [mySubmissions]);
 
+  // Danh sách tất cả chuyên đề khả dụng được trích xuất từ đề thi + các chuyên đề phổ biến chuẩn Bộ GD&ĐT
+  const allAvailableChapters = useMemo(() => {
+    const set = new Set<string>();
+    exams.forEach((e) => {
+      if (e.chapter && e.chapter.trim()) {
+        set.add(e.chapter.trim());
+      }
+    });
+    const standardChapters = [
+      "Ứng dụng đạo hàm & Khảo sát hàm số",
+      "Hàm số luỹ thừa, Mũ & Logarit",
+      "Nguyên hàm, Tích phân & Ứng dụng",
+      "Phương pháp toạ độ trong không gian Oxyz",
+      "Khối đa diện & Thể tích khối đa diện",
+      "Mặt cầu, Mặt trụ, Mặt nón",
+      "Số phức & Các dạng toán thực tế",
+      "Xác suất & Thống kê nâng cao",
+      "Hình học giải tích trong mặt phẳng",
+      "Lượng giác & Phương trình lượng giác",
+    ];
+    standardChapters.forEach((c) => set.add(c));
+    return Array.from(set);
+  }, [exams]);
+
+  // Danh sách đề thi đã ghim
+  const pinnedExamsList = useMemo(() => {
+    return exams.filter((e) => pinnedExamIds.includes(e.id));
+  }, [exams, pinnedExamIds]);
+
+  // Tiến độ mục tiêu học tập tuần
+  const weeklyStudyGoal = useMemo(() => {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const countThisWeek = mySubmissions.filter((s) => {
+      try {
+        return new Date(s.submittedAt) >= sevenDaysAgo;
+      } catch {
+        return false;
+      }
+    }).length;
+    const target = widgetConfig.targetExamCountWeekly || 5;
+    const percent = Math.min(100, Math.round((countThisWeek / target) * 100));
+    return {
+      countThisWeek,
+      target,
+      percent,
+    };
+  }, [mySubmissions, widgetConfig.targetExamCountWeekly]);
+
+  // Tìm kiếm chuyên đề trong modal
+  const [topicSearchModal, setTopicSearchModal] = useState<string>("");
+  const filteredTopicsInModal = useMemo(() => {
+    const clean = topicSearchModal.trim().toLowerCase();
+    if (!clean) return allAvailableChapters;
+    return allAvailableChapters.filter((c) => c.toLowerCase().includes(clean));
+  }, [allAvailableChapters, topicSearchModal]);
+
   return (
-    <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 min-w-0">
       {/* Student Hero Header - Bento Card */}
       <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl border border-slate-800 relative overflow-hidden">
         <div className="absolute right-0 top-0 translate-x-8 -translate-y-8 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -445,6 +631,311 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
             <div className="text-[11px] text-sky-300 mt-0.5">Tổng thời lượng</div>
           </div>
         </div>
+      </div>
+
+      {/* KHU VỰC DASHBOARD WIDGETS TÙY CHỈNH CỦA HỌC SINH */}
+      <div id="student-dashboard-custom-widgets" className="bg-white rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden">
+        {/* Header thanh Widget */}
+        <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold shadow-md shrink-0">
+              <Pin className="w-5 h-5 fill-slate-950" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-sm sm:text-base font-extrabold tracking-tight">
+                  Không Gian Trọng Tâm Cá Nhân (Dashboard Widgets)
+                </h2>
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 font-extrabold text-[11px] border border-amber-400/30">
+                  {pinnedExamsList.length} đề thi • {pinnedChapters.length} chuyên đề đã ghim
+                </span>
+              </div>
+              <p className="text-xs text-slate-300">
+                Ghim các đề thi và chuyên đề trọng tâm để truy cập nhanh & theo dõi tiến độ luyện thi cá nhân.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            <button
+              id="btn-open-dashboard-customizer"
+              type="button"
+              onClick={() => setShowCustomizerModal(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 shadow-xs transition flex items-center gap-1.5"
+              title="Tùy chỉnh các widget hiển thị trên Dashboard"
+            >
+              <Settings2 className="w-4 h-4 text-amber-300" />
+              <span>Tùy chỉnh Widget</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsDashboardCollapsed(!isDashboardCollapsed)}
+              className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs transition"
+              title={isDashboardCollapsed ? "Mở rộng Dashboard" : "Thu gọn Dashboard"}
+            >
+              {isDashboardCollapsed ? (
+                <ChevronDown className="w-4 h-4" />
+              ) : (
+                <ChevronUp className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Nội dung các Widgets */}
+        {!isDashboardCollapsed && (
+          <div className="p-4 sm:p-6 space-y-5 bg-slate-50/50">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+              {/* WIDGET 1: ĐỀ THI ĐÃ GHIM */}
+              {widgetConfig.showPinnedExams && (
+                <div
+                  className={`${
+                    widgetConfig.showPinnedTopics ? "lg:col-span-2" : "lg:col-span-3"
+                  } bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3.5`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <BookmarkCheck className="w-4 h-4 text-amber-500" />
+                      <h3 className="font-extrabold text-sm text-slate-900">
+                        Đề Thi Trọng Tâm Đã Ghim ({pinnedExamsList.length})
+                      </h3>
+                    </div>
+                    {pinnedExamsList.length > 0 && (
+                      <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
+                        Bấm vào đề để vào làm bài ngay
+                      </span>
+                    )}
+                  </div>
+
+                  {pinnedExamsList.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[360px] overflow-y-auto pr-1">
+                      {pinnedExamsList.map((exam) => {
+                        const previousSub = mySubmissions.find((s) => s.examId === exam.id);
+                        const accessStatus = checkExamAccessStatus(exam);
+                        return (
+                          <div
+                            key={`pinned-widget-exam-${exam.id}`}
+                            className="p-3.5 rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50/40 via-white to-slate-50 hover:border-amber-400 hover:shadow-xs transition group flex flex-col justify-between space-y-2.5"
+                          >
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between gap-1.5">
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 font-extrabold text-[10px] rounded-md border border-amber-300 font-mono">
+                                  {exam.code}
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {previousSub && (
+                                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-md">
+                                      Đã làm: {previousSub.score}đ
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTogglePinExam(exam.id)}
+                                    className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                                    title="Bỏ ghim khỏi Dashboard"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <h4 className="font-bold text-xs sm:text-sm text-slate-900 line-clamp-2 group-hover:text-emerald-700 transition">
+                                {exam.title}
+                              </h4>
+                              {exam.chapter && (
+                                <p className="text-[11px] text-slate-500 line-clamp-1">
+                                  {exam.chapter}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                              <div className="text-[11px] text-slate-500 font-semibold flex items-center gap-2">
+                                <span>⏱ {exam.durationMinutes}p</span>
+                                <span>•</span>
+                                <span>📝 {exam.questions.length} câu</span>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleAttemptExam(exam)}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-2xs transition flex items-center gap-1 shrink-0"
+                              >
+                                <Play className="w-3 h-3 fill-current" />
+                                <span>Làm bài</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-6 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-2">
+                      <Pin className="w-6 h-6 text-slate-300 mx-auto" />
+                      <p className="text-xs text-slate-500 font-medium">
+                        Bạn chưa ghim đề thi nào vào Dashboard.
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        Hãy nhấn vào biểu tượng <b>📌 Ghim</b> trên từng thẻ đề thi bên dưới để lưu vào danh sách theo dõi nhanh!
+                      </p>
+                      {exams.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const firstTwo = exams.slice(0, 2).map((e) => e.id);
+                            updatePinnedExamIds(firstTwo);
+                            toast.success("Đã ghim đề thi đề xuất lên Dashboard!");
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition shadow-xs inline-flex items-center gap-1.5"
+                        >
+                          <Pin className="w-3.5 h-3.5 fill-current" />
+                          <span>Ghim 2 đề thi đề xuất</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* WIDGET 2 & 3: CHUYÊN ĐỀ QUAN TÂM & MỤC TIÊU TUẦN */}
+              <div className="space-y-4">
+                {/* WIDGET CHUYÊN ĐỀ QUAN TÂM */}
+                {widgetConfig.showPinnedTopics && (
+                  <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Target className="w-4 h-4 text-indigo-600" />
+                        <h3 className="font-extrabold text-sm text-slate-900">
+                          Chuyên Đề Trọng Tâm ({pinnedChapters.length})
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddTopicModal(true)}
+                        className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Thêm/Quản lý</span>
+                      </button>
+                    </div>
+
+                    {pinnedChapters.length > 0 ? (
+                      <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                        {pinnedChapters.map((chapter) => {
+                          const matchingExamsCount = exams.filter((e) =>
+                            e.chapter && e.chapter.toLowerCase().includes(chapter.toLowerCase())
+                          ).length;
+
+                          return (
+                            <div
+                              key={`pinned-chapter-${chapter}`}
+                              className="p-2.5 rounded-xl bg-slate-50 hover:bg-indigo-50/70 border border-slate-200/80 hover:border-indigo-300 transition flex items-center justify-between gap-2 group"
+                            >
+                              <div
+                                className="flex-1 cursor-pointer"
+                                onClick={() => {
+                                  setActiveTab("exams");
+                                  setSearchQuery(chapter);
+                                  toast.info(`Đang hiển thị các đề thi thuộc: "${chapter}"`);
+                                }}
+                              >
+                                <div className="font-bold text-xs text-slate-800 group-hover:text-indigo-700 line-clamp-1">
+                                  {chapter}
+                                </div>
+                                <div className="text-[10px] text-slate-500">
+                                  {matchingExamsCount > 0
+                                    ? `${matchingExamsCount} đề thi phù hợp`
+                                    : "Chưa có đề • Bấm để lọc"}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveTab("exams");
+                                    setSearchQuery(chapter);
+                                    toast.info(`Đang lọc đề thi thuộc chuyên đề: ${chapter}`);
+                                  }}
+                                  className="px-2 py-1 rounded-lg bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-bold text-[10px] transition"
+                                  title="Lọc đề thi theo chuyên đề này"
+                                >
+                                  Lọc đề
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleTogglePinChapter(chapter)}
+                                  className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                                  title="Bỏ ghim chuyên đề"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-1.5">
+                        <p className="text-xs text-slate-500">Chưa ghim chuyên đề nào.</p>
+                        <button
+                          type="button"
+                          onClick={() => setShowAddTopicModal(true)}
+                          className="text-xs text-indigo-600 font-bold hover:underline"
+                        >
+                          + Chọn chuyên đề ôn tập mục tiêu
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* WIDGET MỤC TIÊU TUẦN */}
+                {widgetConfig.showStudyGoal && (
+                  <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Flame className="w-4 h-4 text-amber-500" />
+                        <h3 className="font-extrabold text-sm text-slate-900">
+                          Mục Tiêu Rèn Luyện Tuần
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomizerModal(true)}
+                        className="text-[10px] text-slate-500 hover:text-slate-800 font-bold"
+                      >
+                        Đổi chỉ tiêu ({widgetConfig.targetExamCountWeekly} đề)
+                      </button>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-xs font-bold mb-1.5">
+                        <span className="text-slate-600">Tiến độ 7 ngày qua:</span>
+                        <span className="text-emerald-700 font-black">
+                          {weeklyStudyGoal.countThisWeek} / {weeklyStudyGoal.target} đề ({weeklyStudyGoal.percent}%)
+                        </span>
+                      </div>
+                      <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 rounded-full transition-all duration-500"
+                          style={{ width: `${weeklyStudyGoal.percent}%` }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      {weeklyStudyGoal.percent >= 100
+                        ? "🎉 Xuất sắc! Bạn đã hoàn thành chỉ tiêu bài thi tuần này."
+                        : `🔥 Cố lên! Còn ${Math.max(0, weeklyStudyGoal.target - weeklyStudyGoal.countThisWeek)} đề thi nữa để hoàn thành mục tiêu tuần.`}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Student Navigation Tabs */}
@@ -631,16 +1122,42 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                         </span>
                       </div>
 
-                      {previousSub ? (
-                        <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-md border border-indigo-200 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3 text-indigo-500" />
-                          <span>Đã làm: {previousSub.score}đ</span>
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-bold rounded-md border border-amber-200">
-                          Chưa làm
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {previousSub ? (
+                          <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-md border border-indigo-200 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-indigo-500" />
+                            <span>Đã làm: {previousSub.score}đ</span>
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-bold rounded-md border border-amber-200">
+                            Chưa làm
+                          </span>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleTogglePinExam(exam.id);
+                          }}
+                          className={`p-1.5 rounded-xl border transition shrink-0 ${
+                            pinnedExamIds.includes(exam.id)
+                              ? "bg-amber-400 text-slate-950 border-amber-500 shadow-2xs"
+                              : "bg-slate-50 hover:bg-amber-50 text-slate-400 hover:text-amber-700 border-slate-200"
+                          }`}
+                          title={
+                            pinnedExamIds.includes(exam.id)
+                              ? "Bỏ ghim khỏi Dashboard cá nhân"
+                              : "Ghim đề thi lên Dashboard cá nhân"
+                          }
+                        >
+                          <Pin
+                            className={`w-3.5 h-3.5 ${
+                              pinnedExamIds.includes(exam.id) ? "fill-current" : ""
+                            }`}
+                          />
+                        </button>
+                      </div>
                     </div>
 
                     <h3 className="font-bold text-base text-slate-900 group-hover:text-emerald-600 transition line-clamp-2">
@@ -1194,6 +1711,351 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         onStartExam={onStartExam}
         initialCode={initialModalCode}
       />
+
+      {/* MODAL TÙY CHỈNH DASHBOARD WIDGETS CỦA HỌC SINH */}
+      {showCustomizerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white w-full max-w-xl max-h-[90vh] rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold">
+                  <Settings2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm sm:text-base">
+                    Tùy Chỉnh Bảng Điều Khiển (Widgets)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Cá nhân hóa giao diện học tập theo nhu cầu ôn thi của bạn
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCustomizerModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-5 text-xs flex-1">
+              {/* PHẦN 1: BẬT / TẮT CÁC WIDGET */}
+              <div className="space-y-3">
+                <h4 className="font-extrabold text-slate-900 text-xs sm:text-sm flex items-center gap-2">
+                  <LayoutGrid className="w-4 h-4 text-emerald-600" />
+                  <span>Hiển thị Widgets trên trang chủ</span>
+                </h4>
+
+                <div className="space-y-2.5">
+                  <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100/70 transition">
+                    <div className="space-y-0.5">
+                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <BookmarkCheck className="w-4 h-4 text-amber-500" />
+                        <span>Widget Đề thi đã ghim</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Hiển thị danh sách các đề thi bạn quan tâm và muốn luyện tập ngay
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={widgetConfig.showPinnedExams}
+                      onChange={(e) => updateWidgetConfig({ showPinnedExams: e.target.checked })}
+                      className="w-4 h-4 text-emerald-600 rounded-md focus:ring-emerald-500 cursor-pointer"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100/70 transition">
+                    <div className="space-y-0.5">
+                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <Target className="w-4 h-4 text-indigo-500" />
+                        <span>Widget Chuyên đề trọng tâm</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Ghim các chương/chuyên đề bạn đang muốn tập trung ôn luyện
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={widgetConfig.showPinnedTopics}
+                      onChange={(e) => updateWidgetConfig({ showPinnedTopics: e.target.checked })}
+                      className="w-4 h-4 text-emerald-600 rounded-md focus:ring-emerald-500 cursor-pointer"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100/70 transition">
+                    <div className="space-y-0.5">
+                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <Flame className="w-4 h-4 text-amber-500" />
+                        <span>Widget Mục tiêu rèn luyện 7 ngày</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Theo dõi tiến độ hoàn thành số lượng bài thi trong tuần
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={widgetConfig.showStudyGoal}
+                      onChange={(e) => updateWidgetConfig({ showStudyGoal: e.target.checked })}
+                      className="w-4 h-4 text-emerald-600 rounded-md focus:ring-emerald-500 cursor-pointer"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* PHẦN 2: CÀI ĐẶT MỤC TIÊU TUẦN */}
+              <div className="space-y-3 pt-3 border-t border-slate-200">
+                <h4 className="font-extrabold text-slate-900 text-xs sm:text-sm flex items-center gap-2">
+                  <Flame className="w-4 h-4 text-amber-500" />
+                  <span>Chỉ tiêu số bài thi mỗi tuần</span>
+                </h4>
+
+                <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                  <span className="text-xs text-slate-700 font-medium">Mục tiêu:</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateWidgetConfig({
+                          targetExamCountWeekly: Math.max(1, widgetConfig.targetExamCountWeekly - 1),
+                        })
+                      }
+                      className="w-7 h-7 rounded-lg bg-white border border-slate-300 font-black text-slate-700 hover:bg-slate-100 transition"
+                    >
+                      -
+                    </button>
+                    <span className="font-black text-sm text-emerald-700 w-8 text-center">
+                      {widgetConfig.targetExamCountWeekly}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateWidgetConfig({
+                          targetExamCountWeekly: Math.min(30, widgetConfig.targetExamCountWeekly + 1),
+                        })
+                      }
+                      className="w-7 h-7 rounded-lg bg-white border border-slate-300 font-black text-slate-700 hover:bg-slate-100 transition"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <span className="text-xs text-slate-500">bài thi / tuần (7 ngày)</span>
+                </div>
+              </div>
+
+              {/* PHẦN 3: QUẢN LÝ CÁC MỤC ĐANG GHIM */}
+              <div className="space-y-3 pt-3 border-t border-slate-200">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-extrabold text-slate-900 text-xs sm:text-sm flex items-center gap-2">
+                    <Pin className="w-4 h-4 text-amber-500 fill-amber-500" />
+                    <span>Danh sách đang ghim ({pinnedExamsList.length} đề thi, {pinnedChapters.length} chuyên đề)</span>
+                  </h4>
+                  {(pinnedExamIds.length > 0 || pinnedChapters.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updatePinnedExamIds([]);
+                        updatePinnedChapters([]);
+                        toast.info("Đã xóa toàn bộ mục ghim.");
+                      }}
+                      className="text-[11px] text-rose-600 hover:text-rose-800 font-bold transition flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Xóa tất cả ghim</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Danh sách đề thi ghim */}
+                {pinnedExamsList.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-bold text-slate-500">Đề thi đã ghim:</div>
+                    <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
+                      {pinnedExamsList.map((ex) => (
+                        <div
+                          key={`mgr-pinned-${ex.id}`}
+                          className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200"
+                        >
+                          <span className="font-semibold text-slate-800 line-clamp-1 flex-1 pr-2">
+                            <b className="font-mono text-indigo-600 font-bold">[{ex.code}]</b> {ex.title}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePinExam(ex.id)}
+                            className="text-rose-600 hover:text-rose-800 p-1 rounded-md transition"
+                            title="Xóa ghim"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Danh sách chuyên đề ghim */}
+                {pinnedChapters.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-[11px] font-bold text-slate-500">Chuyên đề đã ghim:</div>
+                    <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
+                      {pinnedChapters.map((ch) => (
+                        <div
+                          key={`mgr-chapter-${ch}`}
+                          className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200"
+                        >
+                          <span className="font-semibold text-slate-800 line-clamp-1 flex-1 pr-2">
+                            {ch}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePinChapter(ch)}
+                            className="text-rose-600 hover:text-rose-800 p-1 rounded-md transition"
+                            title="Xóa ghim"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  updateWidgetConfig(DEFAULT_WIDGET_CONFIG);
+                  toast.info("Đã khôi phục cấu hình Dashboard mặc định.");
+                }}
+                className="px-3 py-1.5 text-slate-600 hover:text-slate-900 font-bold text-xs flex items-center gap-1.5 transition"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Khôi phục mặc định</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCustomizerModal(false);
+                  toast.success("Đã lưu thiết lập Dashboard!");
+                }}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-xs transition"
+              >
+                Lưu & Hoàn Tất
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL QUẢN LÝ & THÊM CHUYÊN ĐỀ GHIM */}
+      {showAddTopicModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white w-full max-w-lg max-h-[85vh] rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500 text-white flex items-center justify-center font-bold">
+                  <Target className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm sm:text-base">
+                    Ghim Chuyên Đề Ôn Tập Trọng Tâm
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Chọn các chuyên đề bạn muốn theo dõi trên Dashboard
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddTopicModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 border-b border-slate-100 bg-slate-50">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={topicSearchModal}
+                  onChange={(e) => setTopicSearchModal(e.target.value)}
+                  placeholder="Tìm chuyên đề toán học..."
+                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-2 text-xs flex-1">
+              {filteredTopicsInModal.map((chapter) => {
+                const isPinned = pinnedChapters.includes(chapter);
+                const matchingExamsCount = exams.filter((e) =>
+                  e.chapter && e.chapter.toLowerCase().includes(chapter.toLowerCase())
+                ).length;
+
+                return (
+                  <div
+                    key={`modal-chapter-${chapter}`}
+                    onClick={() => handleTogglePinChapter(chapter)}
+                    className={`p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between gap-3 ${
+                      isPinned
+                        ? "bg-indigo-50/80 border-indigo-300 text-indigo-950 font-bold"
+                        : "bg-white border-slate-200 hover:bg-slate-50 text-slate-700"
+                    }`}
+                  >
+                    <div className="space-y-0.5 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span>{chapter}</span>
+                        {isPinned && (
+                          <span className="px-2 py-0.5 bg-indigo-200 text-indigo-800 rounded-md text-[10px] font-black">
+                            Đang ghim
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-normal">
+                        {matchingExamsCount > 0
+                          ? `Có ${matchingExamsCount} đề thi trong hệ thống`
+                          : "Chuyên đề nâng cao chuẩn GDPT"}
+                      </div>
+                    </div>
+
+                    <div
+                      className={`w-6 h-6 rounded-lg flex items-center justify-center transition shrink-0 ${
+                        isPinned
+                          ? "bg-indigo-600 text-white"
+                          : "bg-slate-100 text-slate-400 border border-slate-300"
+                      }`}
+                    >
+                      {isPinned ? <Check className="w-4 h-4" /> : <Plus className="w-3.5 h-3.5" />}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {filteredTopicsInModal.length === 0 && (
+                <div className="p-6 text-center text-slate-400 text-xs">
+                  Không tìm thấy chuyên đề phù hợp với từ khóa.
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowAddTopicModal(false)}
+                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs transition shadow-xs"
+              >
+                Xong ({pinnedChapters.length} chuyên đề đã ghim)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

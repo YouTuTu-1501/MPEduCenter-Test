@@ -30,6 +30,8 @@ interface ToastContextValue {
     info: (title: string, message?: string, duration?: number) => void;
   };
   dismissToast: (id: string) => void;
+  isFocusMode: boolean;
+  setIsFocusMode: (val: boolean) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -50,6 +52,7 @@ interface ToastItem extends ToastOptions {
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [isFocusMode, setIsFocusMode] = useState<boolean>(false);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -64,6 +67,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       duration = 4000,
       icon,
     }: ToastOptions) => {
+      // Khi đang ở Chế độ tập trung (Focus mode), tự động chặn mọi thông báo hệ thống làm phân tâm
+      if (isFocusMode) {
+        return;
+      }
+
       const newToast: ToastItem = {
         id,
         type,
@@ -82,7 +90,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }, duration);
       }
     },
-    [dismissToast]
+    [dismissToast, isFocusMode]
   );
 
   const toast = React.useMemo(
@@ -100,20 +108,21 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const contextValue = React.useMemo(
-    () => ({ showToast, toast, dismissToast }),
-    [showToast, toast, dismissToast]
+    () => ({ showToast, toast, dismissToast, isFocusMode, setIsFocusMode }),
+    [showToast, toast, dismissToast, isFocusMode]
   );
 
   return (
     <ToastContext.Provider value={contextValue}>
       {children}
 
-      {/* Toast Container Stack */}
-      <div
-        id="toast-notifications-container"
-        className="fixed top-4 right-4 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none p-2 sm:p-0"
-        aria-live="polite"
-      >
+      {/* Toast Container Stack - Ẩn hoàn toàn khi ở Chế độ tập trung */}
+      {!isFocusMode && (
+        <div
+          id="toast-notifications-container"
+          className="fixed top-4 right-4 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none p-2 sm:p-0"
+          aria-live="polite"
+        >
         {toasts.map((t) => {
           const isSuccess = t.type === "success";
           const isError = t.type === "error";
@@ -192,7 +201,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
     </ToastContext.Provider>
   );
 };

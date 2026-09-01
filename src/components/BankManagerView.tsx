@@ -475,29 +475,29 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans p-4 sm:p-6 lg:p-8">
-      <div className="max-w-7xl mx-auto space-y-5">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans p-3 sm:p-5 lg:p-6 w-full max-w-full overflow-x-hidden">
+      <div className="max-w-7xl mx-auto space-y-5 w-full min-w-0">
         {/* ================= COMPACT STATS & QUICK ACTIONS HEADER ================= */}
-        <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="space-y-1">
+        <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4 w-full min-w-0">
+          <div className="space-y-1 min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black shadow-xs">
+              <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black shadow-xs shrink-0">
                 <BookOpen className="w-4 h-4" />
               </span>
-              <h1 className="text-xl font-black text-slate-900 tracking-tight">
+              <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight truncate">
                 Ngân Hàng Đề Thi THPT
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-black border border-indigo-200/80">
+              <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-black border border-indigo-200/80 shrink-0">
                 {exams.length} đề thi
               </span>
             </div>
-            <p className="text-xs text-slate-500 font-medium pl-10">
+            <p className="text-xs text-slate-500 font-medium pl-10 line-clamp-1 sm:line-clamp-none">
               Quản lý, phân loại khoa học theo Khối, Lớp, Chương mục và 4 dạng thức chuẩn GDPT 2018.
             </p>
           </div>
 
           {/* Quick Metrics & Actions */}
-          <div className="flex items-center gap-2.5 flex-wrap w-full md:w-auto justify-end">
+          <div className="flex items-center gap-2.5 flex-wrap w-full md:w-auto justify-start sm:justify-end shrink-0">
             <div className="hidden xl:flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600">
               <span title="Trắc nghiệm 4 lựa chọn">P1: {singleChoiceCount}c</span>
               <span className="text-slate-300">•</span>
@@ -531,7 +531,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
         </div>
 
         {/* ================= MAIN WORKSPACE: SIDEBAR + CONTENT ================= */}
-        <div className="flex flex-col lg:flex-row items-start gap-5">
+        <div className="flex flex-col lg:flex-row items-start gap-5 w-full min-w-0">
           {/* 1. Sidebar Phân Cấp Khoa Học */}
           <BankSidebar
             exams={exams}
@@ -549,7 +549,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
           />
 
           {/* 2. Main Content List / Table Area */}
-          <main className="flex-1 w-full space-y-4">
+          <main className="flex-1 min-w-0 w-full space-y-4">
             {/* Toolbar: Search, Sort & View Selector */}
             <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
               {/* Ô tìm kiếm */}

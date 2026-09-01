@@ -106,7 +106,14 @@ export function evaluateExamSubmission(
   studentName: string = "Thí sinh",
   studentId: string = "TS01",
   timeSpentSeconds: number = 0,
-  extraMeta?: { studentEmail?: string; studentClass?: string; studentAvatar?: string }
+  extraMeta?: {
+    studentEmail?: string;
+    studentClass?: string;
+    studentAvatar?: string;
+    tabSwitchCount?: number;
+    tabSwitchLogs?: Array<{ timestamp: string; durationSeconds?: number; type?: "tab_switch" | "window_blur" | "focus_lost"; note?: string }>;
+    hasCheatingWarning?: boolean;
+  }
 ): StudentSubmission {
   let totalScore = 0;
   let totalMaxScore = 0;
@@ -227,6 +234,9 @@ export function evaluateExamSubmission(
     details,
     submittedAt: new Date().toISOString(),
     timeSpentSeconds,
+    tabSwitchCount: extraMeta?.tabSwitchCount || 0,
+    tabSwitchLogs: extraMeta?.tabSwitchLogs || [],
+    hasCheatingWarning: extraMeta?.hasCheatingWarning || (extraMeta?.tabSwitchCount ? extraMeta.tabSwitchCount > 0 : false),
   };
 }
 

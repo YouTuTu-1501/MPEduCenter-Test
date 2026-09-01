@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Exam, Question, StudentSubmission, EssayAnswer, checkExamAccessStatus } from "../types/exam";
+import { Exam, Question, StudentSubmission, TabSwitchLog, EssayAnswer, checkExamAccessStatus } from "../types/exam";
 import { MathRenderer } from "./MathRenderer";
 import { EssayAnswerInput } from "./EssayAnswerInput";
 import { InteractiveFigureViewer } from "./InteractiveFigureViewer";
@@ -47,6 +47,12 @@ import {
   Lock,
   Unlock,
   KeyRound,
+  ShieldAlert,
+  ShieldCheck,
+  AlertOctagon,
+  Target,
+  BellOff,
+  Zap,
 } from "lucide-react";
 
 interface StudentExamViewProps {
@@ -62,7 +68,7 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
   onSubmissionComplete,
   onOpenHistory,
 }) => {
-  const { toast } = useToast();
+  const { toast, isFocusMode, setIsFocusMode } = useToast();
   const { currentUser } = useAuth();
   const [studentName, setStudentName] = useState<string>(
     currentUser.role === "student" && currentUser.schoolClass
@@ -75,6 +81,9 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
       : `HS_${currentUser.id.slice(-4)}`
   );
   const [hasStarted, setHasStarted] = useState<boolean>(false);
+  const [submission, setSubmission] = useState<StudentSubmission | null>(null);
+  const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
+  const [enteredPassword, setEnteredPassword] = useState<string>("");
 
   // Tổng thời gian làm bài (giây)
   const totalDurationSeconds = useMemo(() => exam.durationMinutes * 60, [exam.durationMinutes]);
@@ -120,6 +129,14 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
   const warned1MinRef = useRef<boolean>(false);
   const autoSubmittedRef = useRef<boolean>(false);
 
+  // Giám sát hành vi chuyển tab / rời màn hình thi (Anti-cheat proctoring)
+  const [tabSwitchCount, setTabSwitchCount] = useState<number>(0);
+  const [tabSwitchLogs, setTabSwitchLogs] = useState<TabSwitchLog[]>([]);
+  const [showTabSwitchModal, setShowTabSwitchModal] = useState<boolean>(false);
+  const [lastViolationDuration, setLastViolationDuration] = useState<number>(0);
+  const isTabAwayRef = useRef<boolean>(false);
+  const leaveTimestampRef = useRef<number | null>(null);
+
   // Tự động khôi phục nháp bài làm nếu có
   // Tải bản nháp trước đó nếu có (Bảo vệ tiến độ bài thi của học sinh)
   useEffect(() => {
@@ -143,6 +160,12 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
           if (draft.secondsRemaining !== undefined && draft.secondsRemaining > 0) {
             setSecondsRemaining(draft.secondsRemaining);
             targetEndTimeRef.current = Date.now() + draft.secondsRemaining * 1000;
+          }
+          if (draft.tabSwitchCount !== undefined) {
+            setTabSwitchCount(draft.tabSwitchCount);
+          }
+          if (draft.tabSwitchLogs && Array.isArray(draft.tabSwitchLogs)) {
+            setTabSwitchLogs(draft.tabSwitchLogs);
           }
           if (draft.hasStarted) {
             setHasStarted(true);
@@ -172,6 +195,8 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
         flaggedQuestions,
         currentIdx,
         secondsRemaining,
+        tabSwitchCount,
+        tabSwitchLogs,
         hasStarted: true,
         startTime,
         savedAt: Date.now(),
@@ -179,12 +204,73 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
       localStorage.setItem(`edutest_draft_${exam.id}_${currentUser.id}`, JSON.stringify(draftData));
       localStorage.setItem(`edutest_draft_${exam.id}_${studentId}`, JSON.stringify(draftData));
     } catch {}
-  }, [userAnswers, flaggedQuestions, currentIdx, secondsRemaining, hasStarted, startTime, exam.id, currentUser.id, studentId, studentName]);
+  }, [userAnswers, flaggedQuestions, currentIdx, secondsRemaining, tabSwitchCount, tabSwitchLogs, hasStarted, startTime, exam.id, currentUser.id, studentId, studentName]);
 
-  // Trạng thái nộp bài
-  const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
-  const [submission, setSubmission] = useState<StudentSubmission | null>(null);
-  const [enteredPassword, setEnteredPassword] = useState<string>("");
+  // Bộ lắng nghe sự kiện phát hiện RỜI TRANG / CHUYỂN TAB (Tab Switching Detector)
+  useEffect(() => {
+    if (!hasStarted || submission || isTimeUp) return;
+
+    const handleUserLeave = (type: "tab_switch" | "window_blur") => {
+      if (!isTabAwayRef.current) {
+        isTabAwayRef.current = true;
+        leaveTimestampRef.current = Date.now();
+      }
+    };
+
+    const handleUserReturn = () => {
+      if (isTabAwayRef.current) {
+        isTabAwayRef.current = false;
+        const now = Date.now();
+        const leaveTime = leaveTimestampRef.current || (now - 1000);
+        const awaySeconds = Math.max(1, Math.round((now - leaveTime) / 1000));
+        leaveTimestampRef.current = null;
+        setLastViolationDuration(awaySeconds);
+
+        const newLogItem: TabSwitchLog = {
+          timestamp: new Date().toISOString(),
+          durationSeconds: awaySeconds,
+          type: "tab_switch",
+          note: `Rời khỏi màn hình thi ~${awaySeconds}s`,
+        };
+
+        setTabSwitchCount((prev) => {
+          const nextCount = prev + 1;
+          setTabSwitchLogs((prevLogs) => [...prevLogs, newLogItem]);
+          return nextCount;
+        });
+
+        // Kích hoạt âm báo cảnh báo vi phạm
+        playSound("wrong");
+        setShowTabSwitchModal(true);
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        handleUserLeave("tab_switch");
+      } else {
+        handleUserReturn();
+      }
+    };
+
+    const onWindowBlur = () => {
+      handleUserLeave("window_blur");
+    };
+
+    const onWindowFocus = () => {
+      handleUserReturn();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("blur", onWindowBlur);
+    window.addEventListener("focus", onWindowFocus);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("blur", onWindowBlur);
+      window.removeEventListener("focus", onWindowFocus);
+    };
+  }, [hasStarted, submission, isTimeUp]);
 
   // Bắt đầu làm bài thi & khởi tạo đích thời gian chính xác
   const handleStartExam = () => {
@@ -229,6 +315,36 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
   // Chế độ Toàn màn hình (Tập trung làm bài)
   const examContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  // Tự động tắt chế độ tập trung khi rời trang thi hoặc nộp bài
+  useEffect(() => {
+    return () => {
+      setIsFocusMode(false);
+    };
+  }, [setIsFocusMode]);
+
+  const toggleFocusMode = () => {
+    const nextState = !isFocusMode;
+    setIsFocusMode(nextState);
+    if (nextState) {
+      toast.info(
+        "Đã bật Chế độ tập trung (Focus Mode)",
+        "Đã ẩn hoàn toàn thanh điều hướng và tắt các thông báo hệ thống để bạn tập trung làm bài."
+      );
+    }
+  };
+
+  // Phím tắt Alt+F để bật/tắt nhanh chế độ tập trung
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        toggleFocusMode();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFocusMode]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -393,6 +509,9 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
         studentEmail: currentUser.email,
         studentClass: currentUser.schoolClass || (studentName.includes("-") ? studentName.split("-")[1]?.trim() : "") || "",
         studentAvatar: currentUser.avatar,
+        tabSwitchCount,
+        tabSwitchLogs,
+        hasCheatingWarning: tabSwitchCount > 0,
       }
     );
 
@@ -641,6 +760,35 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
             )}
           </div>
 
+          {/* Tùy chọn Chế độ tập trung (Focus Mode) ngay từ đầu */}
+          <div className="p-3.5 rounded-2xl bg-indigo-50/80 border border-indigo-200 mb-6 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                <Target className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="font-bold text-xs sm:text-sm text-indigo-950">
+                  Chế độ tập trung (Focus Mode)
+                </h4>
+                <p className="text-[11px] text-indigo-800 font-medium">
+                  Tự động ẩn thanh điều hướng và tắt thông báo để không bị phân tâm
+                </p>
+              </div>
+            </div>
+            <button
+              id="btn-toggle-focus-mode-pre-exam"
+              type="button"
+              onClick={toggleFocusMode}
+              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition border ${
+                isFocusMode
+                  ? "bg-amber-500 text-white border-amber-600 shadow-xs"
+                  : "bg-white text-slate-700 hover:bg-slate-50 border-slate-300"
+              }`}
+            >
+              {isFocusMode ? "Đã bật ✓" : "Bật chế độ"}
+            </button>
+          </div>
+
           <div className="flex gap-3">
             <button
               id="btn-cancel-start"
@@ -725,6 +873,84 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
                 {submission.partScores.part_4.earned} / {submission.partScores.part_4.max}đ
               </p>
             </div>
+          </div>
+
+          {/* Báo cáo Giám sát thi & Phát hiện rời trang (Anti-Cheat Proctoring Report) */}
+          <div
+            className={`p-4 sm:p-5 rounded-2xl border mb-6 transition ${
+              (submission.tabSwitchCount || 0) > 0
+                ? "bg-rose-50/70 border-rose-200 text-rose-950"
+                : "bg-emerald-50/60 border-emerald-200 text-emerald-950"
+            }`}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                    (submission.tabSwitchCount || 0) > 0
+                      ? "bg-rose-600 text-white shadow-xs"
+                      : "bg-emerald-600 text-white shadow-xs"
+                  }`}
+                >
+                  {(submission.tabSwitchCount || 0) > 0 ? (
+                    <ShieldAlert className="w-5 h-5" />
+                  ) : (
+                    <ShieldCheck className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-extrabold text-sm sm:text-base">
+                      {(submission.tabSwitchCount || 0) > 0
+                        ? `Cảnh báo giám sát thi: Rời màn hình ${submission.tabSwitchCount} lần`
+                        : "Báo cáo giám sát thi: Tính trung thực hoàn hảo (0 lần rời trang)"}
+                    </h3>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider ${
+                        (submission.tabSwitchCount || 0) > 0
+                          ? "bg-rose-200 text-rose-800"
+                          : "bg-emerald-200 text-emerald-800"
+                      }`}
+                    >
+                      {(submission.tabSwitchCount || 0) > 0
+                        ? "Có ghi nhận vi phạm"
+                        : "Đạt chuẩn tập trung"}
+                    </span>
+                  </div>
+                  <p className="text-xs mt-0.5 opacity-90 leading-relaxed">
+                    {(submission.tabSwitchCount || 0) > 0
+                      ? "Hệ thống đã tự động ghi lại các mốc thời gian thí sinh chuyển tab hoặc mất tiêu điểm làm bài và gửi kèm vào bảng điểm giáo viên."
+                      : "Thí sinh thực hiện bài thi tập trung, không rời khỏi tab làm bài hoặc mở cửa sổ ứng dụng khác."}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Chi tiết nhật ký rời trang nếu có */}
+            {submission.tabSwitchLogs && submission.tabSwitchLogs.length > 0 && (
+              <div className="mt-3.5 pt-3 border-t border-rose-200/80">
+                <div className="text-xs font-bold text-rose-900 mb-2 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Nhật ký chi tiết các lần rời trang ({submission.tabSwitchLogs.length} sự kiện):</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                  {submission.tabSwitchLogs.map((log, lIdx) => (
+                    <div
+                      key={lIdx}
+                      className="p-2.5 rounded-xl bg-white border border-rose-200 text-[11px] font-semibold text-slate-700 shadow-2xs flex items-center justify-between"
+                    >
+                      <span className="font-bold text-rose-700">Lần #{lIdx + 1}:</span>
+                      <span className="text-slate-600 font-mono">
+                        {new Date(log.timestamp).toLocaleTimeString("vi-VN")}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 font-bold text-[10px]">
+                        ~{log.durationSeconds || 1}s
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Danh sách rà soát chi tiết từng câu */}
@@ -982,6 +1208,12 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
                   {exam.chapter}
                 </span>
               )}
+              {isFocusMode && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 font-black text-[10px] border border-amber-300 flex items-center gap-1 animate-pulse">
+                  <Target className="w-3 h-3 text-amber-700" />
+                  <span>Chế độ tập trung</span>
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 font-semibold">
               Thí sinh: <span className="text-indigo-600 font-bold">{studentName}</span> ({studentId})
@@ -989,8 +1221,37 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
           </div>
         </div>
 
-        {/* Đồng hồ đếm ngược, Nút Nháp, Nút Lưu nháp, Nút Toàn màn hình & Nút nộp bài */}
+        {/* Đồng hồ đếm ngược, Nút Nháp, Nút Lưu nháp, Nút Tập trung, Nút Toàn màn hình & Nút nộp bài */}
         <div className="flex items-center gap-2 sm:gap-2.5">
+          {/* Nút Bật/Tắt Chế độ Tập trung (Focus Mode) */}
+          <button
+            id="btn-exam-focus-mode-toggle"
+            type="button"
+            onClick={toggleFocusMode}
+            className={`px-3 py-1.5 rounded-xl border font-bold text-xs sm:text-sm flex items-center gap-1.5 transition shadow-2xs ${
+              isFocusMode
+                ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-600 ring-2 ring-amber-400/40 shadow-xs"
+                : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border-indigo-200"
+            }`}
+            title={
+              isFocusMode
+                ? "Đang bật Chế độ tập trung: Đã ẩn toàn bộ thông báo hệ thống và thanh điều hướng (Nhấn để tắt hoặc Alt+F)"
+                : "Bật Chế độ tập trung: Tắt toàn bộ thông báo hệ thống và ẩn các thành phần gây xao nhãng (Alt+F)"
+            }
+          >
+            {isFocusMode ? (
+              <>
+                <BellOff className="w-4 h-4 text-white" />
+                <span className="font-extrabold">Thoát tập trung</span>
+              </>
+            ) : (
+              <>
+                <Target className="w-4 h-4 text-indigo-600" />
+                <span className="hidden sm:inline">Chế độ tập trung</span>
+              </>
+            )}
+          </button>
+
           {/* Cụm chỉnh cỡ chữ nhanh trên Header */}
           <div className="hidden sm:flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200" title="Tăng / giảm cỡ chữ bài thi">
             <button
@@ -1080,6 +1341,19 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
               {isFullscreen ? "Thu nhỏ" : "Toàn màn hình"}
             </span>
           </button>
+
+          {/* Cảnh báo số lần rời trang nếu có vi phạm */}
+          {tabSwitchCount > 0 && (
+            <div
+              id="header-tab-switch-warning-badge"
+              className="px-2.5 py-1.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-700 font-bold text-xs flex items-center gap-1.5 animate-pulse shadow-2xs"
+              title={`Cảnh báo: Bạn đã rời khỏi màn hình làm bài ${tabSwitchCount} lần! Vi phạm được ghi lại vào bài nộp.`}
+            >
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+              <span className="font-extrabold hidden sm:inline">Rời tab:</span>
+              <span className="font-black text-rose-800">{tabSwitchCount} lần</span>
+            </div>
+          )}
 
           {/* Đồng hồ đếm ngược trực quan với các cấp độ cảnh báo */}
           <div
@@ -1684,6 +1958,61 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
                 className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md transition"
               >
                 Xác nhận nộp bài
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cảnh báo Giám sát Vi phạm Chuyển Tab / Rời Màn hình thi */}
+      {showTabSwitchModal && (
+        <div
+          id="tab-switch-violation-modal"
+          className="fixed inset-0 bg-rose-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
+        >
+          <div className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-lg shadow-2xl border-2 border-rose-400 text-slate-800 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3.5 pb-3 border-b border-rose-100">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 shadow-inner">
+                <AlertOctagon className="w-7 h-7 text-rose-600 animate-bounce" />
+              </div>
+              <div>
+                <span className="px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-extrabold text-[10px] uppercase tracking-wider">
+                  Cảnh báo giám sát thi trực tuyến
+                </span>
+                <h3 className="text-lg font-black text-slate-900 leading-tight mt-0.5">
+                  Phát hiện hành vi rời khỏi màn hình thi!
+                </h3>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-rose-50/80 border border-rose-200 text-xs sm:text-sm text-rose-950 space-y-2 leading-relaxed">
+              <p className="font-bold text-rose-900">
+                Hệ thống ghi nhận bạn vừa chuyển tab hoặc thu nhỏ cửa sổ làm bài:
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-xs font-semibold pt-1">
+                <div className="bg-white/80 p-2 rounded-xl border border-rose-200">
+                  <span className="text-slate-500 block text-[10px]">Số lần ghi nhận:</span>
+                  <span className="text-rose-700 font-black text-base">Lần thứ #{tabSwitchCount}</span>
+                </div>
+                <div className="bg-white/80 p-2 rounded-xl border border-rose-200">
+                  <span className="text-slate-500 block text-[10px]">Thời gian rời màn hình:</span>
+                  <span className="text-slate-900 font-black text-base">~{lastViolationDuration || 1} giây</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-rose-800 italic pt-1">
+                ⚠️ Lưu ý: Mọi hành vi rời tab và thời lượng đều được ghi nhận tự động vào cơ sở dữ liệu bài thi và báo cáo cho giáo viên phụ trách môn học.
+              </p>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                id="btn-acknowledge-tab-switch-warning"
+                type="button"
+                onClick={() => setShowTabSwitchModal(false)}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-2"
+              >
+                <Check className="w-4 h-4" />
+                <span>Tôi đã hiểu & Cam kết tiếp tục làm bài</span>
               </button>
             </div>
           </div>

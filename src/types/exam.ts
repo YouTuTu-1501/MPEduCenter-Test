@@ -386,6 +386,13 @@ export const STANDARD_CHAPTERS_BY_GRADE: Record<string, string[]> = {
   ],
 };
 
+export interface TabSwitchLog {
+  timestamp: string;
+  durationSeconds?: number;
+  type?: "tab_switch" | "window_blur" | "focus_lost";
+  note?: string;
+}
+
 export interface StudentSubmission {
   id: string;
   examId: string;
@@ -428,6 +435,9 @@ export interface StudentSubmission {
   >;
   submittedAt: string;
   timeSpentSeconds: number;
+  tabSwitchCount?: number;
+  tabSwitchLogs?: TabSwitchLog[];
+  hasCheatingWarning?: boolean;
 }
 
 export interface LiveStudent {

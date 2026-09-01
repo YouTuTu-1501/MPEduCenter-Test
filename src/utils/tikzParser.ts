@@ -14,6 +14,8 @@ export interface TikzNode {
   pos: string; // 'left' | 'right' | 'above' | 'below' | 'above left' | 'below right' | ...
   color?: string;
   isBadge?: boolean;
+  isExplicitShifted?: boolean;
+  isFixed?: boolean;
 }
 
 export interface TikzRectShape {
@@ -58,6 +60,8 @@ export interface AngleMark {
   isRightAngle?: boolean;
   doubleArc?: boolean;
   color?: string;
+  fillColor?: string;
+  hasDot?: boolean;
 }
 
 /**
@@ -523,6 +527,30 @@ function getAngleDeg(dx: number, dy: number): number {
 }
 
 /**
+ * Chuyển đổi các đơn vị đo kích thước TikZ (mm, cm, pt, in, ex, em) sang đơn vị tọa độ toán học
+ */
+export function parseTikzDimension(valStr: string, defaultVal: number): number {
+  if (!valStr) return defaultVal;
+  const s = valStr.trim().toLowerCase();
+  const num = parseFloat(s);
+  if (isNaN(num)) return defaultVal;
+  if (s.endsWith("mm")) return num * 0.1;
+  if (s.endsWith("cm")) return num;
+  if (s.endsWith("pt")) return num / 28.45;
+  if (s.endsWith("in") || s.endsWith("inch")) return num * 2.54;
+  if (s.endsWith("ex")) return (num * 4) / 28.45;
+  if (s.endsWith("em")) return (num * 10) / 28.45;
+
+  // Trong PGF/TikZ, các key thuộc tính kích thước (như angle radius = 12, size = 15, inner sep = 5):
+  // Nếu không có đơn vị rõ ràng và giá trị >= 2.0, đơn vị ngầm định của TeX/TikZ luôn là 'pt' (points).
+  // 12pt = 12 / 28.45 ≈ 0.42 cm.
+  if (num >= 2.0) {
+    return num / 28.45;
+  }
+  return num;
+}
+
+/**
  * Trích xuất cặp ngoặc { ... } lồng nhau một cách chính xác
  */
 export function extractBalancedBraces(str: string, startIndex: number): { content: string; endIndex: number } | null {
@@ -552,6 +580,27 @@ export function extractBalancedParens(str: string, startIndex: number): { conten
   for (let i = startIndex; i < str.length; i++) {
     if (str[i] === "(") depth++;
     else if (str[i] === ")") {
+      depth--;
+      if (depth === 0) {
+        return {
+          content: str.substring(startIndex + 1, i),
+          endIndex: i,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Trích xuất cặp ngoặc vuông [ ... ] lồng nhau một cách chính xác
+ */
+export function extractBalancedBrackets(str: string, startIndex: number): { content: string; endIndex: number } | null {
+  if (str[startIndex] !== "[") return null;
+  let depth = 0;
+  for (let i = startIndex; i < str.length; i++) {
+    if (str[i] === "[") depth++;
+    else if (str[i] === "]") {
       depth--;
       if (depth === 0) {
         return {
@@ -851,6 +900,13 @@ export function cleanCoordStr(rawStr: string): string {
       s = s.replace(/(\\\$|\$)+$/, "").trim();
       changed = true;
     }
+    if (s.startsWith("++")) {
+      s = s.substring(2).trim();
+      changed = true;
+    } else if (s.startsWith("+")) {
+      s = s.substring(1).trim();
+      changed = true;
+    }
     if (s.startsWith("(") && s.endsWith(")")) {
       const bal = extractBalancedParens(s, 0);
       if (bal && bal.endIndex === s.length - 1) {
@@ -860,6 +916,64 @@ export function cleanCoordStr(rawStr: string): string {
     }
   }
   return s;
+}
+
+/**
+ * Trích xuất độ dịch chuyển shift={(...)}, xshift=..., yshift=... từ chuỗi tùy chọn options của node
+ */
+export function parseNodeShift(optStr: string, coordsMap?: Map<string, Point2D>): { dx: number; dy: number; hasExplicitShift: boolean } {
+  let dx = 0;
+  let dy = 0;
+  let hasExplicitShift = false;
+
+  if (!optStr) return { dx: 0, dy: 0, hasExplicitShift: false };
+
+  // 1. xshift
+  const xshiftM = optStr.match(/xshift\s*=\s*\{?([^,\]}]+)\}?/i);
+  if (xshiftM) {
+    dx += evaluateExpr(xshiftM[1]);
+    hasExplicitShift = true;
+  }
+
+  // 2. yshift
+  const yshiftM = optStr.match(/yshift\s*=\s*\{?([^,\]}]+)\}?/i);
+  if (yshiftM) {
+    dy += evaluateExpr(yshiftM[1]);
+    hasExplicitShift = true;
+  }
+
+  // 3. shift={...} hoặc shift=(...)
+  const shiftM = optStr.match(/shift\s*=\s*\{?\s*\(([^)]+)\)\s*\}?/i) || optStr.match(/shift\s*=\s*\{([^}]+)\}/i);
+  if (shiftM) {
+    hasExplicitShift = true;
+    const inner = shiftM[1].trim().replace(/^\(|\)$/g, "").trim();
+    if (inner.includes(":") && !inner.includes("$")) {
+      // Tọa độ cực (angle : dist)
+      const parts = inner.split(":");
+      if (parts.length === 2) {
+        const angleDeg = evaluateExpr(parts[0]);
+        const dist = evaluateExpr(parts[1]);
+        if (!isNaN(angleDeg) && !isNaN(dist)) {
+          const rad = (angleDeg * Math.PI) / 180;
+          dx += dist * Math.cos(rad);
+          dy += dist * Math.sin(rad);
+        }
+      }
+    } else if (inner.includes(",")) {
+      // Tọa độ Descartes (dx, dy)
+      const parts = inner.split(",");
+      if (parts.length === 2) {
+        dx += evaluateExpr(parts[0]);
+        dy += evaluateExpr(parts[1]);
+      }
+    } else if (coordsMap && coordsMap.has(inner)) {
+      const pt = coordsMap.get(inner)!;
+      dx += pt.x;
+      dy += pt.y;
+    }
+  }
+
+  return { dx, dy, hasExplicitShift };
 }
 
 /**
@@ -1207,11 +1321,11 @@ export function generateTikzArcPoints(
     if (saMatch) startAngle = evaluateExpr(saMatch[1]);
     if (eaMatch) endAngle = evaluateExpr(eaMatch[1]);
     if (rMatch) {
-      rx = evaluateExpr(rMatch[1]) || 1.0;
+      rx = parseTikzDimension(rMatch[1], 1.0);
       ry = rx;
     }
-    if (rxMatch) rx = evaluateExpr(rxMatch[1]) || rx;
-    if (ryMatch) ry = evaluateExpr(ryMatch[1]) || ry;
+    if (rxMatch) rx = parseTikzDimension(rxMatch[1], rx);
+    if (ryMatch) ry = parseTikzDimension(ryMatch[1], ry);
   } else {
     // Dạng ngoặc tròn: (startAngle : endAngle : rx and ry) hoặc (startAngle : endAngle : r)
     let content = arcSpec.trim();
@@ -1252,10 +1366,10 @@ export function generateTikzArcPoints(
       const radStr = parts[2].trim();
       if (radStr.includes("and")) {
         const [rxStr, ryStr] = radStr.split("and").map((s) => s.trim());
-        rx = evaluateExpr(rxStr) || 1.0;
-        ry = evaluateExpr(ryStr) || 1.0;
+        rx = parseTikzDimension(rxStr, 1.0);
+        ry = parseTikzDimension(ryStr, 1.0);
       } else {
-        rx = evaluateExpr(radStr) || 1.0;
+        rx = parseTikzDimension(radStr, 1.0);
         ry = rx;
       }
     } else if (parts.length === 2) {
@@ -1446,6 +1560,51 @@ export function parseDrawSubpaths(
       continue;
     }
 
+    // 3.1. Kiểm tra rectangle: rectangle (P2) hoặc rectangle +(dx,dy) hoặc rectangle ++(dx,dy)
+    const rectMatch = rest.match(/^rectangle\b/i);
+    if (rectMatch) {
+      cursor += rectMatch[0].length;
+      while (cursor < cleaned.length && /\s/.test(cleaned[cursor])) cursor++;
+
+      let p2: Point2D | null = null;
+      let isAccum = false;
+      const relM = cleaned.substring(cursor).match(/^(\+{1,2})\s*\(/);
+      if (relM) {
+        isAccum = relM[1] === "++";
+        const parenStart = cursor + relM[0].length - 1;
+        const bal = extractBalancedParens(cleaned, parenStart);
+        if (bal) {
+          cursor = bal.endIndex + 1;
+          const delta = parseCoordinateValue(bal.content, coordsMap);
+          if (delta && currentPt) {
+            p2 = { x: currentPt.x + delta.x, y: currentPt.y + delta.y };
+          }
+        }
+      } else if (cleaned[cursor] === "(") {
+        const bal = extractBalancedParens(cleaned, cursor);
+        if (bal) {
+          cursor = bal.endIndex + 1;
+          p2 = parseCoordinateValue(bal.content, coordsMap);
+        }
+      }
+
+      if (currentPt && p2) {
+        const p1 = currentPt;
+        result.push({
+          points: [
+            { x: p1.x, y: p1.y },
+            { x: p2.x, y: p1.y },
+            { x: p2.x, y: p2.y },
+            { x: p1.x, y: p2.y },
+          ],
+          isCycle: true,
+        });
+        currentSubpathPts = [];
+        currentPt = p2;
+      }
+      continue;
+    }
+
     // 4. Kiểm tra toạ độ tương đối ++(...) hoặc +(...)
     const relMatch = rest.match(/^(\+{1,2})\s*\(/);
     if (relMatch) {
@@ -1453,6 +1612,8 @@ export function parseDrawSubpaths(
       const parenStart = cursor + relMatch[0].length - 1;
       const bal = extractBalancedParens(cleaned, parenStart);
       if (bal) {
+        const beforeRel = cleaned.substring(0, cursor).trim();
+        const hasConnectorBeforeRel = beforeRel.endsWith("--") || beforeRel.endsWith("to");
         cursor = bal.endIndex + 1;
         const delta = parseCoordinateValue(bal.content, coordsMap);
         if (delta) {
@@ -1461,6 +1622,9 @@ export function parseDrawSubpaths(
             : delta;
           if (isAccum) {
             currentPt = newPt;
+          }
+          if (!hasConnectorBeforeRel && currentSubpathPts.length > 0) {
+            flushSubpath();
           }
           currentSubpathPts.push(newPt);
         }
@@ -1530,22 +1694,43 @@ export function stripNodesAndPics(cmd: string): string {
   let i = 0;
   while (i < cmd.length) {
     const sub = cmd.substring(i);
-    const nodePicMatch = sub.match(
-      /^(?:\\?node|\\?pic)\b(?:\s*\[[^\]]*\])?(?:\s*\([^\)]*\))?(?:\s*at\s*(?:\([^)]*\)|[^\s;{]+))?(?:\s*\[[^\]]*\])?\s*/i
-    );
+    const nodePicMatch = sub.match(/^(?:\\?node|\\?pic)\b/i);
     if (nodePicMatch) {
-      const matchLen = nodePicMatch[0].length;
-      const braceStart = i + matchLen;
-      if (cmd[braceStart] === "{") {
-        const bal = extractBalancedBraces(cmd, braceStart);
+      let cursor = i + nodePicMatch[0].length;
+      let loop = true;
+      while (loop && cursor < cmd.length) {
+        while (cursor < cmd.length && /\s/.test(cmd[cursor])) cursor++;
+        if (cmd[cursor] === "[") {
+          const bal = extractBalancedBrackets(cmd, cursor);
+          if (bal) {
+            cursor = bal.endIndex + 1;
+            continue;
+          }
+        }
+        if (cmd[cursor] === "(") {
+          const bal = extractBalancedParens(cmd, cursor);
+          if (bal) {
+            cursor = bal.endIndex + 1;
+            continue;
+          }
+        }
+        const atMatch = cmd.substring(cursor).match(/^at\s*/i);
+        if (atMatch) {
+          cursor += atMatch[0].length;
+          continue;
+        }
+        loop = false;
+      }
+      while (cursor < cmd.length && /\s/.test(cmd[cursor])) cursor++;
+      if (cmd[cursor] === "{") {
+        const bal = extractBalancedBraces(cmd, cursor);
         if (bal) {
           i = bal.endIndex + 1;
           continue;
         }
-      } else {
-        i += matchLen;
-        continue;
       }
+      i = cursor;
+      continue;
     }
     result += cmd[i];
     i++;
@@ -1933,49 +2118,129 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     }
   }
 
-  // 8. \tkzMarkAngle & \tkzMarkRightAngle
-  const tkzMarkAngleMatches = cleanCode.matchAll(/\\tkzMarkAngle(?:\s*\[([^\]]*)\])?\s*\(([^,]+),([^,]+),([^)]+)\)/g);
-  for (const match of tkzMarkAngleMatches) {
-    const optStr = match[1] || "";
-    const p1 = coordsMap.get(match[2].trim());
-    const vertex = coordsMap.get(match[3].trim());
-    const p2 = coordsMap.get(match[4].trim());
-    if (p1 && vertex && p2) {
-      const isDouble = optStr.includes("arc=ll") || optStr.includes("arc=2");
-      let size = 0.65;
-      const sizeMatch = optStr.match(/size\s*=\s*([0-9.]+\s*(?:mm|cm|pt)?)/);
-      if (sizeMatch) size = evaluateExpr(sizeMatch[1]) || 0.65;
-      angleMarks.push({
-        p1,
-        vertex,
-        p2,
-        size,
-        doubleArc: isDouble,
-        color: "#475569",
-      });
+  // 8. \tkzMarkAngle, \tkzMarkAngles, \tkzDrawAngle, \tkzDrawAngles
+  const tkzMarkAngleRegex = /\\(?:tkzMarkAngles?|tkzDrawAngles?)(?:\s*\[([^\]]*)\])?\s*\(([^)]+)\)/g;
+  let tkzAngleM: RegExpExecArray | null;
+  while ((tkzAngleM = tkzMarkAngleRegex.exec(cleanCode)) !== null) {
+    const optStr = tkzAngleM[1] || "";
+    const rawArgs = tkzAngleM[2].trim();
+    const tokens = rawArgs.replace(/[()]/g, " ").split(/[\s,]+/).filter(Boolean);
+
+    for (let i = 0; i + 2 < tokens.length; i += 3) {
+      const p1 = coordsMap.get(tokens[i]);
+      const vertex = coordsMap.get(tokens[i + 1]);
+      const p2 = coordsMap.get(tokens[i + 2]);
+      if (p1 && vertex && p2) {
+        const isDouble = optStr.includes("arc=ll") || optStr.includes("arc=2") || optStr.includes("double");
+        let size = 0.65;
+        const sizeMatch = optStr.match(/(?:size|radius)\s*=\s*([0-9.]+\s*(?:mm|cm|pt)?)/i);
+        if (sizeMatch) size = parseTikzDimension(sizeMatch[1], 0.65);
+
+        const strokeColor = parseTikzColor(optStr, "#475569");
+        let fillColor: string | undefined = undefined;
+        const fillMatch = optStr.match(/(?:^|[, ])fill\s*=\s*([a-zA-Z0-9!_]+)/i);
+        if (fillMatch) fillColor = parseTikzColor(fillMatch[1], "rgba(99,102,241,0.15)");
+
+        angleMarks.push({
+          p1,
+          vertex,
+          p2,
+          size,
+          doubleArc: isDouble,
+          color: strokeColor,
+          fillColor,
+        });
+      }
     }
   }
 
-  const tkzMarkRightAngleMatches = cleanCode.matchAll(
-    /\\tkzMarkRightAngles?(?:\s*\[([^\]]*)\])?\s*\(([^,]+),([^,]+),([^)]+)\)/g
-  );
-  for (const match of tkzMarkRightAngleMatches) {
-    const optStr = match[1] || "";
-    const p1 = coordsMap.get(match[2].trim());
-    const vertex = coordsMap.get(match[3].trim());
-    const p2 = coordsMap.get(match[4].trim());
-    if (p1 && vertex && p2) {
-      let size = 0.3;
-      const sizeMatch = optStr.match(/size\s*=\s*([0-9.]+\s*(?:mm|cm|pt)?)/);
-      if (sizeMatch) size = evaluateExpr(sizeMatch[1]) || 0.3;
-      angleMarks.push({
-        p1,
-        vertex,
-        p2,
-        size,
-        isRightAngle: true,
-        color: "#1e293b",
-      });
+  // 8.1. \tkzMarkRightAngle, \tkzMarkRightAngles, \tkzDrawRightAngle, \tkzDrawRightAngles
+  const tkzRightAngleRegex = /\\(?:tkzMarkRightAngles?|tkzDrawRightAngles?)(?:\s*\[([^\]]*)\])?\s*\(([^)]+)\)/g;
+  let tkzRightM: RegExpExecArray | null;
+  while ((tkzRightM = tkzRightAngleRegex.exec(cleanCode)) !== null) {
+    const optStr = tkzRightM[1] || "";
+    const rawArgs = tkzRightM[2].trim();
+    const tokens = rawArgs.replace(/[()]/g, " ").split(/[\s,]+/).filter(Boolean);
+
+    for (let i = 0; i + 2 < tokens.length; i += 3) {
+      const p1 = coordsMap.get(tokens[i]);
+      const vertex = coordsMap.get(tokens[i + 1]);
+      const p2 = coordsMap.get(tokens[i + 2]);
+      if (p1 && vertex && p2) {
+        let size = 0.3;
+        const sizeMatch = optStr.match(/(?:size|radius)\s*=\s*([0-9.]+\s*(?:mm|cm|pt)?)/i);
+        if (sizeMatch) size = parseTikzDimension(sizeMatch[1], 0.3);
+
+        const hasDot = /german|dot/i.test(optStr);
+        const strokeColor = parseTikzColor(optStr, "#1e293b");
+        let fillColor: string | undefined = undefined;
+        const fillMatch = optStr.match(/(?:^|[, ])fill\s*=\s*([a-zA-Z0-9!_]+)/i);
+        if (fillMatch) fillColor = parseTikzColor(fillMatch[1], "rgba(99,102,241,0.15)");
+
+        angleMarks.push({
+          p1,
+          vertex,
+          p2,
+          size,
+          isRightAngle: true,
+          hasDot,
+          color: strokeColor,
+          fillColor,
+        });
+      }
+    }
+  }
+
+  // 8.2. \tkzLabelAngle & \tkzLabelAngles
+  const tkzLabelAngleRegex = /\\(?:tkzLabelAngles?)(?:\s*\[([^\]]*)\])?\s*\(([^)]+)\)\s*\{([^}]+)\}/g;
+  let tkzLabelM: RegExpExecArray | null;
+  while ((tkzLabelM = tkzLabelAngleRegex.exec(cleanCode)) !== null) {
+    const optStr = tkzLabelM[1] || "";
+    const rawArgs = tkzLabelM[2].trim();
+    const label = tkzLabelM[3].trim();
+    const tokens = rawArgs.replace(/[()]/g, " ").split(/[\s,]+/).filter(Boolean);
+
+    let pos = 1.35;
+    const posMatch = optStr.match(/pos\s*=\s*([0-9.]+)/i);
+    if (posMatch) pos = parseFloat(posMatch[1]) || 1.35;
+
+    for (let i = 0; i + 2 < tokens.length; i += 3) {
+      const p1 = coordsMap.get(tokens[i]);
+      const vertex = coordsMap.get(tokens[i + 1]);
+      const p2 = coordsMap.get(tokens[i + 2]);
+      if (p1 && vertex && p2) {
+        const dx1 = p1.x - vertex.x;
+        const dy1 = p1.y - vertex.y;
+        const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1) || 1;
+        const dx2 = p2.x - vertex.x;
+        const dy2 = p2.y - vertex.y;
+        const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2) || 1;
+
+        let bisX = dx1 / len1 + dx2 / len2;
+        let bisY = dy1 / len1 + dy2 / len2;
+        let bisLen = Math.sqrt(bisX * bisX + bisY * bisY);
+        if (bisLen < 1e-4) {
+          bisX = -dy1 / len1;
+          bisY = dx1 / len1;
+          bisLen = 1;
+        }
+
+        const labelPt: Point2D = {
+          x: vertex.x + (bisX / bisLen) * (0.45 * pos),
+          y: vertex.y + (bisY / bisLen) * (0.45 * pos),
+        };
+
+        nodes.push({
+          id: `tkz_angle_lbl_${nodes.length}`,
+          x: labelPt.x,
+          y: labelPt.y,
+          pos: "above",
+          label,
+          isBadge: true,
+          isFixed: true,
+          isExplicitShifted: true,
+        });
+      }
     }
   }
 
@@ -2258,14 +2523,18 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       continue;
     }
 
-    // 0.1. \clip và \draw rectangle: \clip (-5,-10.5) rectangle (5,2.5); hoặc \draw[fill=...] (0,0) rectangle (4,3);
-    const rectRegex = /\\(clip|draw|fill|filldraw|path)\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)\s*rectangle\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)/i;
+    // 0.1. \clip và \draw rectangle: \clip (-5,-10.5) rectangle (5,2.5); hoặc \draw (E) rectangle +(0.3, 0.3); hoặc \draw[fill=...] (0,0) rectangle (4,3);
+    const rectRegex = /\\(clip|draw|fill|filldraw|path)\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)\s*rectangle\s*(?:\[([^\]]*)\])?\s*(\+{1,2})?\s*\(([^)]+)\)/i;
     const rectM = cmd.match(rectRegex);
     if (rectM) {
       const isClip = rectM[1].toLowerCase() === "clip";
       const optStr = ((rectM[2] || "") + " " + (rectM[4] || "")).trim();
+      const isRel = !!rectM[5];
       const p1 = parseCoordinateValue(`(${rectM[3]})`, coordsMap);
-      const p2 = parseCoordinateValue(`(${rectM[5]})`, coordsMap);
+      let p2 = parseCoordinateValue(`(${rectM[6]})`, coordsMap);
+      if (isRel && p1 && p2) {
+        p2 = { x: p1.x + p2.x, y: p1.y + p2.y };
+      }
       if (p1 && p2) {
         const rxMin = Math.min(p1.x, p2.x);
         const rxMax = Math.max(p1.x, p2.x);
@@ -2723,74 +2992,135 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     }
 
     // 3. \draw pic[...] {angle=C--B--A} hoặc \pic ["$30^\circ$", draw, angle radius=6mm] {angle=C--B--A} hoặc {right angle=c--O--b}
-    const picAngleMatches = cmd.matchAll(
-      /pic\s*(?:\[([^\]]*)\])?\s*\{\s*(?:(?:angle|right\s*angle)\s*=\s*)?([a-zA-Z0-9_]+)\s*--\s*([a-zA-Z0-9_]+)\s*--\s*([a-zA-Z0-9_]+)\s*\}/gi
-    );
-    for (const match of picAngleMatches) {
-      const optStr = match[1] || "";
-      const isRightAngle = optStr.includes("right angle") || match[0].includes("right angle");
-      const p1 = coordsMap.get(match[2].trim());
-      const vertex = coordsMap.get(match[3].trim());
-      const p2 = coordsMap.get(match[4].trim());
+    const picRegex = /(?:\\draw\s+|\\path\s+|\\)?\bpic\b/gi;
+    let picM: RegExpExecArray | null;
+    while ((picM = picRegex.exec(cmd)) !== null) {
+      let curIdx = picRegex.lastIndex;
+      let optStr = "";
+      let bodyStr = "";
 
-      if (p1 && vertex && p2) {
-        const isDouble = optStr.includes("double");
-        let radius = isRightAngle ? 0.28 : 0.55;
-        const radMatch = optStr.match(/(?:angle\s+radius|radius)\s*=\s*([0-9.]+\s*(?:mm|cm|pt)?)/i);
-        if (radMatch) {
-          const rawRadiusVal = evaluateExpr(radMatch[1]);
-          if (rawRadiusVal > 0) {
-            // Nếu người dùng chỉ định angle radius=4 (đơn vị pt/mm mặc định trong TikZ)
-            radius = rawRadiusVal > 1.5 ? Math.min(0.35, rawRadiusVal * 0.07) : rawRadiusVal;
-          }
+      // Kiểm tra tên pic dạng (name) trước options hoặc sau options
+      const nameBeforeM = cmd.substring(curIdx).match(/^\s*\(([^)]+)\)/);
+      if (nameBeforeM) {
+        curIdx += nameBeforeM[0].length;
+      }
+
+      // Trích xuất options [ ... ]
+      const bracketIdx = cmd.indexOf("[", curIdx);
+      if (bracketIdx !== -1 && /^\s*$/.test(cmd.substring(curIdx, bracketIdx))) {
+        const bal = extractBalancedBrackets(cmd, bracketIdx);
+        if (bal) {
+          optStr = bal.content;
+          curIdx = bal.endIndex + 1;
         }
+      }
 
-        // Kiểm tra quotes label (gói quotes): ví dụ pic["$30^\circ$", draw]
-        const quoteMatch = optStr.match(/["']([^"']+)["']/);
-        const quoteLabel = quoteMatch ? quoteMatch[1].trim() : undefined;
+      // Kiểm tra tên pic dạng (name) hoặc vị trí at (...)
+      const nameOrAtM = cmd.substring(curIdx).match(/^\s*(?:\(([^)]+)\)|at\s*\(([^)]+)\))/);
+      if (nameOrAtM) {
+        curIdx += nameOrAtM[0].length;
+      }
 
-        angleMarks.push({
-          p1,
-          vertex,
-          p2,
-          size: radius,
-          doubleArc: isDouble,
-          isRightAngle,
-          label: quoteLabel,
-          color: "#334155",
-        });
+      // Trích xuất body { ... }
+      const braceIdx = cmd.indexOf("{", curIdx);
+      if (braceIdx !== -1 && /^\s*$/.test(cmd.substring(curIdx, braceIdx))) {
+        const bal = extractBalancedBraces(cmd, braceIdx);
+        if (bal) {
+          bodyStr = bal.content;
+          curIdx = bal.endIndex + 1;
+        }
+      }
 
-        // Nếu có nhãn góc từ quotes library, đặt nhãn KaTeX ở phân giác góc
-        if (quoteLabel) {
-          const dx1 = p1.x - vertex.x;
-          const dy1 = p1.y - vertex.y;
-          const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1) || 1;
-          const dx2 = p2.x - vertex.x;
-          const dy2 = p2.y - vertex.y;
-          const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2) || 1;
+      if (bodyStr) {
+        const angleMatch = bodyStr.match(/(?:(?:angle|angles|right\s*angle|right\s*angles)\s*=\s*)?([a-zA-Z0-9_'\\]+)\s*--\s*([a-zA-Z0-9_'\\]+)\s*--\s*([a-zA-Z0-9_'\\]+)/i);
+        if (angleMatch) {
+          const p1Name = angleMatch[1].replace(/^\\/, "").trim();
+          const vertexName = angleMatch[2].replace(/^\\/, "").trim();
+          const p2Name = angleMatch[3].replace(/^\\/, "").trim();
 
-          const bisX = dx1 / len1 + dx2 / len2;
-          const bisY = dy1 / len1 + dy2 / len2;
-          const bisLen = Math.sqrt(bisX * bisX + bisY * bisY) || 1;
+          const p1 = coordsMap.get(p1Name);
+          const vertex = coordsMap.get(vertexName);
+          const p2 = coordsMap.get(p2Name);
 
-          let ecc = 1.35;
-          const eccMatch = optStr.match(/angle\s+eccentricity\s*=\s*([0-9.]+)/);
-          if (eccMatch) ecc = parseFloat(eccMatch[1]) || 1.35;
+          if (p1 && vertex && p2) {
+            const isRightAngle = /right\s*angle/i.test(optStr) || /right\s*angle/i.test(bodyStr);
+            const isDouble = optStr.includes("double") || /arc\s*=\s*(?:ll|2)/i.test(optStr);
+            const hasDot = /german|dot/i.test(optStr);
+            const strokeColor = parseTikzColor(optStr, isRightAngle ? "#1e293b" : "#334155");
 
-          const labelDist = radius * ecc;
-          const labelPt: Point2D = {
-            x: vertex.x + (bisX / bisLen) * labelDist,
-            y: vertex.y + (bisY / bisLen) * labelDist,
-          };
+            let fillColor: string | undefined = undefined;
+            const fillMatch = optStr.match(/(?:^|[, ])fill\s*=\s*([a-zA-Z0-9!_]+)/i);
+            if (fillMatch) fillColor = parseTikzColor(fillMatch[1], "rgba(99,102,241,0.15)");
 
-          nodes.push({
-            id: `angle_lbl_${nodes.length}`,
-            x: labelPt.x,
-            y: labelPt.y,
-            pos: "above",
-            label: quoteLabel,
-            isBadge: false,
-          });
+            let radius = isRightAngle ? 0.28 : 0.55;
+            const radMatch = optStr.match(/(?:angle\s+radius|radius|size)\s*=\s*([0-9.]+\s*(?:mm|cm|pt|in)?)/i);
+            if (radMatch) {
+              radius = parseTikzDimension(radMatch[1], radius);
+            }
+
+            // Kiểm tra quotes label (gói quotes): ví dụ pic["$30^\circ$", draw] hoặc pic text={$30^\circ$}
+            let quoteLabel: string | undefined = undefined;
+            const quoteMatch = optStr.match(/["']([^"']+)["']/);
+            if (quoteMatch) {
+              quoteLabel = quoteMatch[1].trim();
+            } else {
+              const textMatch = optStr.match(/pic\s*text\s*=\s*\{?([^},\]]+)\}?/i);
+              if (textMatch) quoteLabel = textMatch[1].trim();
+            }
+
+            angleMarks.push({
+              p1,
+              vertex,
+              p2,
+              size: radius,
+              doubleArc: isDouble,
+              isRightAngle,
+              hasDot,
+              label: quoteLabel,
+              color: strokeColor,
+              fillColor,
+            });
+
+            // Nếu có nhãn góc từ quotes library, đặt nhãn KaTeX ở phân giác góc
+            if (quoteLabel) {
+              const dx1 = p1.x - vertex.x;
+              const dy1 = p1.y - vertex.y;
+              const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1) || 1;
+              const dx2 = p2.x - vertex.x;
+              const dy2 = p2.y - vertex.y;
+              const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2) || 1;
+
+              let bisX = dx1 / len1 + dx2 / len2;
+              let bisY = dy1 / len1 + dy2 / len2;
+              let bisLen = Math.sqrt(bisX * bisX + bisY * bisY);
+              if (bisLen < 1e-4) {
+                bisX = -dy1 / len1;
+                bisY = dx1 / len1;
+                bisLen = 1;
+              }
+
+              let ecc = 1.35;
+              const eccMatch = optStr.match(/angle\s+eccentricity\s*=\s*([0-9.]+)/i);
+              if (eccMatch) ecc = parseFloat(eccMatch[1]) || 1.35;
+
+              const labelDist = radius * ecc;
+              const labelPt: Point2D = {
+                x: vertex.x + (bisX / bisLen) * labelDist,
+                y: vertex.y + (bisY / bisLen) * labelDist,
+              };
+
+              nodes.push({
+                id: `angle_lbl_${nodes.length}`,
+                x: labelPt.x,
+                y: labelPt.y,
+                pos: "above",
+                label: quoteLabel,
+                isBadge: true,
+                isFixed: true,
+                isExplicitShifted: true,
+              });
+            }
+          }
         }
       }
     }
@@ -2873,15 +3203,17 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         // Lặp lấy options [...] và at (...)
         let loop = true;
         while (loop && cursor < cmd.length) {
-          const rest = cmd.substring(cursor);
-          const optM = rest.match(/^\s*\[([^\]]*)\]/);
-          if (optM) {
-            optParts.push(optM[1].trim());
-            cursor += optM[0].length;
-            continue;
+          while (cursor < cmd.length && /\s/.test(cmd[cursor])) cursor++;
+          if (cmd[cursor] === "[") {
+            const bal = extractBalancedBrackets(cmd, cursor);
+            if (bal) {
+              optParts.push(bal.content.trim());
+              cursor = bal.endIndex + 1;
+              continue;
+            }
           }
 
-          const atM = rest.match(/^\s*at\s*/);
+          const atM = cmd.substring(cursor).match(/^\s*at\s*/);
           if (atM) {
             cursor += atM[0].length;
             const atRest = cmd.substring(cursor);
@@ -2916,6 +3248,11 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         }
 
         if (explicitPt) {
+          const { dx, dy, hasExplicitShift } = parseNodeShift(optStr, activeCoordsMap);
+          if (hasExplicitShift) {
+            explicitPt = { x: explicitPt.x + dx, y: explicitPt.y + dy };
+          }
+
           if (optStr.includes("rectangle") || optStr.includes("minimum width") || optStr.includes("pattern=")) {
             let width = 1.0;
             let height = 1.0;
@@ -2952,6 +3289,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
               y: explicitPt.y,
               pos: optStr || "above",
               label,
+              isExplicitShifted: hasExplicitShift,
+              isFixed: hasExplicitShift,
             });
           }
         }
@@ -3023,15 +3362,17 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         // Lặp trích xuất options [...] và at (...)
         let loop = true;
         while (loop && cursor < cmd.length) {
-          const rest = cmd.substring(cursor);
-          const optBracketMatch = rest.match(/^\s*\[([^\]]*)\]/);
-          if (optBracketMatch) {
-            optParts.push(optBracketMatch[1].trim());
-            cursor += optBracketMatch[0].length;
-            continue;
+          while (cursor < cmd.length && /\s/.test(cmd[cursor])) cursor++;
+          if (cmd[cursor] === "[") {
+            const bal = extractBalancedBrackets(cmd, cursor);
+            if (bal) {
+              optParts.push(bal.content.trim());
+              cursor = bal.endIndex + 1;
+              continue;
+            }
           }
 
-          const atMatch = rest.match(/^\s*at\s*/);
+          const atMatch = cmd.substring(cursor).match(/^\s*at\s*/);
           if (atMatch) {
             cursor += atMatch[0].length;
             const atRest = cmd.substring(cursor);
@@ -3125,6 +3466,11 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         }
 
         if (nodePt && label) {
+          const { dx, dy, hasExplicitShift } = parseNodeShift(optStr, activeCoordsMap);
+          if (hasExplicitShift) {
+            nodePt = { x: nodePt.x + dx, y: nodePt.y + dy };
+          }
+
           nodes.push({
             id: nodeName || `path_node_${nodes.length}`,
             x: nodePt.x,
@@ -3132,6 +3478,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
             pos: optStr || "above",
             label,
             isBadge: optStr.includes("midway"),
+            isExplicitShifted: hasExplicitShift,
+            isFixed: hasExplicitShift,
           });
         }
       }
@@ -3303,6 +3651,15 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       const c3x = vx + s * u2x;
       const c3y = vy - s * u2y;
 
+      if (m.fillColor && m.fillColor !== "none") {
+        svgElements += `
+          <polygon 
+            id="tikz-right-angle-fill-${mIdx}"
+            points="${vx.toFixed(1)},${vy.toFixed(1)} ${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${c3x.toFixed(1)},${c3y.toFixed(1)}"
+            fill="${m.fillColor}" 
+          />`;
+      }
+
       svgElements += `
         <path 
           id="tikz-right-angle-${mIdx}"
@@ -3311,6 +3668,19 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           stroke="${m.color || "#1e293b"}" 
           stroke-width="1.4"
         />`;
+
+      if (m.hasDot) {
+        const dotX = vx + s * 0.45 * (u1x + u2x);
+        const dotY = vy - s * 0.45 * (u1y + u2y);
+        svgElements += `
+          <circle 
+            id="tikz-right-angle-dot-${mIdx}"
+            cx="${dotX.toFixed(1)}" 
+            cy="${dotY.toFixed(1)}" 
+            r="1.8" 
+            fill="${m.color || "#1e293b"}" 
+          />`;
+      }
       return;
     }
 
@@ -3320,17 +3690,35 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
     let diff = angle2 - angle1;
     while (diff < 0) diff += 360;
-    const sweepFlag = diff <= 180 ? 0 : 1;
+    while (diff >= 360) diff -= 360;
+
+    // Trong TikZ (thư viện angles/tkz-euclide):
+    // Cung góc luôn được vẽ theo chiều ngược chiều kim đồng hồ trong hệ tọa độ toán học (tăng góc từ angle1 đến angle2).
+    // Trong hệ tọa độ màn hình SVG (với trục Y hướng xuống):
+    // - Chiều tăng góc lượng giác toán học tương ứng với chiều NGƯỢC chiều kim đồng hồ trên màn hình (sweepFlag = 0).
+    // - largeArcFlag = 1 nếu diff > 180 (góc phản xạ/lồi > 180°), ngược lại = 0.
+    const largeArcFlag = diff > 180 ? 1 : 0;
+    const sweepFlag = 0;
 
     const startX = vx + r * Math.cos((angle1 * Math.PI) / 180);
     const startY = vy - r * Math.sin((angle1 * Math.PI) / 180);
     const endX = vx + r * Math.cos((angle2 * Math.PI) / 180);
     const endY = vy - r * Math.sin((angle2 * Math.PI) / 180);
 
+    if (m.fillColor && m.fillColor !== "none") {
+      svgElements += `
+        <path 
+          id="tikz-angle-wedge-${mIdx}"
+          d="M ${vx.toFixed(1)} ${vy.toFixed(1)} L ${startX.toFixed(1)} ${startY.toFixed(1)} A ${r.toFixed(1)} ${r.toFixed(1)} 0 ${largeArcFlag} ${sweepFlag} ${endX.toFixed(1)} ${endY.toFixed(1)} Z"
+          fill="${m.fillColor}" 
+          stroke="none"
+        />`;
+    }
+
     svgElements += `
       <path 
         id="tikz-angle-arc-${mIdx}"
-        d="M ${startX.toFixed(1)} ${startY.toFixed(1)} A ${r.toFixed(1)} ${r.toFixed(1)} 0 0 ${sweepFlag} ${endX.toFixed(1)} ${endY.toFixed(1)}"
+        d="M ${startX.toFixed(1)} ${startY.toFixed(1)} A ${r.toFixed(1)} ${r.toFixed(1)} 0 ${largeArcFlag} ${sweepFlag} ${endX.toFixed(1)} ${endY.toFixed(1)}"
         fill="none" 
         stroke="${m.color || "#334155"}" 
         stroke-width="1.5"
@@ -3345,7 +3733,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       svgElements += `
         <path 
           id="tikz-angle-arc-double-${mIdx}"
-          d="M ${sX2.toFixed(1)} ${sY2.toFixed(1)} A ${r2.toFixed(1)} ${r2.toFixed(1)} 0 0 ${sweepFlag} ${eX2.toFixed(1)} ${eY2.toFixed(1)}"
+          d="M ${sX2.toFixed(1)} ${sY2.toFixed(1)} A ${r2.toFixed(1)} ${r2.toFixed(1)} 0 ${largeArcFlag} ${sweepFlag} ${eX2.toFixed(1)} ${eY2.toFixed(1)}"
           fill="none" 
           stroke="${m.color || "#334155"}" 
           stroke-width="1.3"
@@ -3416,11 +3804,29 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     y: number;
     label: string;
     isBadge?: boolean;
+    isFixed?: boolean;
+    isExplicitShifted?: boolean;
   }
 
   const layoutNodes: LayoutNode[] = uniqueNodes.map((node, idx) => {
     const vx = toSvgX(node.x);
     const vy = toSvgY(node.y);
+
+    if (node.isFixed || node.isExplicitShifted) {
+      return {
+        id: node.id || `node_${idx}`,
+        origVx: vx,
+        origVy: vy,
+        initDx: 0,
+        initDy: 0,
+        x: vx,
+        y: vy,
+        label: node.label,
+        isBadge: node.isBadge,
+        isFixed: true,
+        isExplicitShifted: true,
+      };
+    }
 
     let offsetX = 0;
     let offsetY = 0;
@@ -3491,6 +3897,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       y: vy + offsetY,
       label: node.label,
       isBadge: node.isBadge,
+      isFixed: false,
+      isExplicitShifted: false,
     };
   });
 
@@ -3511,10 +3919,20 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           const overlap = MIN_NODE_DIST - dist;
           const uX = dX / dist;
           const uY = dY / dist;
-          n1.x -= uX * overlap * 0.5;
-          n1.y -= uY * overlap * 0.5;
-          n2.x += uX * overlap * 0.5;
-          n2.y += uY * overlap * 0.5;
+          if (n1.isFixed && n2.isFixed) {
+            // Cả hai cố định, không di chuyển
+          } else if (n1.isFixed) {
+            n2.x += uX * overlap;
+            n2.y += uY * overlap;
+          } else if (n2.isFixed) {
+            n1.x -= uX * overlap;
+            n1.y -= uY * overlap;
+          } else {
+            n1.x -= uX * overlap * 0.5;
+            n1.y -= uY * overlap * 0.5;
+            n2.x += uX * overlap * 0.5;
+            n2.y += uY * overlap * 0.5;
+          }
         }
       }
     }
@@ -3522,6 +3940,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     // 2. Tránh đè lên các đỉnh khác trong hình vẽ
     for (let i = 0; i < layoutNodes.length; i++) {
       const item = layoutNodes[i];
+      if (item.isFixed || item.isExplicitShifted) continue;
       for (const pt of allPoints) {
         const pSvgX = toSvgX(pt.x);
         const pSvgY = toSvgY(pt.y);
@@ -3542,6 +3961,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     // 3. Neo giữ khoảng cách tự nhiên với đỉnh gốc của chính nó
     for (let i = 0; i < layoutNodes.length; i++) {
       const item = layoutNodes[i];
+      if (item.isFixed || item.isExplicitShifted) continue;
       const dX = item.x - item.origVx;
       const dY = item.y - item.origVy;
       const dist = Math.hypot(dX, dY) || 0.001;

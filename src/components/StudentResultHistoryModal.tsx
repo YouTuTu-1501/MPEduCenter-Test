@@ -33,6 +33,8 @@ import {
   Layers,
   Maximize2,
   Minimize2,
+  ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
 
 interface StudentResultHistoryModalProps {
@@ -569,6 +571,18 @@ export const StudentResultHistoryModal: React.FC<StudentResultHistoryModalProps>
                           <span className="text-slate-600 font-medium bg-slate-100 px-2 py-0.5 rounded-md text-[11px]">
                             P.I: {sub.partScores.part_1.earned}đ • P.II: {sub.partScores.part_2.earned}đ • P.III:{" "}
                             {sub.partScores.part_3.earned}đ • P.IV: {sub.partScores.part_4.earned}đ
+                          </span>
+                        )}
+
+                        {(sub.tabSwitchCount || 0) > 0 ? (
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
+                            <ShieldAlert className="w-3 h-3 text-rose-600" />
+                            <span>{sub.tabSwitchCount} lần rời tab</span>
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                            <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                            <span>Giám sát chuẩn</span>
                           </span>
                         )}
                       </div>
