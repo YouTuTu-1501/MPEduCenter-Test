@@ -411,12 +411,49 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     });
   }, [filteredSubmissionsByExam, activeClass]);
 
-  // Thống kê tổng quan dựa trên danh sách đã lọc đồng bộ
+  // 3. Gom nhóm theo từng học sinh: Mỗi học sinh chỉ hiển thị duy nhất 1 lần với điểm cập nhật mới nhất (sau khi chấm tự luận)
+  const uniqueSubmissionsByStudent = useMemo(() => {
+    const studentMap = new Map<string, StudentSubmission>();
+
+    filteredSubmissionsByClass.forEach((sub) => {
+      // Khóa định danh duy nhất cho học sinh (theo từng đề thi nếu ở chế độ Tất cả đề)
+      const studentKey = isAllExamsMode
+        ? `${(sub.studentId || sub.studentName || "").trim()}_${sub.examId}`
+        : (sub.studentId || sub.studentName || "").trim();
+
+      const existing = studentMap.get(studentKey);
+      if (!existing) {
+        studentMap.set(studentKey, sub);
+      } else {
+        // Ưu tiên bài làm đã được giáo viên chấm điểm tự luận (có essayGrades hoặc điểm Phần IV > 0)
+        const subHasEssayGrade =
+          (sub.essayGrades && Object.keys(sub.essayGrades).length > 0) ||
+          (sub.partScores?.part_4?.earned || 0) > 0;
+        const existingHasEssayGrade =
+          (existing.essayGrades && Object.keys(existing.essayGrades).length > 0) ||
+          (existing.partScores?.part_4?.earned || 0) > 0;
+
+        if (subHasEssayGrade && !existingHasEssayGrade) {
+          studentMap.set(studentKey, sub);
+        } else if (!subHasEssayGrade && existingHasEssayGrade) {
+          // Giữ bài đã được chấm tự luận
+        } else {
+          // Nếu cả 2 đều đã chấm hoặc chưa chấm: lấy bài có thời gian nộp/cập nhật mới nhất
+          const subTime = new Date(sub.submittedAt || 0).getTime();
+          const existingTime = new Date(existing.submittedAt || 0).getTime();
+          if (subTime > existingTime || (subTime === existingTime && sub.score >= existing.score)) {
+            studentMap.set(studentKey, sub);
+          }
+        }
+      }
+    });
+
+    return Array.from(studentMap.values());
+  }, [filteredSubmissionsByClass, isAllExamsMode]);
+
+  // Thống kê tổng quan dựa trên danh sách học sinh đã lọc và chuẩn hóa
   const stats = useMemo(() => {
-    const count = filteredSubmissionsByClass.length;
-    const uniqueStudents = new Set(
-      filteredSubmissionsByClass.map((s) => s.studentId || s.studentName)
-    ).size;
+    const count = uniqueSubmissionsByStudent.length;
 
     if (count === 0) {
       return {
@@ -436,7 +473,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
       };
     }
 
-    const scores = filteredSubmissionsByClass.map((s) => s.score);
+    const scores = uniqueSubmissionsByStudent.map((s) => s.score);
     const sum = scores.reduce((a, b) => a + b, 0);
     const avg = Number((sum / count).toFixed(2));
     const max = Math.max(...scores);
@@ -455,14 +492,14 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
 
     return {
       total: count,
-      totalStudents: uniqueStudents,
+      totalStudents: count,
       avgScore: avg,
       maxScore: max,
       minScore: min,
       passRate,
       distribution,
     };
-  }, [filteredSubmissionsByClass]);
+  }, [uniqueSubmissionsByStudent]);
 
   // ===================== PHÂN TÍCH TIẾN BỘ ĐIỂM SỐ QUA CÁC ĐỀ THI (RECHARTS LINE CHART) =====================
   const [progressChartMode, setProgressChartMode] = useState<
@@ -669,7 +706,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
   const itemAnalysis = useMemo(() => {
     if (!currentQuestionsExam || !currentQuestionsExam.questions) return [];
 
-    const examSubs = filteredSubmissionsByClass.filter((s) => {
+    const examSubs = uniqueSubmissionsByStudent.filter((s) => {
       return (
         s.examId === currentQuestionsExam.id ||
         s.examId === currentQuestionsExam.code ||
@@ -729,11 +766,11 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     }
 
     return list;
-  }, [currentQuestionsExam, filteredSubmissionsByClass, itemPartFilter, itemDifficultyFilter]);
+  }, [currentQuestionsExam, uniqueSubmissionsByStudent, itemPartFilter, itemDifficultyFilter]);
 
   // Danh sách học sinh lọc theo từ khóa tìm kiếm (Accent-insensitive) + Mức điểm + Sắp xếp
   const filteredStudents = useMemo(() => {
-    let list = filteredSubmissionsByClass;
+    let list = uniqueSubmissionsByStudent;
 
     // 1. Lọc từ khóa tìm kiếm (không dấu)
     if (searchKeyword.trim()) {
@@ -769,7 +806,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     });
 
     return sorted;
-  }, [filteredSubmissionsByClass, searchKeyword, studentScoreTier, studentSortBy]);
+  }, [uniqueSubmissionsByStudent, searchKeyword, studentScoreTier, studentSortBy]);
 
   // In bảng điểm
   const handlePrint = () => {
@@ -779,7 +816,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
   // Xuất CSV bảng điểm có thông tin Lớp
   const handleExportCSV = () => {
     let csv = "\uFEFFSBD,Họ và tên,Lớp,Điểm tổng,Phần I,Phần II,Phần III,Phần IV,Thời gian nộp\n";
-    filteredSubmissionsByClass.forEach((s) => {
+    uniqueSubmissionsByStudent.forEach((s) => {
       csv += `"${s.studentId}","${s.studentName}","${s.studentClass || ""}",${s.score},${s.partScores.part_1.earned},${s.partScores.part_2.earned},${s.partScores.part_3.earned},${s.partScores.part_4.earned},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
     });
 
@@ -965,7 +1002,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
 
               {activeFilterBadges.length === 0 ? (
                 <span className="text-[11px] text-slate-400 italic bg-slate-50 px-2 py-0.5 rounded-lg border border-slate-200">
-                  Đang hiển thị toàn bộ ({filteredSubmissionsByClass.length} bài nộp)
+                  Đang hiển thị toàn bộ ({uniqueSubmissionsByStudent.length} học sinh)
                 </span>
               ) : (
                 activeFilterBadges.map((b) => (
@@ -1000,7 +1037,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
             </div>
 
             <div className="text-[11px] font-bold text-slate-500 shrink-0">
-              Đang phân tích: <strong className="text-indigo-600 font-black">{filteredSubmissionsByClass.length}</strong> bài nộp
+              Đang phân tích: <strong className="text-indigo-600 font-black">{uniqueSubmissionsByStudent.length}</strong> học sinh
             </div>
           </div>
         </div>

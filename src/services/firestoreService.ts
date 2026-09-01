@@ -622,10 +622,28 @@ export const saveSubmissionToFirestore = async (
 ): Promise<void> => {
   removeDeletedSubmissionId(sub.id);
 
-  // 1. Cập nhật tức thì vào LocalStorage (Bảo đảm không bao giờ mất dù có ngắt mạng hay F5)
+  // 1. Cập nhật tức thì vào LocalStorage (Bảo đảm không bao giờ mất dù có ngắt mạng hay F5 và không nhân bản học sinh)
   try {
     const current = getLocalSubmissions();
-    const filtered = current.filter((s) => s.id !== sub.id);
+    const filtered = current.filter((s) => {
+      if (s.id === sub.id) return false;
+      const isSameStudent =
+        (s.studentId && sub.studentId && s.studentId === sub.studentId) ||
+        (s.studentName &&
+          sub.studentName &&
+          s.studentName.trim().toLowerCase() === sub.studentName.trim().toLowerCase());
+
+      const isSameExam =
+        s.examId === sub.examId ||
+        (s.examTitle &&
+          sub.examTitle &&
+          s.examTitle.trim().toLowerCase() === sub.examTitle.trim().toLowerCase());
+
+      if (isSameStudent && isSameExam) {
+        return false;
+      }
+      return true;
+    });
     const updated = [sub, ...filtered];
     localStorage.setItem("edutest_submissions", JSON.stringify(updated));
   } catch (err) {

@@ -323,10 +323,30 @@ function MainApp({ currentUser }: { currentUser: User }) {
     setActiveView("exam");
   };
 
-  // Lưu kết quả nộp bài thi lên Firestore & LocalStorage
+  // Lưu kết quả nộp bài thi lên Firestore & LocalStorage (đảm bảo không bao giờ bị nhân bản bản ghi học sinh)
   const handleSubmissionComplete = (sub: StudentSubmission) => {
     setSubmissions((prev) => {
-      const filtered = prev.filter((s) => s.id !== sub.id);
+      const filtered = prev.filter((s) => {
+        if (s.id === sub.id) return false;
+        // Nếu cùng học sinh và cùng đề thi: thay thế bản ghi cũ bằng bản ghi vừa được cập nhật/chấm điểm
+        const isSameStudent =
+          (s.studentId && sub.studentId && s.studentId === sub.studentId) ||
+          (s.studentName &&
+            sub.studentName &&
+            s.studentName.trim().toLowerCase() === sub.studentName.trim().toLowerCase());
+
+        const isSameExam =
+          s.examId === sub.examId ||
+          (s.examTitle &&
+            sub.examTitle &&
+            s.examTitle.trim().toLowerCase() === sub.examTitle.trim().toLowerCase());
+
+        if (isSameStudent && isSameExam) {
+          return false;
+        }
+        return true;
+      });
+
       const updated = [sub, ...filtered];
       try {
         localStorage.setItem("edutest_submissions", JSON.stringify(updated));
