@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import katex from "katex";
 import { renderTikzWithPackages } from "../utils/tikzParser";
+import { preprocessTikzCode, preprocessTikzInLatex } from "../utils/tikzProcessor";
 import { parseTkzTab, parseLatexTabular } from "../utils/tableParser";
 import { InteractiveFigureViewer } from "./InteractiveFigureViewer";
 
@@ -136,28 +137,44 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
     );
 
     // =========================================================================
-    // 2. TRÍCH XUẤT HÌNH VẼ TIKZ (\begin{tikzpicture} ... \end{tikzpicture})
+    // 2. TRÍCH XUẤT HÌNH VẼ TIKZ (\begin{tikzpicture} ... \end{tikzpicture}) & XÓA PREAMBLE
     // =========================================================================
     const detectedLibs: string[] = [];
     text = text.replace(/\\usetikzlibrary\{([^}]+)\}/gi, (_, libs) => {
       libs.split(",").forEach((l: string) => detectedLibs.push(l.trim()));
       return "";
     });
+    text = text.replace(/\\usepgfplotslibrary\{([^}]+)\}/gi, (_, libs) => {
+      libs.split(",").forEach((l: string) => detectedLibs.push(l.trim()));
+      return "";
+    });
     text = text.replace(/\\usepackage(?:\s*\[[^\]]*\])?\{([^}]+)\}/gi, "");
+    text = text.replace(/\\pgfplotsset\{[\s\S]*?\}/gi, "");
+    text = text.replace(/\\tikzset\{[\s\S]*?\}/gi, "");
+    text = text.replace(/\\tikzstyle\{[\s\S]*?\}/gi, "");
+    text = text.replace(/\\shorthandoff\{[^}]+\}/gi, "");
+    text = text.replace(/\\shorthandon\{[^}]+\}/gi, "");
+    text = text.replace(/\\documentclass(?:\s*\[[^\]]*\])?\{[^}]+\}/gi, "");
+    text = text.replace(/\\geometry\{[^}]+\}/gi, "");
+    text = text.replace(/\\pagestyle\{[^}]+\}/gi, "");
+    text = text.replace(/\\thispagestyle\{[^}]+\}/gi, "");
+    text = text.replace(/\\begin\{document\}|\\end\{document\}/gi, "");
 
     text = text.replace(
-      /\\begin\{center\}\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\\end\{center\}/g,
+      /\\begin\{center\}\s*(\\begin\{tikzpicture\*?\}[\s\S]*?\\end\{tikzpicture\*?\})\s*\\end\{center\}/gi,
       (_, tikz) => {
         const idx = tikzList.length;
-        const svg = renderTikzWithPackages(tikz, detectedLibs);
+        const preprocessed = preprocessTikzCode(tikz, { extraLibraries: detectedLibs });
+        const svg = renderTikzWithPackages(preprocessed, detectedLibs);
         tikzList.push(svg);
         return `%%%TIKZ_PLACEHOLDER_${idx}%%%`;
       }
     );
 
-    text = text.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, (tikz) => {
+    text = text.replace(/\\begin\{tikzpicture\*?\}[\s\S]*?\\end\{tikzpicture\*?\}/gi, (tikz) => {
       const idx = tikzList.length;
-      const svg = renderTikzWithPackages(tikz, detectedLibs);
+      const preprocessed = preprocessTikzCode(tikz, { extraLibraries: detectedLibs });
+      const svg = renderTikzWithPackages(preprocessed, detectedLibs);
       tikzList.push(svg);
       return `%%%TIKZ_PLACEHOLDER_${idx}%%%`;
     });

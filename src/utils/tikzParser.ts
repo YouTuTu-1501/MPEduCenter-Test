@@ -64,6 +64,11 @@ export interface AngleMark {
  * Danh sách các gói (packages) và thư viện TikZ phổ biến được hỗ trợ tự động
  */
 export const SUPPORTED_TIKZ_LIBRARIES = [
+  "pgfplots",
+  "pgfplots.groupplots",
+  "pgfplots.polar",
+  "pgfplots.statistics",
+  "pgfplots.dateplot",
   "patterns",
   "patterns.meta",
   "angles",
@@ -79,6 +84,7 @@ export const SUPPORTED_TIKZ_LIBRARIES = [
   "math",
   "3d",
   "perspective",
+  "tikz-3dplot",
   "decorations.pathmorphing",
   "decorations.markings",
   "backgrounds",
@@ -87,6 +93,41 @@ export const SUPPORTED_TIKZ_LIBRARIES = [
   "scopes",
   "chains",
   "babel",
+  "tkz-euclide",
+  "tkz-tab",
+  "tkz-fct",
+  "shadings",
+  "shadows",
+  "fadings",
+] as const;
+
+/**
+ * Cấu hình các gói mặc định luôn tự động được nạp trong trình biên dịch TikZ
+ * Bao gồm pgfplots, các thư viện hình học không gian 3D, calc, angles, quotes, patterns...
+ */
+export const DEFAULT_TIKZ_PACKAGES: readonly string[] = [
+  "pgfplots",
+  "pgfplots.groupplots",
+  "3d",
+  "perspective",
+  "tikz-3dplot",
+  "calc",
+  "angles",
+  "quotes",
+  "arrows.meta",
+  "positioning",
+  "patterns",
+  "patterns.meta",
+  "shapes.geometric",
+  "shapes.misc",
+  "intersections",
+  "through",
+  "math",
+  "decorations.pathmorphing",
+  "decorations.markings",
+  "backgrounds",
+  "fit",
+  "tkz-euclide",
 ] as const;
 
 /**
@@ -95,6 +136,24 @@ export const SUPPORTED_TIKZ_LIBRARIES = [
 export function detectRequiredTikzPackages(tikzCode: string): string[] {
   if (!tikzCode) return [];
   const detected = new Set<string>();
+
+  // 0. Gói pgfplots & groupplots cho vẽ đồ thị khoa học
+  if (
+    /\\begin\{axis\}|\\end\{axis\}|\\addplot|\\pgfplotsset|pgfplots|axis\s+cs:|rel\s+axis\s+cs:|\bxmin\s*=|\\addplot3|\bymin\s*=/i.test(
+      tikzCode
+    )
+  ) {
+    detected.add("pgfplots");
+    if (/groupplot/i.test(tikzCode)) {
+      detected.add("pgfplots.groupplots");
+    }
+    if (/polaraxis/i.test(tikzCode)) {
+      detected.add("pgfplots.polar");
+    }
+    if (/boxplot|statistics/i.test(tikzCode)) {
+      detected.add("pgfplots.statistics");
+    }
+  }
 
   // 1. Gói patterns / patterns.meta
   if (
@@ -106,13 +165,14 @@ export function detectRequiredTikzPackages(tikzCode: string): string[] {
     detected.add("patterns.meta");
   }
 
-  // 2. Gói angles
+  // 2. Gói angles & quotes
   if (
     /pic\s*(?:\[|\{)|angle\s*=|angle\s+radius|angle\s+eccentricity|right\s+angle\s*=|\\tkzMarkAngle|\\tkzMarkRightAngle/i.test(
       tikzCode
     )
   ) {
     detected.add("angles");
+    detected.add("quotes");
   }
 
   // 3. Gói quotes (dùng nhãn chuỗi dạng "label" trong pic hoặc edge)
@@ -122,7 +182,7 @@ export function detectRequiredTikzPackages(tikzCode: string): string[] {
     )
   ) {
     detected.add("quotes");
-    detected.add("angles"); // quotes thường đi kèm angles trong TikZ
+    detected.add("angles");
   }
 
   // 4. Gói calc
@@ -153,10 +213,15 @@ export function detectRequiredTikzPackages(tikzCode: string): string[] {
     detected.add("intersections");
   }
 
-  // 8. Gói 3d / perspective
-  if (/canvas\s+is|3d|perspective|xyz\s+cylindrical/i.test(tikzCode)) {
+  // 8. Thư viện hình học không gian 3D (3d, perspective, tikz-3dplot)
+  if (
+    /canvas\s+is|\b3d\b|perspective|xyz\s+cylindrical|xyz\s+spherical|\\tdplotsetmaincoords|tdplot_main_coords|tdplot_screen_coords|\\tdplotdrawarc|\\tdplotsetthetaplanecoords|tikz-3dplot|\bview\s*=|3d\s+view|\\addplot3|\bx\s*=\s*\{[^\}]*\},?\s*y\s*=\s*\{[^\}]*\}|\(\s*[-+0-9.]+\s*,\s*[-+0-9.]+\s*,\s*[-+0-9.]+\s*\)/i.test(
+      tikzCode
+    )
+  ) {
     detected.add("3d");
     detected.add("perspective");
+    detected.add("tikz-3dplot");
   }
 
   // 9. Thư viện tkz-euclide nếu chứa macro tkz
@@ -164,16 +229,22 @@ export function detectRequiredTikzPackages(tikzCode: string): string[] {
     detected.add("tkz-euclide");
   }
 
+  // 10. Hình học shapes & decorations
+  if (/cylinder|trapezium|ellipse|regular polygon|star\b|cloud|callout|decorate\b|decoration=/i.test(tikzCode)) {
+    detected.add("shapes.geometric");
+    detected.add("decorations.pathmorphing");
+  }
+
   return Array.from(detected);
 }
 
 /**
- * Hàm kiểm tra, chuẩn hóa và tự động bổ sung các gói thư viện TikZ cần thiết (như patterns, angles, quotes, calc)
+ * Hàm kiểm tra, chuẩn hóa và tự động bổ sung các gói thư viện TikZ cần thiết (như pgfplots, 3d, tikz-3dplot, patterns, angles, quotes, calc)
  * Đảm bảo các đoạn mã TikZ phức tạp luôn ổn định và tương thích trước khi render
  */
 export function ensureTikzPackages(
   tikzCode: string,
-  extraRequiredPackages: string[] = ["patterns", "angles", "quotes", "calc", "arrows.meta", "positioning"]
+  extraRequiredPackages: readonly string[] = DEFAULT_TIKZ_PACKAGES
 ): {
   processedCode: string;
   detectedLibraries: string[];
@@ -201,12 +272,53 @@ export function ensureTikzPackages(
     m[1].split(",").forEach((lib) => existingLibs.add(lib.trim()));
   }
 
-  // Lọc các thư viện còn thiếu
-  const missingLibs = Array.from(allNeeded).filter((lib) => !existingLibs.has(lib));
+  const existingPkgs = new Set<string>();
+  const pkgMatches = tikzCode.matchAll(/\\usepackage(?:\s*\[[^\]]*\])?\{([^}]+)\}/g);
+  for (const m of pkgMatches) {
+    m[1].split(",").forEach((pkg) => existingPkgs.add(pkg.trim()));
+  }
 
-  // Tạo dòng header khai báo thư viện chuẩn LaTeX
-  const injectedHeader =
-    missingLibs.length > 0 ? `\\usetikzlibrary{${missingLibs.join(", ")}}\n` : "";
+  // Lọc các thư viện TikZ còn thiếu (ngoại trừ các gói độc lập như pgfplots, tikz-3dplot, tkz-euclide)
+  const standalonePkgs = new Set(["pgfplots", "tikz-3dplot", "tkz-euclide", "tkz-tab", "tkz-fct"]);
+  const missingLibs = Array.from(allNeeded).filter(
+    (lib) => !existingLibs.has(lib) && !standalonePkgs.has(lib) && !lib.startsWith("pgfplots")
+  );
+
+  let injectedHeader = "";
+  if (
+    (allNeeded.has("pgfplots") || detectedLibraries.includes("pgfplots")) &&
+    !existingPkgs.has("pgfplots") &&
+    !tikzCode.includes("\\usepackage{pgfplots}") &&
+    !tikzCode.includes("\\usepackage[")
+  ) {
+    injectedHeader += "\\usepackage{pgfplots}\n\\pgfplotsset{compat=1.18}\n";
+  }
+  if (allNeeded.has("pgfplots.groupplots") && !tikzCode.includes("groupplots")) {
+    injectedHeader += "\\usepgfplotslibrary{groupplots}\n";
+  }
+  if (allNeeded.has("pgfplots.polar") && !tikzCode.includes("polar")) {
+    injectedHeader += "\\usepgfplotslibrary{polar}\n";
+  }
+
+  if (
+    (allNeeded.has("tikz-3dplot") || detectedLibraries.includes("tikz-3dplot")) &&
+    !existingPkgs.has("tikz-3dplot") &&
+    !tikzCode.includes("tikz-3dplot")
+  ) {
+    injectedHeader += "\\usepackage{tikz-3dplot}\n";
+  }
+
+  if (
+    (allNeeded.has("tkz-euclide") || detectedLibraries.includes("tkz-euclide")) &&
+    !existingPkgs.has("tkz-euclide") &&
+    !tikzCode.includes("tkz-euclide")
+  ) {
+    injectedHeader += "\\usepackage{tkz-euclide}\n";
+  }
+
+  if (missingLibs.length > 0) {
+    injectedHeader += `\\usetikzlibrary{${missingLibs.join(", ")}}\n`;
+  }
 
   let processedCode = tikzCode;
 
@@ -238,24 +350,50 @@ export function evaluateExpr(expr: string): number {
   // Bỏ đơn vị cm, pt, mm, in (1cm = 1.0 đơn vị toán học, 1mm = 0.1cm, 10pt = 0.35cm)
   clean = clean.replace(/(\d+(?:\.\d+)?)\s*mm\b/g, "($1*0.1)");
   clean = clean.replace(/(\d+(?:\.\d+)?)\s*pt\b/g, "($1*0.035)");
-  clean = clean.replace(/cm|in|deg|\\degree|^\s*\{|\}\s*$/g, "").trim();
+  clean = clean.replace(/cm|in|deg|\\degree/g, "").trim();
+
+  // Chuẩn hóa ngoặc nhọn trong biểu thức {expr} -> (expr)
+  clean = clean.replace(/\{([^{}]+)\}/g, "($1)");
+  clean = clean.replace(/^\s*\{|\}\s*$/g, "").trim();
 
   // Chuẩn hóa số thập phân khuyết 0 ở đầu: .5 -> 0.5, -.5 -> -0.5
   clean = clean.replace(/(^|[\s,(\[+\-*\/])\.(\d+)/g, "$1 0.$2");
   clean = clean.replace(/(^|[\s,(\[+\-*\/])-\.(\d+)/g, "$1 -0.$2");
 
   // Thay thế các hàm & hằng số toán
-  clean = clean.replace(/\\pi\b|pi\b/g, "Math.PI");
+  clean = clean.replace(/\\pi\b|(?<![a-zA-Z0-9_])pi(?![a-zA-Z0-9_])/g, "Math.PI");
+  clean = clean.replace(/\\e\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])/g, "Math.E");
   clean = clean.replace(/\\sqrt\{([^}]+)\}/g, "Math.sqrt($1)");
-  clean = clean.replace(/sqrt\(([^)]+)\)/g, "Math.sqrt($1)");
-  clean = clean.replace(/\\sin\(([^)]+)\)/g, "Math.sin(($1) * Math.PI / 180)");
-  clean = clean.replace(/sin\(([^)]+)\)/g, "Math.sin(($1) * Math.PI / 180)");
-  clean = clean.replace(/\\cos\(([^)]+)\)/g, "Math.cos(($1) * Math.PI / 180)");
-  clean = clean.replace(/cos\(([^)]+)\)/g, "Math.cos(($1) * Math.PI / 180)");
-  clean = clean.replace(/\\tan\(([^)]+)\)/g, "Math.tan(($1) * Math.PI / 180)");
-  clean = clean.replace(/tan\(([^)]+)\)/g, "Math.tan(($1) * Math.PI / 180)");
+  clean = clean.replace(/\bsqrt\(([^)]+)\)/g, "Math.sqrt($1)");
+
+  // Hàm lượng giác ngược (TikZ asin, acos, atan, atan2 trả về độ)
+  clean = clean.replace(/\\?asin\(([^)]+)\)/g, "(Math.asin($1) * 180 / Math.PI)");
+  clean = clean.replace(/\\?acos\(([^)]+)\)/g, "(Math.acos($1) * 180 / Math.PI)");
+  clean = clean.replace(/\\?atan2\(([^,]+),\s*([^)]+)\)/g, "(Math.atan2($1, $2) * 180 / Math.PI)");
+  clean = clean.replace(/\\?atan\(([^)]+)\)/g, "(Math.atan($1) * 180 / Math.PI)");
+
+  // Hàm lượng giác thông thường (đối số là độ trong TikZ)
+  clean = clean.replace(/\\?sin\(([^)]+)\)/g, "Math.sin(($1) * Math.PI / 180)");
+  clean = clean.replace(/\\?cos\(([^)]+)\)/g, "Math.cos(($1) * Math.PI / 180)");
+  clean = clean.replace(/\\?tan\(([^)]+)\)/g, "Math.tan(($1) * Math.PI / 180)");
+
+  // Các hàm toán học bổ sung
+  clean = clean.replace(/\\?abs\(([^)]+)\)/g, "Math.abs($1)");
+  clean = clean.replace(/\\?ln\(([^)]+)\)/g, "Math.log($1)");
+  clean = clean.replace(/\\?exp\(([^)]+)\)/g, "Math.exp($1)");
+  clean = clean.replace(/\\?round\(([^)]+)\)/g, "Math.round($1)");
+  clean = clean.replace(/\\?floor\(([^)]+)\)/g, "Math.floor($1)");
+  clean = clean.replace(/\\?ceil\(([^)]+)\)/g, "Math.ceil($1)");
+
   clean = clean.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "(($1)/($2))");
   clean = clean.replace(/\^/g, "**");
+
+  // Nhân ẩn: 3(x) -> 3*(x), (x)(y) -> (x)*(y), )3 -> )*3
+  clean = clean.replace(/(\d+(?:\.\d+)?)\s*\(/g, "$1*(");
+  clean = clean.replace(/\)\s*\(/g, ")*(");
+  clean = clean.replace(/\)\s*(\d+(?:\.\d+)?)/g, ")*$1");
+  // Nhân ẩn với Math: 3Math.cos -> 3*Math.cos
+  clean = clean.replace(/(\d+(?:\.\d+)?)\s*(Math\.[a-zA-Z0-9_]+)/g, "$1*$2");
 
   try {
     const fn = new Function(`return (${clean});`);
@@ -265,6 +403,114 @@ export function evaluateExpr(expr: string): number {
     const num = parseFloat(clean);
     return isNaN(num) ? 0 : num;
   }
+}
+
+/**
+ * Hàm giải biểu thức hàm số toán học f(x) hoặc f(t) cho các lệnh plot trong TikZ & PGFPlots
+ */
+export function evaluateMathFunction(expr: string, xVal: number, varName: string = "x"): number {
+  if (!expr) return NaN;
+  let clean = expr.trim();
+
+  // Bỏ dấu ngoặc nhọn ngoài cùng nếu có {expr}
+  if (clean.startsWith("{") && clean.endsWith("}")) {
+    clean = clean.substring(1, clean.length - 1).trim();
+  }
+
+  // Chuẩn hóa hàm mũ e^... trước khi thay thế biến
+  clean = clean.replace(/e\s*\^\s*\{([^}]+)\}/gi, "Math.exp($1)");
+  clean = clean.replace(/e\s*\^\s*\\?([a-zA-Z0-9_]+)/gi, "Math.exp($1)");
+
+  // Thay thế biến (\x, \t, x, t) bằng giá trị số học
+  const vRegex = new RegExp(`\\\\${varName}\\b|(?<![a-zA-Z_])${varName}(?![a-zA-Z_])`, "g");
+  clean = clean.replace(vRegex, `(${xVal})`);
+  // Hỗ trợ trường hợp biến khác x nếu có \x trong công thức
+  clean = clean.replace(/\\x\b/g, `(${xVal})`);
+  clean = clean.replace(/\\t\b/g, `(${xVal})`);
+
+  // Phép nhân ẩn (Implicit multiplication): 3(x) -> 3*(x), (x)(y) -> (x)*(y), )( -> )*(, )3 -> )*3
+  clean = clean.replace(/(\d+(?:\.\d+)?)\s*\(/g, "$1*(");
+  clean = clean.replace(/\)\s*\(/g, ")*(");
+  clean = clean.replace(/\)\s*(\d+(?:\.\d+)?)/g, ")*$1");
+  clean = clean.replace(/(\d+(?:\.\d+)?)\s*Math\./g, "$1*Math.");
+
+  // Chuẩn hóa lũy thừa và dấu +-
+  clean = clean.replace(/\^/g, "**");
+  clean = clean.replace(/\+-/g, "-");
+  clean = clean.replace(/--/g, "+");
+
+  // Chuẩn hóa lượng giác radian (sin(\x r)) và thông thường
+  clean = clean.replace(/\bsin\s*\(([^)]+)\s*r\)/gi, "Math.sin($1)");
+  clean = clean.replace(/\bcos\s*\(([^)]+)\s*r\)/gi, "Math.cos($1)");
+  clean = clean.replace(/\btan\s*\(([^)]+)\s*r\)/gi, "Math.tan($1)");
+  clean = clean.replace(/\bsin\s*\(([^)]+)\)/gi, "Math.sin($1)");
+  clean = clean.replace(/\bcos\s*\(([^)]+)\)/gi, "Math.cos($1)");
+  clean = clean.replace(/\btan\s*\(([^)]+)\)/gi, "Math.tan($1)");
+  clean = clean.replace(/\\sin\b/gi, "Math.sin");
+  clean = clean.replace(/\\cos\b/gi, "Math.cos");
+  clean = clean.replace(/\\tan\b/gi, "Math.tan");
+
+  // Căn bậc hai, logarit, hàm mũ, trị tuyệt đối
+  clean = clean.replace(/\\sqrt\{([^}]+)\}/gi, "Math.sqrt($1)");
+  clean = clean.replace(/\bsqrt\s*\(([^)]+)\)/gi, "Math.sqrt($1)");
+  clean = clean.replace(/\\ln\s*\(([^)]+)\)/gi, "Math.log($1)");
+  clean = clean.replace(/\bln\s*\(([^)]+)\)/gi, "Math.log($1)");
+  clean = clean.replace(/\\log\s*\(([^)]+)\)/gi, "Math.log10($1)");
+  clean = clean.replace(/\blog\s*\(([^)]+)\)/gi, "Math.log10($1)");
+  clean = clean.replace(/\\exp\s*\(([^)]+)\)/gi, "Math.exp($1)");
+  clean = clean.replace(/\bexp\s*\(([^)]+)\)/gi, "Math.exp($1)");
+  clean = clean.replace(/\\abs\s*\(([^)]+)\)/gi, "Math.abs($1)");
+  clean = clean.replace(/\babs\s*\(([^)]+)\)/gi, "Math.abs($1)");
+
+  // Hằng số Pi và e
+  clean = clean.replace(/\\pi\b|\bpi\b/gi, "Math.PI");
+  clean = clean.replace(/\\e\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])/g, "Math.E");
+
+  // Phân số LaTeX \frac{a}{b}
+  clean = clean.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "(($1)/($2))");
+
+  try {
+    const fn = new Function(`return (${clean});`);
+    const val = Number(fn());
+    return isFinite(val) ? val : NaN;
+  } catch {
+    return NaN;
+  }
+}
+
+/**
+ * Phân tích và chuyển đổi màu sắc TikZ (gray!20, blue!50, red, v.v.) sang mã màu CSS / SVG
+ */
+export function parseTikzColor(colorStr: string, defaultColor = "#1e293b"): string {
+  if (!colorStr) return defaultColor;
+  const s = colorStr.toLowerCase().trim();
+
+  if (s.includes("gray!10") || s.includes("black!10")) return "rgba(148, 163, 184, 0.2)";
+  if (s.includes("gray!20") || s.includes("black!20")) return "rgba(148, 163, 184, 0.35)";
+  if (s.includes("gray!30") || s.includes("black!30")) return "rgba(148, 163, 184, 0.5)";
+  if (s.includes("gray!50") || s.includes("black!50")) return "rgba(100, 116, 139, 0.7)";
+  if (s.includes("gray!80") || s.includes("black!80")) return "#475569";
+  if (s.includes("gray") || s.includes("grey")) return "#64748b";
+
+  if (s.includes("red!20")) return "rgba(239, 68, 68, 0.25)";
+  if (s.includes("red!50")) return "rgba(239, 68, 68, 0.6)";
+  if (s.includes("red")) return "#ef4444";
+
+  if (s.includes("blue!20")) return "rgba(59, 130, 246, 0.25)";
+  if (s.includes("blue!50")) return "rgba(59, 130, 246, 0.6)";
+  if (s.includes("blue")) return "#2563eb";
+
+  if (s.includes("green!20")) return "rgba(16, 185, 129, 0.25)";
+  if (s.includes("green!50")) return "rgba(16, 185, 129, 0.6)";
+  if (s.includes("green")) return "#10b981";
+
+  if (s.includes("amber") || s.includes("orange")) return "#f59e0b";
+  if (s.includes("purple") || s.includes("indigo")) return "#6366f1";
+  if (s.includes("cyan") || s.includes("teal")) return "#06b6d4";
+  if (s.includes("white")) return "#ffffff";
+  if (s.includes("black")) return "#0f172a";
+
+  return defaultColor;
 }
 
 /**
@@ -316,6 +562,115 @@ export function extractBalancedParens(str: string, startIndex: number): { conten
     }
   }
   return null;
+}
+
+/**
+ * Mở rộng và thay thế các định nghĩa biến, macro trong TikZ/LaTeX theo đúng thứ tự xuất hiện
+ * Hỗ trợ:
+ * - \def\a{2.5} hoặc \def\a {2.5}
+ * - \pgfmathsetmacro\a{2.5} hoặc \pgfmathsetmacro{\a}{2.5}
+ * - \pgfmathparse{2.5} -> \pgfmathresult
+ * - \newcommand{\a}{2.5} hoặc \newcommand\a{2.5}
+ * - \edef, \renewcommand, \let
+ */
+export function expandTikzMacros(code: string): string {
+  let result = code;
+  let iterations = 0;
+
+  while (iterations < 40) {
+    iterations++;
+
+    interface MacroMatchCandidate {
+      index: number;
+      length: number;
+      fullText: string;
+      varName: string;
+      rawVal: string;
+      isMath: boolean;
+      isPgfResult?: boolean;
+    }
+
+    const candidates: MacroMatchCandidate[] = [];
+
+    // 1. \pgfmathsetmacro\var{val} hoặc \pgfmathsetmacro{\var}{val}
+    const pgfMathRegex = /\\pgfmathsetmacro\s*(?:\{?\\?([a-zA-Z0-9_]+)\}?)\s*\{([^}]+)\}/gi;
+    let pmMatch: RegExpExecArray | null;
+    while ((pmMatch = pgfMathRegex.exec(result)) !== null) {
+      candidates.push({
+        index: pmMatch.index,
+        length: pmMatch[0].length,
+        fullText: pmMatch[0],
+        varName: pmMatch[1],
+        rawVal: pmMatch[2].trim(),
+        isMath: true,
+      });
+    }
+
+    // 2. \pgfmathparse{val}
+    const pgfParseRegex = /\\pgfmathparse\s*\{([^}]+)\}/gi;
+    let ppMatch: RegExpExecArray | null;
+    while ((ppMatch = pgfParseRegex.exec(result)) !== null) {
+      candidates.push({
+        index: ppMatch.index,
+        length: ppMatch[0].length,
+        fullText: ppMatch[0],
+        varName: "pgfmathresult",
+        rawVal: ppMatch[1].trim(),
+        isMath: true,
+        isPgfResult: true,
+      });
+    }
+
+    // 3. \def\var{val} hoặc \edef\var{val}
+    const defRegex = /\\e?def\s*\\([a-zA-Z0-9_]+)\s*\{([^}]+)\}/gi;
+    let defMatch: RegExpExecArray | null;
+    while ((defMatch = defRegex.exec(result)) !== null) {
+      candidates.push({
+        index: defMatch.index,
+        length: defMatch[0].length,
+        fullText: defMatch[0],
+        varName: defMatch[1],
+        rawVal: defMatch[2].trim(),
+        isMath: false,
+      });
+    }
+
+    // 4. \newcommand{\var}{val} hoặc \renewcommand{\var}{val}
+    const newcmdRegex = /\\(?:re)?newcommand\*?\s*(?:\{?\\?([a-zA-Z0-9_]+)\}?)\s*\{([^}]+)\}/gi;
+    let ncMatch: RegExpExecArray | null;
+    while ((ncMatch = newcmdRegex.exec(result)) !== null) {
+      candidates.push({
+        index: ncMatch.index,
+        length: ncMatch[0].length,
+        fullText: ncMatch[0],
+        varName: ncMatch[1],
+        rawVal: ncMatch[2].trim(),
+        isMath: false,
+      });
+    }
+
+    if (candidates.length === 0) break;
+
+    // Chọn macro xuất hiện sớm nhất trong mã nguồn (theo thứ tự thực thi của LaTeX)
+    candidates.sort((a, b) => a.index - b.index);
+    const earliest = candidates[0];
+
+    // Đánh giá giá trị biểu thức
+    let valStr = earliest.rawVal;
+    const numVal = evaluateExpr(earliest.rawVal);
+    if (!isNaN(numVal) && (earliest.isMath || /^[+-]?[0-9.]+(?:\/[0-9.]+)?$/.test(earliest.rawVal) || /asin|acos|atan|sin|cos|tan|sqrt|\+|\-|\*|\//.test(earliest.rawVal))) {
+      valStr = numVal.toString();
+    }
+
+    // Xóa định nghĩa macro khỏi chuỗi
+    result = result.substring(0, earliest.index) + result.substring(earliest.index + earliest.length);
+
+    // Thay thế biến trong phần mã còn lại
+    const replaceRegex = new RegExp(`\\\\${earliest.varName}(?![a-zA-Z0-9_])`, "g");
+    result = result.replace(replaceRegex, valStr);
+  }
+
+  return result;
 }
 
 /**
@@ -508,12 +863,58 @@ export function cleanCoordStr(rawStr: string): string {
 }
 
 /**
- * Parse tọa độ dạng (x,y), (x,y,z), (angle:radius), ($(A)!0.5!(B)$), ($(B)+(E)-(A)$), ($(O)+(0,5)$)...
+ * Parse tọa độ dạng (x,y), (x,y,z), (axis cs:x,y), (rel axis cs:rx,ry), (angle:radius), ($(A)!0.5!(B)$), ($(B)+(E)-(A)$), ($(O)+(0,5)$)...
  */
 export function parseCoordinateValue(coordStr: string, coordsMap: Map<string, Point2D>): Point2D | null {
   if (!coordStr) return null;
-  const str = cleanCoordStr(coordStr);
+  let str = cleanCoordStr(coordStr);
   if (!str) return null;
+
+  // 0. Xử lý hệ tọa độ PGFPlots & Scientific Visualization
+  if (/^current\s+axis\.origin$/i.test(str) || /^current\s+axis\.center$/i.test(str)) {
+    return { x: 0, y: 0 };
+  }
+  if (/^current\s+axis\.left\s+of\s+origin$/i.test(str)) {
+    const minX = coordsMap.get("__axis_min_x")?.x ?? -5;
+    return { x: minX, y: 0 };
+  }
+  if (/^current\s+axis\.right\s+of\s+origin$/i.test(str)) {
+    const maxX = coordsMap.get("__axis_max_x")?.x ?? 5;
+    return { x: maxX, y: 0 };
+  }
+  if (/^current\s+axis\.above\s+origin$/i.test(str)) {
+    const maxY = coordsMap.get("__axis_max_y")?.y ?? 5;
+    return { x: 0, y: maxY };
+  }
+  if (/^current\s+axis\.below\s+origin$/i.test(str)) {
+    const minY = coordsMap.get("__axis_min_y")?.y ?? -5;
+    return { x: 0, y: minY };
+  }
+
+  // Tọa độ tương đối rel axis cs: rx, ry (0 -> 1)
+  if (/^(?:rel\s+axis\s+cs|axis\s+description\s+cs)\s*:/i.test(str)) {
+    const cleanInner = str.replace(/^(?:rel\s+axis\s+cs|axis\s+description\s+cs)\s*:/i, "").trim();
+    const rParts = cleanInner.split(",").map((s) => evaluateExpr(s));
+    if (rParts.length >= 2) {
+      const rx = rParts[0];
+      const ry = rParts[1];
+      const minX = coordsMap.get("__axis_min_x")?.x ?? -5;
+      const maxX = coordsMap.get("__axis_max_x")?.x ?? 5;
+      const minY = coordsMap.get("__axis_min_y")?.y ?? -5;
+      const maxY = coordsMap.get("__axis_max_y")?.y ?? 5;
+      return {
+        x: minX + rx * (maxX - minX),
+        y: minY + ry * (maxY - minY),
+      };
+    }
+  }
+
+  // Tọa độ dữ liệu trục PGFPlots: axis cs: x, y hoặc axis direction cs: dx, dy
+  if (/^axis\s+cs\s*:/i.test(str)) {
+    str = str.replace(/^axis\s+cs\s*:/i, "").trim();
+  } else if (/^axis\s+direction\s+cs\s*:/i.test(str)) {
+    str = str.replace(/^axis\s+direction\s+cs\s*:/i, "").trim();
+  }
 
   // 1. Tên tọa độ đã lưu: A hoặc B hoặc H
   if (coordsMap.has(str)) {
@@ -604,16 +1005,63 @@ export function parseCoordinateValue(coordStr: string, coordsMap: Map<string, Po
     if (p1 && p2) return { x: p2.x, y: p1.y };
   }
 
-  // 5. Tọa độ cực: (angle:radius) hoặc (-90:4mm)
-  if (str.includes(":")) {
+  // 5. Tọa độ cực hoặc tọa độ trụ/cầu 3D: (angle:radius) hoặc (angle:radius:z) hoặc (-90:4mm)
+  if (str.includes(":") && !str.includes("$")) {
     const parts = str.split(":");
-    const angleDeg = evaluateExpr(parts[0]);
-    const r = evaluateExpr(parts[1]);
-    const rad = (angleDeg * Math.PI) / 180;
-    return {
-      x: r * Math.cos(rad),
-      y: r * Math.sin(rad),
-    };
+    if (parts.length === 3) {
+      const angleDeg = evaluateExpr(parts[0]);
+      const r = evaluateExpr(parts[1]);
+      const z = evaluateExpr(parts[2]);
+      if (!isNaN(angleDeg) && !isNaN(r) && !isNaN(z)) {
+        const rad = (angleDeg * Math.PI) / 180;
+        const x3d = r * Math.cos(rad);
+        const y3d = r * Math.sin(rad);
+        const z3d = z;
+        const bx = coordsMap.get("__basis_x") || { x: -0.35, y: -0.35 };
+        const by = coordsMap.get("__basis_y") || { x: 1.0, y: 0.0 };
+        const bz = coordsMap.get("__basis_z") || { x: 0.0, y: 1.0 };
+        return {
+          x: x3d * bx.x + y3d * by.x + z3d * bz.x,
+          y: x3d * bx.y + y3d * by.y + z3d * bz.y,
+        };
+      }
+    } else if (parts.length === 2 && !str.includes(",")) {
+      const angleDeg = evaluateExpr(parts[0]);
+      const r = evaluateExpr(parts[1]);
+      if (!isNaN(angleDeg) && !isNaN(r)) {
+        const canvasPlane = coordsMap.get("__canvas_plane") as any;
+        if (canvasPlane) {
+          const rad = (angleDeg * Math.PI) / 180;
+          const u = r * Math.cos(rad);
+          const v = r * Math.sin(rad);
+          let x3d = u,
+            y3d = v,
+            z3d = canvasPlane.val ?? 0;
+          if (canvasPlane.type === "xz" || canvasPlane.type === "zx") {
+            x3d = u;
+            y3d = canvasPlane.val ?? 0;
+            z3d = v;
+          } else if (canvasPlane.type === "yz" || canvasPlane.type === "zy") {
+            x3d = canvasPlane.val ?? 0;
+            y3d = u;
+            z3d = v;
+          }
+          const bx = coordsMap.get("__basis_x") || { x: -0.35, y: -0.35 };
+          const by = coordsMap.get("__basis_y") || { x: 1.0, y: 0.0 };
+          const bz = coordsMap.get("__basis_z") || { x: 0.0, y: 1.0 };
+          return {
+            x: x3d * bx.x + y3d * by.x + z3d * bz.x,
+            y: x3d * bx.y + y3d * by.y + z3d * bz.y,
+          };
+        }
+
+        const rad = (angleDeg * Math.PI) / 180;
+        return {
+          x: r * Math.cos(rad),
+          y: r * Math.sin(rad),
+        };
+      }
+    }
   }
 
   // 6. Tọa độ Descartes: (x, y) hoặc (x, y, z)
@@ -623,18 +1071,46 @@ export function parseCoordinateValue(coordStr: string, coordsMap: Map<string, Po
       const x3d = evaluateExpr(parts[0]);
       const y3d = evaluateExpr(parts[1]);
       const z3d = evaluateExpr(parts[2]);
-      const angle = Math.PI / 4;
-      const factor = 0.45;
+      const bx = coordsMap.get("__basis_x") || { x: -0.35, y: -0.35 };
+      const by = coordsMap.get("__basis_y") || { x: 1.0, y: 0.0 };
+      const bz = coordsMap.get("__basis_z") || { x: 0.0, y: 1.0 };
       return {
-        x: y3d - x3d * Math.cos(angle) * factor,
-        y: z3d - x3d * Math.sin(angle) * factor,
+        x: x3d * bx.x + y3d * by.x + z3d * bz.x,
+        y: x3d * bx.y + y3d * by.y + z3d * bz.y,
       };
     }
 
-    return {
-      x: evaluateExpr(parts[0]),
-      y: evaluateExpr(parts[1]),
-    };
+    const u = evaluateExpr(parts[0]);
+    const v = evaluateExpr(parts[1]);
+    if (!isNaN(u) && !isNaN(v)) {
+      const canvasPlane = coordsMap.get("__canvas_plane") as any;
+      if (canvasPlane) {
+        let x3d = u,
+          y3d = v,
+          z3d = canvasPlane.val ?? 0;
+        if (canvasPlane.type === "xz" || canvasPlane.type === "zx") {
+          x3d = u;
+          y3d = canvasPlane.val ?? 0;
+          z3d = v;
+        } else if (canvasPlane.type === "yz" || canvasPlane.type === "zy") {
+          x3d = canvasPlane.val ?? 0;
+          y3d = u;
+          z3d = v;
+        }
+        const bx = coordsMap.get("__basis_x") || { x: -0.35, y: -0.35 };
+        const by = coordsMap.get("__basis_y") || { x: 1.0, y: 0.0 };
+        const bz = coordsMap.get("__basis_z") || { x: 0.0, y: 1.0 };
+        return {
+          x: x3d * bx.x + y3d * by.x + z3d * bz.x,
+          y: x3d * bx.y + y3d * by.y + z3d * bz.y,
+        };
+      }
+
+      return {
+        x: u,
+        y: v,
+      };
+    }
   }
 
   return null;
@@ -701,6 +1177,352 @@ export function extractCoordinateTokens(text: string, coordsMap: Map<string, Poi
 }
 
 /**
+ * Giải mã thông số cung elip / đường tròn (arc) trong TikZ
+ * Cú pháp hỗ trợ:
+ * - arc (startAngle : endAngle : radius)
+ * - arc (startAngle : endAngle : rx and ry)
+ * - arc [start angle=..., end angle=..., radius=...]
+ * - arc [start angle=..., end angle=..., x radius=..., y radius=...]
+ */
+export function generateTikzArcPoints(
+  arcSpec: string,
+  startPt: Point2D,
+  coordsMap?: Map<string, Point2D>,
+  rawStart2DPt?: Point2D
+): { points: Point2D[]; endPt: Point2D } | null {
+  let startAngle = 0;
+  let endAngle = 0;
+  let rx = 1.0;
+  let ry = 1.0;
+
+  const bracketMatch = arcSpec.match(/^\[([^\]]*)\]/);
+  if (bracketMatch) {
+    const optStr = bracketMatch[1];
+    const saMatch = optStr.match(/start\s*angle\s*=\s*([^,\]]+)/i);
+    const eaMatch = optStr.match(/end\s*angle\s*=\s*([^,\]]+)/i);
+    const rMatch = optStr.match(/(?:^|[, ])radius\s*=\s*([^,\]]+)/i);
+    const rxMatch = optStr.match(/x\s*radius\s*=\s*([^,\]]+)/i);
+    const ryMatch = optStr.match(/y\s*radius\s*=\s*([^,\]]+)/i);
+
+    if (saMatch) startAngle = evaluateExpr(saMatch[1]);
+    if (eaMatch) endAngle = evaluateExpr(eaMatch[1]);
+    if (rMatch) {
+      rx = evaluateExpr(rMatch[1]) || 1.0;
+      ry = rx;
+    }
+    if (rxMatch) rx = evaluateExpr(rxMatch[1]) || rx;
+    if (ryMatch) ry = evaluateExpr(ryMatch[1]) || ry;
+  } else {
+    // Dạng ngoặc tròn: (startAngle : endAngle : rx and ry) hoặc (startAngle : endAngle : r)
+    let content = arcSpec.trim();
+    if (content.startsWith("(") && content.endsWith(")")) {
+      content = content.substring(1, content.length - 1).trim();
+    } else {
+      const parenMatch = arcSpec.match(/^\(([\s\S]+)\)$/);
+      if (parenMatch) {
+        content = parenMatch[1].trim();
+      } else {
+        return null;
+      }
+    }
+
+    // Phân tách dấu 2 chấm `:` ở cấp ngoài cùng
+    const parts: string[] = [];
+    let depth = 0;
+    let current = "";
+    for (let i = 0; i < content.length; i++) {
+      const ch = content[i];
+      if (ch === "(" || ch === "{" || ch === "[") depth++;
+      else if (ch === ")" || ch === "}" || ch === "]") depth--;
+
+      if (ch === ":" && depth === 0) {
+        parts.push(current.trim());
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    if (current.trim()) {
+      parts.push(current.trim());
+    }
+
+    if (parts.length >= 3) {
+      startAngle = evaluateExpr(parts[0]);
+      endAngle = evaluateExpr(parts[1]);
+      const radStr = parts[2].trim();
+      if (radStr.includes("and")) {
+        const [rxStr, ryStr] = radStr.split("and").map((s) => s.trim());
+        rx = evaluateExpr(rxStr) || 1.0;
+        ry = evaluateExpr(ryStr) || 1.0;
+      } else {
+        rx = evaluateExpr(radStr) || 1.0;
+        ry = rx;
+      }
+    } else if (parts.length === 2) {
+      startAngle = evaluateExpr(parts[0]);
+      endAngle = evaluateExpr(parts[1]);
+    } else {
+      return null;
+    }
+  }
+
+  if (isNaN(rx) || rx <= 0) rx = 1.0;
+  if (isNaN(ry) || ry <= 0) ry = 1.0;
+
+  const canvasPlane = coordsMap?.get("__canvas_plane") as any;
+  if (canvasPlane) {
+    const bx = coordsMap?.get("__basis_x") || { x: -0.35, y: -0.35 };
+    const by = coordsMap?.get("__basis_y") || { x: 1.0, y: 0.0 };
+    const bz = coordsMap?.get("__basis_z") || { x: 0.0, y: 1.0 };
+
+    const startRad = (startAngle * Math.PI) / 180;
+    const rawU = rawStart2DPt ? rawStart2DPt.x : rx * Math.cos(startRad);
+    const rawV = rawStart2DPt ? rawStart2DPt.y : ry * Math.sin(startRad);
+    const cu = rawU - rx * Math.cos(startRad);
+    const cv = rawV - ry * Math.sin(startRad);
+
+    const samples = 48;
+    const pts: Point2D[] = [];
+    for (let i = 0; i <= samples; i++) {
+      const t = i / samples;
+      const curAngle = startAngle + t * (endAngle - startAngle);
+      const curRad = (curAngle * Math.PI) / 180;
+      const u = cu + rx * Math.cos(curRad);
+      const v = cv + ry * Math.sin(curRad);
+      let x3d = u,
+        y3d = v,
+        z3d = canvasPlane.val ?? 0;
+      if (canvasPlane.type === "xz" || canvasPlane.type === "zx") {
+        x3d = u;
+        y3d = canvasPlane.val ?? 0;
+        z3d = v;
+      } else if (canvasPlane.type === "yz" || canvasPlane.type === "zy") {
+        x3d = canvasPlane.val ?? 0;
+        y3d = u;
+        z3d = v;
+      }
+      pts.push({
+        x: x3d * bx.x + y3d * by.x + z3d * bz.x,
+        y: x3d * bx.y + y3d * by.y + z3d * bz.y,
+      });
+    }
+
+    const endRad = (endAngle * Math.PI) / 180;
+    const endU = cu + rx * Math.cos(endRad);
+    const endV = cv + ry * Math.sin(endRad);
+    let endX3d = endU,
+      endY3d = endV,
+      endZ3d = canvasPlane.val ?? 0;
+    if (canvasPlane.type === "xz" || canvasPlane.type === "zx") {
+      endX3d = endU;
+      endY3d = canvasPlane.val ?? 0;
+      endZ3d = endV;
+    } else if (canvasPlane.type === "yz" || canvasPlane.type === "zy") {
+      endX3d = canvasPlane.val ?? 0;
+      endY3d = endU;
+      endZ3d = endV;
+    }
+    const endPt: Point2D = {
+      x: endX3d * bx.x + endY3d * by.x + endZ3d * bz.x,
+      y: endX3d * bx.y + endY3d * by.y + endZ3d * bz.y,
+    };
+
+    return { points: pts, endPt };
+  }
+
+  // Tính tâm elip từ startPt và startAngle
+  const startRad = (startAngle * Math.PI) / 180;
+  const cx = startPt.x - rx * Math.cos(startRad);
+  const cy = startPt.y - ry * Math.sin(startRad);
+
+  const samples = 36;
+  const pts: Point2D[] = [];
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples;
+    const curAngle = startAngle + t * (endAngle - startAngle);
+    const curRad = (curAngle * Math.PI) / 180;
+    pts.push({
+      x: cx + rx * Math.cos(curRad),
+      y: cy + ry * Math.sin(curRad),
+    });
+  }
+
+  const endRad = (endAngle * Math.PI) / 180;
+  const endPt: Point2D = {
+    x: cx + rx * Math.cos(endRad),
+    y: cy + ry * Math.sin(endRad),
+  };
+
+  return { points: pts, endPt };
+}
+
+/**
+ * Phân tích thân lệnh \draw, \fill, \filldraw thành các phân đoạn (subpaths)
+ * Hỗ trợ liền mạch:
+ * - Đoạn thẳng nối -- hoặc to
+ * - Cung tròn / elip arc (...) hoặc arc [...]
+ * - Chu trình khép kín -- cycle
+ * - Tọa độ tương đối ++(...) và +(...)
+ * - Đa phân đoạn (subpaths) trong cùng một lệnh
+ */
+export function parseDrawSubpaths(
+  drawBody: string,
+  coordsMap: Map<string, Point2D>
+): { points: Point2D[]; isCycle: boolean }[] {
+  const result: { points: Point2D[]; isCycle: boolean }[] = [];
+  const cleaned = stripNodesAndPics(drawBody).trim();
+
+  let cursor = 0;
+  let currentSubpathPts: Point2D[] = [];
+  let currentPt: Point2D | null = null;
+  let rawCurrent2DPt: Point2D | null = null;
+  let isCycle = false;
+
+  const flushSubpath = () => {
+    if (currentSubpathPts.length >= 2 || (currentSubpathPts.length === 1 && isCycle)) {
+      result.push({
+        points: [...currentSubpathPts],
+        isCycle,
+      });
+    }
+    currentSubpathPts = [];
+    isCycle = false;
+  };
+
+  while (cursor < cleaned.length) {
+    while (cursor < cleaned.length && /\s/.test(cleaned[cursor])) cursor++;
+    if (cursor >= cleaned.length) break;
+
+    const rest = cleaned.substring(cursor);
+
+    // 1. Kiểm tra cycle
+    const cycleMatch = rest.match(/^cycle\b/i);
+    if (cycleMatch) {
+      isCycle = true;
+      cursor += cycleMatch[0].length;
+      flushSubpath();
+      currentPt = null;
+      rawCurrent2DPt = null;
+      continue;
+    }
+
+    // 2. Kiểm tra toán tử nối: -- hoặc to
+    const opMatch = rest.match(/^(?:--|to\b)/);
+    if (opMatch) {
+      cursor += opMatch[0].length;
+      continue;
+    }
+
+    // 3. Kiểm tra arc: arc (start:end:rad) hoặc arc [start angle=..., end angle=...]
+    const arcMatch = rest.match(/^arc\b/i);
+    if (arcMatch) {
+      cursor += arcMatch[0].length;
+      while (cursor < cleaned.length && /\s/.test(cleaned[cursor])) cursor++;
+
+      let arcSpec = "";
+      if (cleaned[cursor] === "(") {
+        const bal = extractBalancedParens(cleaned, cursor);
+        if (bal) {
+          arcSpec = `(${bal.content})`;
+          cursor = bal.endIndex + 1;
+        }
+      } else if (cleaned[cursor] === "[") {
+        const closeIdx = cleaned.indexOf("]", cursor);
+        if (closeIdx !== -1) {
+          arcSpec = cleaned.substring(cursor, closeIdx + 1);
+          cursor = closeIdx + 1;
+        }
+      }
+
+      if (arcSpec && currentPt) {
+        const arcResult = generateTikzArcPoints(arcSpec, currentPt, coordsMap, rawCurrent2DPt || undefined);
+        if (arcResult) {
+          for (let k = 1; k < arcResult.points.length; k++) {
+            currentSubpathPts.push(arcResult.points[k]);
+          }
+          currentPt = arcResult.endPt;
+        }
+      }
+      continue;
+    }
+
+    // 4. Kiểm tra toạ độ tương đối ++(...) hoặc +(...)
+    const relMatch = rest.match(/^(\+{1,2})\s*\(/);
+    if (relMatch) {
+      const isAccum = relMatch[1] === "++";
+      const parenStart = cursor + relMatch[0].length - 1;
+      const bal = extractBalancedParens(cleaned, parenStart);
+      if (bal) {
+        cursor = bal.endIndex + 1;
+        const delta = parseCoordinateValue(bal.content, coordsMap);
+        if (delta) {
+          const newPt: Point2D = currentPt
+            ? { x: currentPt.x + delta.x, y: currentPt.y + delta.y }
+            : delta;
+          if (isAccum) {
+            currentPt = newPt;
+          }
+          currentSubpathPts.push(newPt);
+        }
+      } else {
+        cursor++;
+      }
+      continue;
+    }
+
+    // 5. Kiểm tra toạ độ tuyệt đối (...)
+    if (cleaned[cursor] === "(") {
+      const bal = extractBalancedParens(cleaned, cursor);
+      if (bal) {
+        const coordContent = bal.content.trim();
+        cursor = bal.endIndex + 1;
+
+        // Nếu phía trước không có toán tử nối '--' và đã có điểm trong currentSubpathPts,
+        // thì đây là bắt đầu của một subpath mới độc lập
+        const beforeCoord = cleaned.substring(0, bal.endIndex - bal.content.length - 1).trim();
+        const hasExplicitConnector = beforeCoord.endsWith("--") || beforeCoord.endsWith("to");
+
+        if (!hasExplicitConnector && currentSubpathPts.length > 0) {
+          flushSubpath();
+        }
+
+        // Lưu tọa độ thô 2D nếu là dạng cực hoặc Descartes 2 thành phần
+        if (coordContent.includes(":") && !coordContent.includes("$")) {
+          const cParts = coordContent.split(":");
+          if (cParts.length === 2) {
+            const aDeg = evaluateExpr(cParts[0]);
+            const rVal = evaluateExpr(cParts[1]);
+            if (!isNaN(aDeg) && !isNaN(rVal)) {
+              const rRad = (aDeg * Math.PI) / 180;
+              rawCurrent2DPt = { x: rVal * Math.cos(rRad), y: rVal * Math.sin(rRad) };
+            }
+          }
+        } else if (coordContent.includes(",") && coordContent.split(",").length === 2) {
+          const cParts = coordContent.split(",").map((s) => evaluateExpr(s));
+          if (!isNaN(cParts[0]) && !isNaN(cParts[1])) {
+            rawCurrent2DPt = { x: cParts[0], y: cParts[1] };
+          }
+        }
+
+        const pt = parseCoordinateValue(coordContent, coordsMap);
+        if (pt) {
+          currentPt = pt;
+          currentSubpathPts.push(pt);
+        }
+      } else {
+        cursor++;
+      }
+      continue;
+    }
+
+    cursor++;
+  }
+
+  flushSubpath();
+  return result;
+}
+
+/**
  * Loại bỏ các khối node[...] {...} và pic[...] {...} lồng nhau ra khỏi chuỗi lệnh TikZ
  */
 export function stripNodesAndPics(cmd: string): string {
@@ -708,7 +1530,9 @@ export function stripNodesAndPics(cmd: string): string {
   let i = 0;
   while (i < cmd.length) {
     const sub = cmd.substring(i);
-    const nodePicMatch = sub.match(/^(?:node|pic)\b(?:\s*\[[^\]]*\])?\s*(?:\([^\)]*\))?\s*/);
+    const nodePicMatch = sub.match(
+      /^(?:\\?node|\\?pic)\b(?:\s*\[[^\]]*\])?(?:\s*\([^\)]*\))?(?:\s*at\s*(?:\([^)]*\)|[^\s;{]+))?(?:\s*\[[^\]]*\])?\s*/i
+    );
     if (nodePicMatch) {
       const matchLen = nodePicMatch[0].length;
       const braceStart = i + matchLen;
@@ -718,6 +1542,9 @@ export function stripNodesAndPics(cmd: string): string {
           i = bal.endIndex + 1;
           continue;
         }
+      } else {
+        i += matchLen;
+        continue;
       }
     }
     result += cmd[i];
@@ -727,11 +1554,66 @@ export function stripNodesAndPics(cmd: string): string {
 }
 
 /**
+ * Phẳng hóa các khối \begin{scope}[...] ... \end{scope} trong TikZ
+ * Kế thừa toàn bộ options của scope vào từng lệnh con bên trong
+ */
+export function flattenTikzScopes(code: string): string {
+  let result = "";
+  let cursor = 0;
+  const scopeStack: string[] = [];
+
+  while (cursor < code.length) {
+    const rest = code.substring(cursor);
+    const beginScopeMatch = rest.match(/^\\begin\{scope\}(?:\s*\[([^\]]*)\])?/i);
+    if (beginScopeMatch) {
+      const scopeOpts = (beginScopeMatch[1] || "").trim();
+      scopeStack.push(scopeOpts);
+      cursor += beginScopeMatch[0].length;
+      continue;
+    }
+
+    const endScopeMatch = rest.match(/^\\end\{scope\}/i);
+    if (endScopeMatch) {
+      scopeStack.pop();
+      cursor += endScopeMatch[0].length;
+      continue;
+    }
+
+    const semiIdx = rest.indexOf(";");
+    if (semiIdx !== -1) {
+      let cmd = rest.substring(0, semiIdx + 1);
+      if (scopeStack.length > 0) {
+        const combinedScopeOpts = scopeStack.filter(Boolean).join(", ");
+        if (combinedScopeOpts) {
+          const cmdMatch = cmd.match(/^(\\(?:draw|fill|filldraw|path|node|coordinate|pic|clip|addplot3?|shade))(?:\s*\[([^\]]*)\])?/i);
+          if (cmdMatch) {
+            const verb = cmdMatch[1];
+            const existingOpts = cmdMatch[2] ? cmdMatch[2].trim() : "";
+            const mergedOpts = existingOpts ? `${combinedScopeOpts}, ${existingOpts}` : combinedScopeOpts;
+            cmd = `${verb}[${mergedOpts}]` + cmd.substring(cmdMatch[0].length);
+          }
+        }
+      }
+      result += cmd;
+      cursor += semiIdx + 1;
+    } else {
+      result += rest;
+      break;
+    }
+  }
+
+  return result;
+}
+
+/**
  * Trích xuất nhãn LaTeX và render qua KaTeX một cách an toàn
  */
 export function renderLatexLabel(rawLabel: string): string {
   let label = rawLabel.trim();
   if (!label) return "";
+
+  // Bỏ các lệnh chỉ định kích cỡ chữ LaTeX: \footnotesize, \small, \scriptsize, \tiny, \large, \Large, v.v.
+  label = label.replace(/\\(?:footnotesize|scriptsize|tiny|small|normalsize|large|Large|LARGE|huge|Huge)\b/g, "").trim();
 
   // Xử lý các dạng như $30$m, $30$ m, 30m, 54^\circ, $54^\circ$
   label = label.replace(/\$([0-9.]+)\$\s*([a-zA-Z]+)/g, "$1\\text{ $2}");
@@ -751,6 +1633,11 @@ export function renderLatexLabel(rawLabel: string): string {
   } else if (mathContent.includes("$")) {
     // Chỉ loại bỏ dấu $ phân cách, giữ nguyên toàn bộ mã toán (ví dụ: \vec{F_1})
     mathContent = mathContent.replace(/\$/g, "").trim();
+  }
+
+  // Bỏ cặp ngoặc nhọn bao quanh đơn lẻ nếu có {x} -> x
+  if (mathContent.startsWith("{") && mathContent.endsWith("}") && !mathContent.includes(" ")) {
+    mathContent = mathContent.substring(1, mathContent.length - 1).trim();
   }
 
   try {
@@ -775,17 +1662,26 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     if (tableHtml) return tableHtml;
   }
 
-  // 1. Mở rộng tất cả vòng lặp \foreach trước khi phân tích
-  const expandedCode = expandTikzForeach(rawTikzCode);
+  // 1. Mở rộng tất cả macro \def, \pgfmathsetmacro, \newcommand
+  let preprocessedCode = expandTikzMacros(rawTikzCode);
 
-  // 2. Chuẩn hóa dòng, loại bỏ chú thích % (trừ \%)
-  const cleanCode = expandedCode
-    .split("\n")
-    .map((line) => {
-      const commentIdx = line.search(/(?<!\\)%/);
-      return commentIdx !== -1 ? line.substring(0, commentIdx) : line;
-    })
-    .join(" ");
+  // Chuẩn hóa lỗi thiếu dấu \ trước node / ode khi dán văn bản
+  preprocessedCode = preprocessedCode.replace(/(?:^|\n|\r|;)\s*ode\s*\[/g, "\n\\node[");
+  preprocessedCode = preprocessedCode.replace(/(?:^|\n|\r|;)\s*node\s*\[/g, "\n\\node[");
+
+  // 2. Mở rộng tất cả vòng lặp \foreach trước khi phân tích
+  preprocessedCode = expandTikzForeach(preprocessedCode);
+
+  // 3. Chuẩn hóa dòng, loại bỏ chú thích % (trừ \%)
+  const cleanCode = expandTikzMacros(
+    preprocessedCode
+      .split("\n")
+      .map((line) => {
+        const commentIdx = line.search(/(?<!\\)%/);
+        return commentIdx !== -1 ? line.substring(0, commentIdx) : line;
+      })
+      .join(" ")
+  );
 
   // 3. Lấy scale từ [scale=0.8]
   let globalScale = 1.0;
@@ -800,6 +1696,79 @@ export function parseTikzToSvg(rawTikzCode: string): string {
   const paths: TikzPath[] = [];
   const angleMarks: AngleMark[] = [];
   const rectShapes: TikzRectShape[] = [];
+
+  // ==========================================
+  // Khởi tạo vector cơ sở không gian 3D (3D Basis Vectors & Projections)
+  // Hỗ trợ \tdplotsetmaincoords, 3d view, view={az}{el}, và x={...}, y={...}, z={...}
+  // ==========================================
+  let basisX: Point2D = { x: -0.35, y: -0.35 };
+  let basisY: Point2D = { x: 1.0, y: 0.0 };
+  let basisZ: Point2D = { x: 0.0, y: 1.0 };
+
+  // 1. Phân tích \tdplotsetmaincoords{\theta}{\phi}
+  const tdplotMatch = cleanCode.match(/\\tdplotsetmaincoords\s*\{([^}]+)\}\s*\{([^}]+)\}/i);
+  if (tdplotMatch) {
+    const thetaDeg = evaluateExpr(tdplotMatch[1]);
+    const phiDeg = evaluateExpr(tdplotMatch[2]);
+    const thetaRad = (thetaDeg * Math.PI) / 180;
+    const phiRad = (phiDeg * Math.PI) / 180;
+    basisX = {
+      x: -Math.sin(phiRad),
+      y: -Math.cos(thetaRad) * Math.cos(phiRad),
+    };
+    basisY = {
+      x: Math.cos(phiRad),
+      y: -Math.cos(thetaRad) * Math.sin(phiRad),
+    };
+    basisZ = {
+      x: 0,
+      y: Math.sin(thetaRad),
+    };
+  }
+
+  // 2. Phân tích 3d view hoặc view={az}{el}
+  const viewMatch =
+    cleanCode.match(/(?:3d\s+view|view)\s*=\s*\{?\s*([+-]?[0-9.]+)\s*\}?\s*(?:\{|\,)\s*([+-]?[0-9.]+)\s*\}?/i) ||
+    cleanCode.match(/(?:3d\s+view|view)\s*=\s*\{?\s*([+-]?[0-9.]+)\s*\}?\s*\{?\s*([+-]?[0-9.]+)\s*\}?/i);
+  if (viewMatch) {
+    const azDeg = evaluateExpr(viewMatch[1]);
+    const elDeg = evaluateExpr(viewMatch[2]);
+    const azRad = (azDeg * Math.PI) / 180;
+    const elRad = (elDeg * Math.PI) / 180;
+    basisX = {
+      x: -Math.sin(azRad),
+      y: -Math.sin(elRad) * Math.cos(azRad),
+    };
+    basisY = {
+      x: Math.cos(azRad),
+      y: -Math.sin(elRad) * Math.sin(azRad),
+    };
+    basisZ = {
+      x: 0,
+      y: Math.cos(elRad),
+    };
+  }
+
+  // 3. Phân tích tùy chọn trục tọa độ x={...}, y={...}, z={...}
+  const customXMatch = cleanCode.match(/\bx\s*=\s*\{\s*\(([^)]+)\)\s*\}/);
+  if (customXMatch) {
+    const p = parseCoordinateValue(`(${customXMatch[1]})`, coordsMap);
+    if (p) basisX = p;
+  }
+  const customYMatch = cleanCode.match(/\by\s*=\s*\{\s*\(([^)]+)\)\s*\}/);
+  if (customYMatch) {
+    const p = parseCoordinateValue(`(${customYMatch[1]})`, coordsMap);
+    if (p) basisY = p;
+  }
+  const customZMatch = cleanCode.match(/\bz\s*=\s*\{\s*\(([^)]+)\)\s*\}/);
+  if (customZMatch) {
+    const p = parseCoordinateValue(`(${customZMatch[1]})`, coordsMap);
+    if (p) basisZ = p;
+  }
+
+  coordsMap.set("__basis_x", basisX);
+  coordsMap.set("__basis_y", basisY);
+  coordsMap.set("__basis_z", basisZ);
 
   // ==========================================
   // A. PARSER CHO BỘ THƯ VIỆN TKZ-EUCLIDE
@@ -1011,60 +1980,745 @@ export function parseTikzToSvg(rawTikzCode: string): string {
   }
 
   // ==========================================
-  // B. PARSER CHO LỆNH TIKZ TIÊU CHUẨN
+  // B1. PGFPLOTS: XỬ LÝ MÔI TRƯỜNG \begin{axis}[...] ... \end{axis}
+  // ==========================================
+  let clipWindow: { minX: number; maxX: number; minY: number; maxY: number } | null = null;
+
+  const axisEnvRegex = /\\begin\{axis\}\s*(?:\[([\s\S]*?)\])?([\s\S]*?)\\end\{axis\}/gi;
+  let axisEnvMatch: RegExpExecArray | null;
+  while ((axisEnvMatch = axisEnvRegex.exec(cleanCode)) !== null) {
+    const optStr = axisEnvMatch[1] || "";
+
+    // 1. Phân tích miền giá trị trục xmin, xmax, ymin, ymax
+    let axMin = -5.0;
+    let axMax = 5.0;
+    let ayMin = -5.0;
+    let ayMax = 5.0;
+
+    const xminM = optStr.match(/xmin\s*=\s*([+-]?[0-9.]+)/i);
+    if (xminM) axMin = parseFloat(xminM[1]);
+    const xmaxM = optStr.match(/xmax\s*=\s*([+-]?[0-9.]+)/i);
+    if (xmaxM) axMax = parseFloat(xmaxM[1]);
+    const yminM = optStr.match(/ymin\s*=\s*([+-]?[0-9.]+)/i);
+    if (yminM) ayMin = parseFloat(yminM[1]);
+    const ymaxM = optStr.match(/ymax\s*=\s*([+-]?[0-9.]+)/i);
+    if (ymaxM) ayMax = parseFloat(ymaxM[1]);
+
+    coordsMap.set("__axis_min_x", { x: axMin, y: 0 });
+    coordsMap.set("__axis_max_x", { x: axMax, y: 0 });
+    coordsMap.set("__axis_min_y", { x: 0, y: ayMin });
+    coordsMap.set("__axis_max_y", { x: 0, y: ayMax });
+
+    clipWindow = { minX: axMin, maxX: axMax, minY: ayMin, maxY: ayMax };
+
+    // 2. Lưới toạ độ (grid=both / grid=major)
+    if (/grid\s*=\s*(?:both|major)/i.test(optStr)) {
+      const stepX = 1.0;
+      const stepY = 1.0;
+      for (let x = Math.ceil(axMin); x <= axMax + 0.001; x += stepX) {
+        paths.push({
+          type: "line",
+          points: [
+            { x, y: ayMin },
+            { x, y: ayMax },
+          ],
+          strokeColor: "rgba(148, 163, 184, 0.35)",
+          strokeWidth: 0.65,
+          isDashed: optStr.includes("grid style={dashed}") || optStr.includes("dashed"),
+        });
+      }
+      for (let y = Math.ceil(ayMin); y <= ayMax + 0.001; y += stepY) {
+        paths.push({
+          type: "line",
+          points: [
+            { x: axMin, y },
+            { x: axMax, y },
+          ],
+          strokeColor: "rgba(148, 163, 184, 0.35)",
+          strokeWidth: 0.65,
+          isDashed: optStr.includes("grid style={dashed}") || optStr.includes("dashed"),
+        });
+      }
+    }
+
+    // 3. Đường trục toạ độ (axis lines=middle / center / box)
+    const hasMiddleAxes =
+      /axis\s+lines\s*=\s*(?:middle|center)/i.test(optStr) ||
+      !/axis\s+lines\s*=\s*(?:none|box)/i.test(optStr);
+    if (hasMiddleAxes) {
+      // Trục hoành Ox
+      paths.push({
+        type: "line",
+        points: [
+          { x: axMin - 0.2, y: 0 },
+          { x: axMax + 0.5, y: 0 },
+        ],
+        strokeColor: "#1e293b",
+        strokeWidth: 1.6,
+        hasArrowEnd: true,
+      });
+
+      // Trục tung Oy
+      paths.push({
+        type: "line",
+        points: [
+          { x: 0, y: ayMin - 0.2 },
+          { x: 0, y: ayMax + 0.5 },
+        ],
+        strokeColor: "#1e293b",
+        strokeWidth: 1.6,
+        hasArrowEnd: true,
+      });
+
+      // Tên trục xlabel, ylabel
+      const xlabelM = optStr.match(/xlabel\s*=\s*(?:\{([^}]+)\}|([^\s,\]]+))/i);
+      const xlabel = xlabelM ? (xlabelM[1] || xlabelM[2]).replace(/\$/g, "").trim() : "x";
+      nodes.push({
+        id: `pgf_xlabel_${nodes.length}`,
+        x: axMax + 0.45,
+        y: -0.25,
+        pos: "right",
+        label: `$${xlabel}$`,
+        isBadge: false,
+      });
+
+      const ylabelM = optStr.match(/ylabel\s*=\s*(?:\{([^}]+)\}|([^\s,\]]+))/i);
+      const ylabel = ylabelM ? (ylabelM[1] || ylabelM[2]).replace(/\$/g, "").trim() : "y";
+      nodes.push({
+        id: `pgf_ylabel_${nodes.length}`,
+        x: -0.25,
+        y: ayMax + 0.45,
+        pos: "above",
+        label: `$${ylabel}$`,
+        isBadge: false,
+      });
+
+      // Gốc toạ độ O
+      if (axMin <= 0 && axMax >= 0 && ayMin <= 0 && ayMax >= 0) {
+        nodes.push({
+          id: `pgf_origin_${nodes.length}`,
+          x: -0.28,
+          y: -0.28,
+          pos: "below left",
+          label: "$O$",
+          isBadge: false,
+        });
+      }
+
+      // Vạch chia toạ độ xtick, ytick nếu có
+      const xtickM = optStr.match(/xtick\s*=\s*\{([^}]+)\}/i);
+      if (xtickM) {
+        const xTicks = xtickM[1]
+          .split(",")
+          .map((s) => evaluateExpr(s))
+          .filter((n) => !isNaN(n) && n !== 0);
+        for (const xt of xTicks) {
+          paths.push({
+            type: "line",
+            points: [
+              { x: xt, y: 0.1 },
+              { x: xt, y: -0.1 },
+            ],
+            strokeColor: "#1e293b",
+            strokeWidth: 1.0,
+          });
+          nodes.push({
+            id: `xtick_${xt}_${nodes.length}`,
+            x: xt,
+            y: -0.25,
+            pos: "below",
+            label: `$${xt}$`,
+            isBadge: false,
+          });
+        }
+      }
+
+      const ytickM = optStr.match(/ytick\s*=\s*\{([^}]+)\}/i);
+      if (ytickM) {
+        const yTicks = ytickM[1]
+          .split(",")
+          .map((s) => evaluateExpr(s))
+          .filter((n) => !isNaN(n) && n !== 0);
+        for (const yt of yTicks) {
+          paths.push({
+            type: "line",
+            points: [
+              { x: 0.1, y: yt },
+              { x: -0.1, y: yt },
+            ],
+            strokeColor: "#1e293b",
+            strokeWidth: 1.0,
+          });
+          nodes.push({
+            id: `ytick_${yt}_${nodes.length}`,
+            x: -0.25,
+            y: yt,
+            pos: "left",
+            label: `$${yt}$`,
+            isBadge: false,
+          });
+        }
+      }
+    }
+  }
+
+  // ==========================================
+  // B2. PARSER CHO CÁC LỆNH TIKZ & PGFPLOTS
   // ==========================================
 
-  const commands = cleanCode
+  const flattenedCode = flattenTikzScopes(cleanCode);
+
+  const commands = flattenedCode
     .replace(/\\usetikzlibrary\{[^}]*\}/gi, "")
+    .replace(/\\usepgfplotslibrary\{[^}]*\}/gi, "")
     .replace(/\\usepackage(?:\s*\[[^\]]*\])?\{[^}]*\}/gi, "")
-    .replace(/\\begin\{tikzpicture\}(\[[^\]]*\])?/g, "")
-    .replace(/\\end\{tikzpicture\}/g, "")
-    .replace(/\\begin\{[a-zA-Z*]+\}/g, "")
-    .replace(/\\end\{[a-zA-Z*]+\}/g, "")
+    .replace(/\\pgfplotsset\{[^}]*\}/gi, "")
+    .replace(/\\tikzset\{[^}]*\}/gi, "")
+    .replace(/\\begin\{tikzpicture\}(?:\[[^\]]*\])?/gi, "")
+    .replace(/\\end\{tikzpicture\}/gi, "")
+    .replace(/\\begin\{axis\}(?:\[[^\]]*\])?/gi, "")
+    .replace(/\\end\{axis\}/gi, "")
+    .replace(/\\begin\{scope\}(?:\[[^\]]*\])?/gi, "")
+    .replace(/\\end\{scope\}/gi, "")
+    .replace(/\\begin\{[a-zA-Z*]+\}(?:\[[^\]]*\])?/gi, "")
+    .replace(/\\end\{[a-zA-Z*]+\}/gi, "")
     .split(";")
     .map((cmd) => cmd.trim())
     .filter((cmd) => cmd.length > 0);
 
   for (const cmd of commands) {
-    // 1. Chained coordinates in \path: (0,0) coordinate (E) (6,-.5) coordinate (A) ...
-    const chainedCoordMatches = cmd.matchAll(/\(([^)]+)\)\s*coordinate\s*\(([^)]+)\)/g);
-    for (const match of chainedCoordMatches) {
-      const coordStr = match[1].trim();
-      const name = match[2].trim();
-      const pt = parseCoordinateValue(`(${coordStr})`, coordsMap);
-      if (pt) coordsMap.set(name, pt);
+    let activeCoordsMap = coordsMap;
+    const canvasMatch = cmd.match(/canvas\s+is\s+([a-zA-Z]+)\s+plane\s+at\s+([a-zA-Z0-9_]+)\s*=\s*([^,\]]+)/i);
+    if (canvasMatch) {
+      activeCoordsMap = new Map(coordsMap);
+      activeCoordsMap.set("__canvas_plane", {
+        type: canvasMatch[1].toLowerCase(),
+        axis: canvasMatch[2].toLowerCase(),
+        val: evaluateExpr(canvasMatch[3]),
+      } as any);
+    }
+    // 0. Grid rendering: \draw[gray!20](-5,-10.5)grid(5,2.5); hoặc \draw (0,0) grid (4,4);
+    const gridRegex = /(?:\\draw|\\path)\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)\s*grid\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)/i;
+    const gridM = cmd.match(gridRegex);
+    if (gridM) {
+      const optStr = ((gridM[1] || "") + " " + (gridM[3] || "")).trim();
+      const p1 = parseCoordinateValue(`(${gridM[2]})`, coordsMap);
+      const p2 = parseCoordinateValue(`(${gridM[4]})`, coordsMap);
+      if (p1 && p2) {
+        const gxMin = Math.min(p1.x, p2.x);
+        const gxMax = Math.max(p1.x, p2.x);
+        const gyMin = Math.min(p1.y, p2.y);
+        const gyMax = Math.max(p1.y, p2.y);
+
+        let step = 1.0;
+        const stepM = optStr.match(/step\s*=\s*([0-9.]+)/i);
+        if (stepM) step = parseFloat(stepM[1]) || 1.0;
+
+        const strokeColor = parseTikzColor(optStr, "rgba(148, 163, 184, 0.35)");
+        const strokeWidth = optStr.includes("thin") ? 0.6 : optStr.includes("thick") ? 1.1 : 0.75;
+
+        // Lưu góc lưới để đảm bảo kích thước canvas chuẩn xác
+        coordsMap.set(`__grid_1_${coordsMap.size}`, { x: gxMin, y: gyMin });
+        coordsMap.set(`__grid_2_${coordsMap.size}`, { x: gxMax, y: gyMax });
+
+        // Tạo các đường lưới dọc
+        const startX = Math.ceil(gxMin / step) * step;
+        for (let x = startX; x <= gxMax + 0.001; x += step) {
+          const curX = Math.round(x * 1000) / 1000;
+          paths.push({
+            type: "line",
+            points: [
+              { x: curX, y: gyMin },
+              { x: curX, y: gyMax },
+            ],
+            strokeColor,
+            strokeWidth,
+            isDashed: optStr.includes("dashed"),
+            isDotted: optStr.includes("dotted"),
+          });
+        }
+
+        // Tạo các đường lưới ngang
+        const startY = Math.ceil(gyMin / step) * step;
+        for (let y = startY; y <= gyMax + 0.001; y += step) {
+          const curY = Math.round(y * 1000) / 1000;
+          paths.push({
+            type: "line",
+            points: [
+              { x: gxMin, y: curY },
+              { x: gxMax, y: curY },
+            ],
+            strokeColor,
+            strokeWidth,
+            isDashed: optStr.includes("dashed"),
+            isDotted: optStr.includes("dotted"),
+          });
+        }
+      }
+      continue;
     }
 
-    // 2. \coordinate (Name) at (coord)
-    const coordMatches = cmd.matchAll(/\\coordinate\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)\s*at\s*/g);
-    for (const match of coordMatches) {
-      const optStr = match[1] || "";
-      const name = match[2].trim();
-      const coordStartIndex = (match.index ?? 0) + match[0].length;
-      let coordStr = "";
-      if (cmd[coordStartIndex] === "(") {
-        const bal = extractBalancedParens(cmd, coordStartIndex);
-        if (bal) coordStr = bal.content;
-      } else {
-        const rest = cmd.substring(coordStartIndex).trim();
-        const endIdx = rest.search(/[\s;]/);
-        coordStr = endIdx !== -1 ? rest.substring(0, endIdx) : rest;
+    // 0.1. \clip và \draw rectangle: \clip (-5,-10.5) rectangle (5,2.5); hoặc \draw[fill=...] (0,0) rectangle (4,3);
+    const rectRegex = /\\(clip|draw|fill|filldraw|path)\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)\s*rectangle\s*(?:\[([^\]]*)\])?\s*\(([^)]+)\)/i;
+    const rectM = cmd.match(rectRegex);
+    if (rectM) {
+      const isClip = rectM[1].toLowerCase() === "clip";
+      const optStr = ((rectM[2] || "") + " " + (rectM[4] || "")).trim();
+      const p1 = parseCoordinateValue(`(${rectM[3]})`, coordsMap);
+      const p2 = parseCoordinateValue(`(${rectM[5]})`, coordsMap);
+      if (p1 && p2) {
+        const rxMin = Math.min(p1.x, p2.x);
+        const rxMax = Math.max(p1.x, p2.x);
+        const ryMin = Math.min(p1.y, p2.y);
+        const ryMax = Math.max(p1.y, p2.y);
+
+        if (isClip) {
+          clipWindow = { minX: rxMin, maxX: rxMax, minY: ryMin, maxY: ryMax };
+          coordsMap.set(`__clip_1_${coordsMap.size}`, { x: rxMin, y: ryMin });
+          coordsMap.set(`__clip_2_${coordsMap.size}`, { x: rxMax, y: ryMax });
+        } else {
+          const strokeColor = parseTikzColor(optStr, "#1e293b");
+          const strokeWidth = optStr.includes("thick") ? 2.0 : optStr.includes("thin") ? 1.2 : 1.5;
+          const isExplicitFill = rectM[1].toLowerCase() === "fill" || rectM[1].toLowerCase() === "filldraw";
+          paths.push({
+            type: "polygon",
+            points: [
+              { x: rxMin, y: ryMin },
+              { x: rxMax, y: ryMin },
+              { x: rxMax, y: ryMax },
+              { x: rxMin, y: ryMax },
+            ],
+            strokeColor: rectM[1].toLowerCase() === "fill" ? "none" : strokeColor,
+            strokeWidth,
+            fillColor: isExplicitFill ? "rgba(99,102,241,0.1)" : "none",
+            isCycle: true,
+          });
+        }
       }
-      const pt = parseCoordinateValue(coordStr, coordsMap);
-      if (pt) {
-        coordsMap.set(name, pt);
-        if (optStr.includes("label=")) {
-          const lblMatch = optStr.match(/label\s*=\s*(?:([^:]+):)?\{?([^}\]]+)\}?/);
-          if (lblMatch) {
-            nodes.push({
-              id: `coord_lbl_${name}`,
-              x: pt.x,
-              y: pt.y,
-              pos: (lblMatch[1] || "above").trim(),
-              label: lblMatch[2].trim(),
+      continue;
+    }
+
+    // 0.2. Lệnh \addplot / \addplot+ / \addplot3 của PGFPlots
+    if (cmd.startsWith("\\addplot") || cmd.startsWith("addplot") || /\\addplot3?\+?\b/i.test(cmd)) {
+      const addplotMatch = cmd.match(/\\?addplot3?\+?\s*(?:\[([^\]]*)\])?([\s\S]*)/i);
+      if (addplotMatch) {
+        const optStr = addplotMatch[1] || "";
+        const rest = addplotMatch[2] || "";
+
+        let samples = 150;
+        const samplesM = optStr.match(/samples\s*=\s*([0-9]+)/i);
+        if (samplesM) samples = Math.min(500, Math.max(20, parseInt(samplesM[1], 10)));
+
+        let dMin = clipWindow ? clipWindow.minX : -5.0;
+        let dMax = clipWindow ? clipWindow.maxX : 5.0;
+        const domainM = optStr.match(/domain\s*=\s*([+-]?[0-9.]+)\s*:\s*([+-]?[0-9.]+)/i);
+        if (domainM) {
+          dMin = parseFloat(domainM[1]);
+          dMax = parseFloat(domainM[2]);
+        }
+
+        let strokeColor = parseTikzColor(optStr, "#2563eb");
+        let strokeWidth = 1.8;
+        if (optStr.includes("thick")) strokeWidth = 2.2;
+        else if (optStr.includes("thin")) strokeWidth = 1.2;
+
+        const isDashed = optStr.includes("dashed");
+        const isDotted = optStr.includes("dotted");
+
+        // Case 1: \addplot[...] coordinates { (x1,y1) (x2,y2) ... }
+        const coordBlockM = rest.match(/coordinates\s*\{([^}]+)\}/i);
+        if (coordBlockM) {
+          const rawPairs = Array.from(coordBlockM[1].matchAll(/\(([^)]+)\)/g));
+          const coordPts: Point2D[] = [];
+          for (const rp of rawPairs) {
+            const pt = parseCoordinateValue(`(${rp[1]})`, coordsMap);
+            if (pt) coordPts.push(pt);
+          }
+          if (coordPts.length >= 2) {
+            paths.push({
+              type: "line",
+              points: coordPts,
+              strokeColor,
+              strokeWidth,
+              isDashed,
+              isDotted,
             });
           }
+          if (optStr.includes("mark=") || optStr.includes("mark =") || optStr.includes("only marks")) {
+            for (let i = 0; i < coordPts.length; i++) {
+              const pt = coordPts[i];
+              explicitDots.set(`addplot_pt_${explicitDots.size}`, {
+                name: `P${i}`,
+                x: pt.x,
+                y: pt.y,
+                fill: strokeColor,
+                stroke: "#ffffff",
+                radius: 3.0,
+              });
+            }
+          }
+          continue;
         }
+
+        // Case 2: \addplot[...] {expr}; hoặc \addplot[...] expression {expr}; hoặc \addplot[...] (x, {expr});
+        let expr = "";
+        const braceM = rest.match(/(?:expression\s*)?\{([^}]+)\}/i);
+        if (braceM) {
+          expr = braceM[1].trim();
+        } else {
+          const parenM = rest.match(/\((?:\\?x|\w+)\s*,\s*\{?([^};)]+)\}?\)/i);
+          if (parenM) expr = parenM[1].trim();
+        }
+
+        if (expr) {
+          const ptsSegment: Point2D[] = [];
+          const step = (dMax - dMin) / (samples - 1);
+          const yMinBound = clipWindow ? clipWindow.minY - 2.0 : -100;
+          const yMaxBound = clipWindow ? clipWindow.maxY + 2.0 : 100;
+
+          for (let i = 0; i < samples; i++) {
+            const curX = dMin + i * step;
+            const curY = evaluateMathFunction(expr, curX, "x");
+            if (isFinite(curY) && !isNaN(curY)) {
+              if (curY >= yMinBound && curY <= yMaxBound) {
+                if (ptsSegment.length > 0) {
+                  const prev = ptsSegment[ptsSegment.length - 1];
+                  if (Math.abs(curY - prev.y) > 15) {
+                    if (ptsSegment.length >= 2) {
+                      paths.push({
+                        type: "line",
+                        points: [...ptsSegment],
+                        strokeColor,
+                        strokeWidth,
+                        isDashed,
+                        isDotted,
+                      });
+                    }
+                    ptsSegment.length = 0;
+                  }
+                }
+                ptsSegment.push({ x: curX, y: curY });
+              } else {
+                if (ptsSegment.length >= 2) {
+                  paths.push({
+                    type: "line",
+                    points: [...ptsSegment],
+                    strokeColor,
+                    strokeWidth,
+                    isDashed,
+                    isDotted,
+                  });
+                }
+                ptsSegment.length = 0;
+              }
+            } else {
+              if (ptsSegment.length >= 2) {
+                paths.push({
+                  type: "line",
+                  points: [...ptsSegment],
+                  strokeColor,
+                  strokeWidth,
+                  isDashed,
+                  isDotted,
+                });
+              }
+              ptsSegment.length = 0;
+            }
+          }
+
+          if (ptsSegment.length >= 2) {
+            paths.push({
+              type: "line",
+              points: ptsSegment,
+              strokeColor,
+              strokeWidth,
+              isDashed,
+              isDotted,
+            });
+          }
+          continue;
+        }
+      }
+    }
+
+    // 0.3. Vẽ đồ thị hàm số TikZ tiêu chuẩn (Function Plot): \draw[...] plot (\x, {expr}); hoặc plot coordinates {...}
+    if (cmd.includes("plot")) {
+      const optMatch = cmd.match(/^\\(?:draw|fill|filldraw|path)\s*\[([^\]]*)\]/i);
+      const optPlotMatch = cmd.match(/plot\s*\[([^\]]*)\]/i);
+      const combinedOpts = ((optMatch ? optMatch[1] : "") + " " + (optPlotMatch ? optPlotMatch[1] : "")).trim();
+
+      let samples = 150;
+      const samplesM = combinedOpts.match(/samples\s*=\s*([0-9]+)/i);
+      if (samplesM) samples = Math.min(500, Math.max(20, parseInt(samplesM[1], 10)));
+
+      let dMin = -5.0;
+      let dMax = 5.0;
+      const domainM = combinedOpts.match(/domain\s*=\s*([+-]?[0-9.]+)\s*:\s*([+-]?[0-9.]+)/i);
+      if (domainM) {
+        dMin = parseFloat(domainM[1]);
+        dMax = parseFloat(domainM[2]);
+      } else if (clipWindow) {
+        dMin = clipWindow.minX;
+        dMax = clipWindow.maxX;
+      }
+
+      let varName = "x";
+      const varM = combinedOpts.match(/variable\s*=\s*\\?([a-zA-Z0-9_]+)/i);
+      if (varM) varName = varM[1].trim();
+
+      let strokeColor = parseTikzColor(combinedOpts, "#1e293b");
+      let strokeWidth = 1.6;
+      if (combinedOpts.includes("thick")) strokeWidth = 2.0;
+      else if (combinedOpts.includes("thin")) strokeWidth = 1.2;
+
+      const isDashed = combinedOpts.includes("dashed");
+      const isDotted = combinedOpts.includes("dotted");
+
+      // Case A: plot coordinates { (0,0) (1,2) (2,1) }
+      const coordBlockM = cmd.match(/plot\s*(?:\[[^\]]*\])?\s*coordinates\s*\{([^}]+)\}/i);
+      if (coordBlockM) {
+        const rawPairs = Array.from(coordBlockM[1].matchAll(/\(([^)]+)\)/g));
+        const coordPts: Point2D[] = [];
+        for (const rp of rawPairs) {
+          const pt = parseCoordinateValue(`(${rp[1]})`, coordsMap);
+          if (pt) coordPts.push(pt);
+        }
+        if (coordPts.length >= 2) {
+          paths.push({
+            type: "line",
+            points: coordPts,
+            strokeColor,
+            strokeWidth,
+            isDashed,
+            isDotted,
+          });
+        }
+        continue;
+      }
+
+      // Case B: plot (\x, {expr}) hoặc plot (\x, expr)
+      const plotIdx = cmd.indexOf("plot");
+      const afterPlot = cmd.substring(plotIdx + 4).trim();
+      const parenIdx = afterPlot.indexOf("(");
+      if (parenIdx !== -1) {
+        const balParen = extractBalancedParens(afterPlot, parenIdx);
+        if (balParen) {
+          const inside = balParen.content.trim();
+          const commaIdx = inside.indexOf(",");
+          if (commaIdx !== -1) {
+            const xArg = inside.substring(0, commaIdx).trim();
+            const yExpr = inside.substring(commaIdx + 1).trim();
+
+            const cleanXArg = xArg.replace(/^\\/, "").trim();
+            if (cleanXArg) varName = cleanXArg;
+
+            const ptsSegment: Point2D[] = [];
+            const step = (dMax - dMin) / (samples - 1);
+
+            const yMinBound = clipWindow ? clipWindow.minY - 1.5 : -100;
+            const yMaxBound = clipWindow ? clipWindow.maxY + 1.5 : 100;
+
+            for (let i = 0; i < samples; i++) {
+              const curX = dMin + i * step;
+              const curY = evaluateMathFunction(yExpr, curX, varName);
+
+              if (isFinite(curY) && !isNaN(curY)) {
+                if (curY >= yMinBound && curY <= yMaxBound) {
+                  if (ptsSegment.length > 0) {
+                    const prev = ptsSegment[ptsSegment.length - 1];
+                    if (Math.abs(curY - prev.y) > 15) {
+                      if (ptsSegment.length >= 2) {
+                        paths.push({
+                          type: "line",
+                          points: [...ptsSegment],
+                          strokeColor,
+                          strokeWidth,
+                          isDashed,
+                          isDotted,
+                        });
+                      }
+                      ptsSegment.length = 0;
+                    }
+                  }
+                  ptsSegment.push({ x: curX, y: curY });
+                } else {
+                  if (ptsSegment.length >= 2) {
+                    paths.push({
+                      type: "line",
+                      points: [...ptsSegment],
+                      strokeColor,
+                      strokeWidth,
+                      isDashed,
+                      isDotted,
+                    });
+                  }
+                  ptsSegment.length = 0;
+                }
+              } else {
+                if (ptsSegment.length >= 2) {
+                  paths.push({
+                    type: "line",
+                    points: [...ptsSegment],
+                    strokeColor,
+                    strokeWidth,
+                    isDashed,
+                    isDotted,
+                  });
+                }
+                ptsSegment.length = 0;
+              }
+            }
+
+            if (ptsSegment.length >= 2) {
+              paths.push({
+                type: "line",
+                points: ptsSegment,
+                strokeColor,
+                strokeWidth,
+                isDashed,
+                isDotted,
+              });
+            }
+          }
+        }
+      }
+      continue;
+    }
+
+    // 1. Phân tích toàn diện tất cả các định nghĩa coordinate / \coordinate trong lệnh
+    // Hỗ trợ cả:
+    // - \coordinate (Name) at (Coord)
+    // - (Coord) coordinate (Name)
+    // - \path (Coord1) coordinate (B) ++(Coord2) coordinate (C) ++(Coord3) coordinate (D) ($(B)+(D)-(C)$) coordinate (A)
+    // - Chained relative movements ++(...) và +(...)
+    if (cmd.includes("coordinate")) {
+      let curPt: Point2D | null = null;
+      let scanIdx = 0;
+
+      while (scanIdx < cmd.length) {
+        while (scanIdx < cmd.length && /\s/.test(cmd[scanIdx])) scanIdx++;
+        if (scanIdx >= cmd.length) break;
+
+        const rest = cmd.substring(scanIdx);
+
+        // A. Từ khóa coordinate [opts] (Name)
+        const coordWordM = rest.match(/^coordinate\b/i);
+        if (coordWordM) {
+          scanIdx += coordWordM[0].length;
+          while (scanIdx < cmd.length && /\s/.test(cmd[scanIdx])) scanIdx++;
+
+          let optStr = "";
+          if (cmd[scanIdx] === "[") {
+            const closeB = cmd.indexOf("]", scanIdx);
+            if (closeB !== -1) {
+              optStr = cmd.substring(scanIdx + 1, closeB).trim();
+              scanIdx = closeB + 1;
+            }
+          }
+          while (scanIdx < cmd.length && /\s/.test(cmd[scanIdx])) scanIdx++;
+
+          if (cmd[scanIdx] === "(") {
+            const bal = extractBalancedParens(cmd, scanIdx);
+            if (bal) {
+              const pointName = bal.content.trim();
+              scanIdx = bal.endIndex + 1;
+
+              // Kiểm tra xem phía sau có "at (Coord)" không
+              const afterNameSub = cmd.substring(scanIdx);
+              const atM = afterNameSub.match(/^\s*at\s*/i);
+              if (atM) {
+                const atCoordStart = scanIdx + atM[0].length;
+                if (cmd[atCoordStart] === "(") {
+                  const atBal = extractBalancedParens(cmd, atCoordStart);
+                  if (atBal) {
+                    const explicitAt = parseCoordinateValue(atBal.content, activeCoordsMap);
+                    if (explicitAt) {
+                      curPt = explicitAt;
+                      scanIdx = atBal.endIndex + 1;
+                    }
+                  }
+                } else {
+                  const restSub = cmd.substring(atCoordStart).trim();
+                  const endIdx = restSub.search(/[\s;]/);
+                  const rawName = endIdx !== -1 ? restSub.substring(0, endIdx) : restSub;
+                  const explicitAt = parseCoordinateValue(rawName, activeCoordsMap);
+                  if (explicitAt) {
+                    curPt = explicitAt;
+                  }
+                }
+              }
+
+              if (curPt) {
+                coordsMap.set(pointName, { ...curPt });
+                activeCoordsMap.set(pointName, { ...curPt });
+                if (optStr.includes("label=")) {
+                  const lblMatch = optStr.match(/label\s*=\s*(?:([^:]+):)?\{?([^}\]]+)\}?/);
+                  if (lblMatch) {
+                    nodes.push({
+                      id: `coord_lbl_${pointName}`,
+                      x: curPt.x,
+                      y: curPt.y,
+                      pos: (lblMatch[1] || "above").trim(),
+                      label: lblMatch[2].trim(),
+                    });
+                  }
+                }
+              }
+            }
+          }
+          continue;
+        }
+
+        // B. Tọa độ tương đối ++(...)
+        const accumM = rest.match(/^\+\+\s*\(/);
+        if (accumM) {
+          const parenIdx = scanIdx + accumM[0].length - 1;
+          const bal = extractBalancedParens(cmd, parenIdx);
+          if (bal) {
+            scanIdx = bal.endIndex + 1;
+            const delta = parseCoordinateValue(bal.content, activeCoordsMap);
+            if (delta) {
+              curPt = curPt ? { x: curPt.x + delta.x, y: curPt.y + delta.y } : delta;
+            }
+          } else {
+            scanIdx++;
+          }
+          continue;
+        }
+
+        // C. Tọa độ tương đối +(...)
+        const relM = rest.match(/^\+\s*\(/);
+        if (relM) {
+          const parenIdx = scanIdx + relM[0].length - 1;
+          const bal = extractBalancedParens(cmd, parenIdx);
+          if (bal) {
+            scanIdx = bal.endIndex + 1;
+            const delta = parseCoordinateValue(bal.content, activeCoordsMap);
+            if (delta) {
+              curPt = curPt ? { x: curPt.x + delta.x, y: curPt.y + delta.y } : delta;
+            }
+          } else {
+            scanIdx++;
+          }
+          continue;
+        }
+
+        // D. Tọa độ tuyệt đối (...)
+        if (cmd[scanIdx] === "(") {
+          const bal = extractBalancedParens(cmd, scanIdx);
+          if (bal) {
+            scanIdx = bal.endIndex + 1;
+            const pt = parseCoordinateValue(bal.content, activeCoordsMap);
+            if (pt) {
+              curPt = pt;
+            }
+          } else {
+            scanIdx++;
+          }
+          continue;
+        }
+
+        scanIdx++;
       }
     }
 
@@ -1234,14 +2888,14 @@ export function parseTikzToSvg(rawTikzCode: string): string {
             if (atRest.startsWith("(")) {
               const bal = extractBalancedParens(cmd, cursor);
               if (bal) {
-                explicitPt = parseCoordinateValue(bal.content, coordsMap);
+                explicitPt = parseCoordinateValue(bal.content, activeCoordsMap);
                 cursor = bal.endIndex + 1;
                 continue;
               }
             } else {
               const ptNameM = atRest.match(/^([a-zA-Z0-9_']+)/);
               if (ptNameM) {
-                explicitPt = parseCoordinateValue(ptNameM[1], coordsMap);
+                explicitPt = parseCoordinateValue(ptNameM[1], activeCoordsMap);
                 cursor += ptNameM[0].length;
                 continue;
               }
@@ -1312,7 +2966,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         const ptName = cm[2].trim();
         const radStr = cm[3] || cm[4] || "1.5pt";
         const rad = evaluateExpr(radStr);
-        const pt = parseCoordinateValue(ptName, coordsMap);
+        const pt = parseCoordinateValue(ptName, activeCoordsMap);
         if (pt) {
           if (rad <= 0.2 || (radStr.includes("pt") && rad <= 5)) {
             let fill = "#1e293b";
@@ -1384,14 +3038,14 @@ export function parseTikzToSvg(rawTikzCode: string): string {
             if (atRest.startsWith("(")) {
               const bal = extractBalancedParens(cmd, cursor);
               if (bal) {
-                explicitAtPt = parseCoordinateValue(bal.content, coordsMap);
+                explicitAtPt = parseCoordinateValue(bal.content, activeCoordsMap);
                 cursor = bal.endIndex + 1;
                 continue;
               }
             } else {
               const ptNameMatch = atRest.match(/^([a-zA-Z0-9_']+)/);
               if (ptNameMatch) {
-                explicitAtPt = parseCoordinateValue(ptNameMatch[1], coordsMap);
+                explicitAtPt = parseCoordinateValue(ptNameMatch[1], activeCoordsMap);
                 cursor += ptNameMatch[0].length;
                 continue;
               }
@@ -1419,10 +3073,10 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         scanIdx = afterBraceIdx;
 
         // Trích xuất các tọa độ trước và sau node (nếu không có explicit at)
-        const prevTokens = extractCoordinateTokens(beforeNode, coordsMap).filter(
+        const prevTokens = extractCoordinateTokens(beforeNode, activeCoordsMap).filter(
           (t) => !t.isCircleRadius && t.pt !== null
         );
-        const nextTokens = extractCoordinateTokens(cmd.substring(afterBraceIdx), coordsMap).filter(
+        const nextTokens = extractCoordinateTokens(cmd.substring(afterBraceIdx), activeCoordsMap).filter(
           (t) => !t.isCircleRadius && t.pt !== null
         );
 
@@ -1511,35 +3165,39 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
       const drawBody = cmd.replace(/^\\(?:draw|fill|filldraw|path)\s*(\[[^\]]*\])?/, "").trim();
 
-      // Bỏ các node[midway...]{...} và pic[...] an toàn bằng hàm stripNodesAndPics
-      const cleanDrawBody = stripNodesAndPics(drawBody).trim();
-
-      const isCycle = cleanDrawBody.includes("cycle");
-
-      // Tách các phân đoạn đường nét nối bằng -- (hỗ trợ cả tên có dấu nháy đơn như A', B', D')
-      // Ví dụ: (B)--(A)--(D) (A')--(A) hoặc (A')--(B')--(C')--(D')--(A') (B')--(B) (C')--(C) (D')--(D)
-      const subPaths = cleanDrawBody.split(/\s+(?=\([a-zA-Z0-9_.,'+-\s]+\)\s*--)/).filter((s) => s.trim().length > 0);
-
-      for (const sp of subPaths) {
-        const pointTokenMatches = Array.from(sp.matchAll(/\(([^)]+)\)/g));
-        const pts: Point2D[] = [];
-        for (const pm of pointTokenMatches) {
-          const pt = parseCoordinateValue(`(${pm[1]})`, coordsMap);
-          if (pt) pts.push(pt);
+      const hasFill = isExplicitFill || optStr.includes("fill") || optStr.includes("pattern");
+      let fillColor = "none";
+      if (hasFill) {
+        fillColor = "rgba(99,102,241,0.08)";
+        const fillMatch = optStr.match(/fill\s*=\s*([a-zA-Z0-9_!]+)/);
+        if (fillMatch) {
+          const fColor = fillMatch[1].toLowerCase();
+          if (fColor.includes("red")) fillColor = "rgba(239, 68, 68, 0.15)";
+          else if (fColor.includes("blue")) fillColor = "rgba(59, 130, 246, 0.15)";
+          else if (fColor.includes("green")) fillColor = "rgba(16, 185, 129, 0.15)";
+          else if (fColor.includes("yellow") || fColor.includes("amber")) fillColor = "rgba(245, 158, 11, 0.15)";
+          else if (fColor.includes("white")) fillColor = "#ffffff";
+          else if (fColor.includes("gray") || fColor.includes("grey")) fillColor = "rgba(100, 116, 139, 0.15)";
+          else if (fColor.includes("black")) fillColor = "rgba(30, 41, 59, 0.9)";
         }
+      }
 
-        if (pts.length >= 2) {
+      // Sử dụng parseDrawSubpaths để phân tích toàn diện tất cả các subpaths, cung elip/tròn arc, chu trình cycle và đường thẳng
+      const parsedSubpaths = parseDrawSubpaths(drawBody, activeCoordsMap);
+
+      for (const sp of parsedSubpaths) {
+        if (sp.points.length >= 2) {
           paths.push({
-            type: isCycle ? "polygon" : "line",
-            points: pts,
+            type: sp.isCycle ? "polygon" : "line",
+            points: sp.points,
             isDashed,
             isDotted,
             hasArrowEnd,
             hasArrowStart,
             strokeColor,
             strokeWidth,
-            fillColor: isExplicitFill || isCycle ? "rgba(99,102,241,0.08)" : "none",
-            isCycle,
+            fillColor: isExplicitFill || (hasFill && sp.isCycle) ? fillColor : "none",
+            isCycle: sp.isCycle,
           });
         }
       }
@@ -1898,7 +3556,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     }
   }
 
-  // D. Render các nhãn KaTeX lên SVG
+  // D. Render các nhãn KaTeX lên SVG (Không dùng nền đè để nhãn điểm trong suốt, không che khuất các đường vẽ và trục tọa độ)
   layoutNodes.forEach((ln, nIdx) => {
     const renderedHtml = renderLatexLabel(ln.label);
 
@@ -1912,8 +3570,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           height="32"
           style="overflow: visible; pointer-events: none;"
         >
-          <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-800 font-bold text-[13px] whitespace-nowrap leading-none">
-            <span class="px-2 py-0.5 bg-white/95 rounded border border-slate-200 shadow-2xs">${renderedHtml}</span>
+          <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-800 font-semibold text-[13px] whitespace-nowrap leading-none select-none bg-transparent">
+            <span class="px-0.5 py-0.5 inline-block leading-none">${renderedHtml}</span>
           </div>
         </foreignObject>`;
     } else {
@@ -1926,8 +3584,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           height="36"
           style="overflow: visible; pointer-events: none;"
         >
-          <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-900 font-bold text-[14px] whitespace-nowrap leading-none">
-            <span class="px-1 py-0.5 bg-white/85 backdrop-blur-[0.5px] rounded drop-shadow-xs" style="text-shadow: 0 0 3px #ffffff, 0 0 5px #ffffff;">${renderedHtml}</span>
+          <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-900 font-semibold text-[13.5px] whitespace-nowrap leading-none select-none bg-transparent">
+            <span class="px-0.5 py-0.5 inline-block leading-none">${renderedHtml}</span>
           </div>
         </foreignObject>`;
     }
@@ -2004,12 +3662,12 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 }
 
 /**
- * Hàm utility chính thức: Tự động kiểm tra, chuẩn hóa và nạp các gói TikZ cần thiết (patterns, angles, quotes, calc...)
+ * Hàm utility chính thức: Tự động kiểm tra, chuẩn hóa và nạp các gói TikZ cần thiết (pgfplots, 3d, tikz-3dplot, patterns, angles, quotes, calc...)
  * trước khi render đồ họa vector SVG, đảm bảo hình vẽ phức tạp luôn ổn định và không bị gãy vỡ.
  */
 export function renderTikzWithPackages(
   rawTikzCode: string,
-  extraPackages: string[] = ["patterns", "angles", "quotes", "calc", "arrows.meta", "positioning"]
+  extraPackages: readonly string[] = DEFAULT_TIKZ_PACKAGES
 ): string {
   if (!rawTikzCode) return "";
 

@@ -11,9 +11,11 @@ import {
 } from "../types/auth";
 import { Exam, StudentSubmission, STANDARD_CLASSES } from "../types/exam";
 import { ExamEditorModal } from "./ExamEditorModal";
+import { AdminRealtimeSyncMonitor } from "./AdminRealtimeSyncMonitor";
 import { useToast } from "../context/ToastContext";
 import { useFilter } from "../context/FilterContext";
 import { wipeAndResetAllData, clearAllSubmissions, clearAllExams } from "../services/firestoreService";
+import { logAuditEvent, analyzeSystemAnomalies } from "../services/auditLogService";
 import {
   ShieldCheck,
   Users,
@@ -127,7 +129,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<"users" | "exams" | "settings">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "exams" | "sync" | "settings">("users");
 
   // State chỉnh sửa đề thi
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
@@ -271,6 +273,11 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
       avgScore,
     };
   }, [users, exams, submissions]);
+
+  // Phân tích các bất thường hệ thống theo thời gian thực
+  const systemAnomalies = useMemo(() => {
+    return analyzeSystemAnomalies(submissions, exams, users);
+  }, [submissions, exams, users]);
 
   // Lọc danh sách người dùng
   const filteredUsers = useMemo(() => {
@@ -812,6 +819,14 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
         phone: formPhone.trim(),
         avatar: formAvatar || undefined,
       });
+      logAuditEvent({
+        category: "user",
+        action: "Cập nhật hồ sơ người dùng",
+        actor: currentUser.name,
+        target: `${formName.trim()} (${formEmail.trim()})`,
+        severity: "info",
+        details: `Cập nhật thông tin vai trò: ${ROLE_LABELS[formRole].title}`,
+      });
     } else {
       addUser({
         name: formName.trim(),
@@ -823,6 +838,14 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
         phone: formPhone.trim(),
         status: "active",
         avatar: formAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(formName.trim())}`,
+      });
+      logAuditEvent({
+        category: "user",
+        action: "Tạo tài khoản người dùng mới",
+        actor: currentUser.name,
+        target: `${formName.trim()} (${formEmail.trim()})`,
+        severity: "info",
+        details: `Cấp tài khoản vai trò: ${ROLE_LABELS[formRole].title}`,
       });
     }
     setShowUserModal(false);
@@ -846,6 +869,14 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   const handleSavePermissions = () => {
     if (!permissionTargetUser) return;
     updateUserPermissions(permissionTargetUser.id, selectedPermissions);
+    logAuditEvent({
+      category: "security",
+      action: "Cập nhật phân quyền tài khoản",
+      actor: currentUser.name,
+      target: `${permissionTargetUser.name} (${permissionTargetUser.email})`,
+      severity: "warning",
+      details: `Đã cấp ${selectedPermissions.length} quyền hạn`,
+    });
     setPermissionTargetUser(null);
   };
 
@@ -943,6 +974,26 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
           <div className="flex flex-wrap gap-2.5">
             <button
               type="button"
+              onClick={() => setActiveTab("sync")}
+              className={`px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold border transition flex items-center gap-2 ${
+                activeTab === "sync"
+                  ? "bg-emerald-600 text-white border-emerald-500 shadow-md"
+                  : "bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700"
+              }`}
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span>Giám sát Đồng bộ</span>
+              {systemAnomalies.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black">
+                  {systemAnomalies.length}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
               onClick={handleOpenAddUser}
               className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs sm:text-sm font-bold shadow-md transition flex items-center gap-2"
             >
@@ -1018,7 +1069,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
       </div>
 
       {/* Admin Tabs */}
-      <div className="flex border-b border-slate-200 bg-white p-2 rounded-2xl shadow-xs gap-2">
+      <div className="flex flex-wrap border-b border-slate-200 bg-white p-2 rounded-2xl shadow-xs gap-2">
         <button
           type="button"
           onClick={() => setActiveTab("users")}
@@ -1029,7 +1080,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
           }`}
         >
           <Users className="w-4 h-4" />
-          <span>Bảng Người dùng & Cấp quyền Trực tiếp ({users.length})</span>
+          <span>Bảng Người dùng & Cấp quyền ({users.length})</span>
         </button>
         <button
           type="button"
@@ -1042,6 +1093,25 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
         >
           <BookOpen className="w-4 h-4" />
           <span>Quản trị Ngân hàng đề thi ({exams.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("sync")}
+          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition ${
+            activeTab === "sync"
+              ? "bg-indigo-600 text-white shadow-sm"
+              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+          }`}
+        >
+          <Activity className="w-4 h-4 text-emerald-400" />
+          <span>Giám sát Đồng bộ & Nhật ký</span>
+          {systemAnomalies.length > 0 ? (
+            <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white font-black text-[10px]">
+              {systemAnomalies.length}
+            </span>
+          ) : (
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          )}
         </button>
         <button
           type="button"
@@ -1871,6 +1941,16 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {/* TAB 4: GIÁM SÁT ĐỒNG BỘ THỜI GIAN THỰC & NHẬT KÝ THAY ĐỔI */}
+      {activeTab === "sync" && (
+        <AdminRealtimeSyncMonitor
+          exams={exams}
+          submissions={submissions}
+          users={users}
+          onSelectExam={onSelectExam}
+        />
       )}
 
       {/* MODAL 1: PHÂN QUYỀN CHI TIẾT CHO NGƯỜI DÙNG (GRANULAR PERMISSION MODAL) */}

@@ -272,6 +272,13 @@ export function cleanQuestionContent(content: string): string {
   // 4. Xóa các dòng chú thích % ID
   text = text.replace(/^\s*%\s*(?:ID|id):.*$/gm, "");
 
+  // 5. Xóa các khai báo preamble rò rỉ nếu có ở đầu hoặc cuối câu hỏi
+  text = text.replace(/\\pgfplotsset\{[\s\S]*?\}/gi, "");
+  text = text.replace(/\\usepgfplotslibrary\{[^}]+\}/gi, "");
+  text = text.replace(/\\usetikzlibrary\{[^}]+\}/gi, "");
+  text = text.replace(/\\usepackage(?:\s*\[[^\]]*\])?\{[^}]+\}/gi, "");
+  text = text.replace(/\\tikzset\{[\s\S]*?\}/gi, "");
+
   return text.trim();
 }
 
@@ -367,7 +374,16 @@ export function extractExplanationAndContent(rawBlock: string): { content: strin
     }
   }
 
-  return { content: text.trim(), explanation: explanation.trim() };
+  const cleanPreamble = (s: string) =>
+    s
+      .replace(/\\pgfplotsset\{[\s\S]*?\}/gi, "")
+      .replace(/\\usepgfplotslibrary\{[^}]+\}/gi, "")
+      .replace(/\\usetikzlibrary\{[^}]+\}/gi, "")
+      .replace(/\\usepackage(?:\s*\[[^\]]*\])?\{[^}]+\}/gi, "")
+      .replace(/\\tikzset\{[\s\S]*?\}/gi, "")
+      .trim();
+
+  return { content: cleanPreamble(text), explanation: cleanPreamble(explanation) };
 }
 
 /**
@@ -667,6 +683,9 @@ export function exportExamToLatex(exam: Exam): string {
 \\usepackage[top=1.5cm, bottom=1.5cm, left=2.0cm, right=1.5cm]{geometry}
 \\usepackage{amsmath,amssymb}
 \\usepackage{tikz}
+\\usepackage{pgfplots}
+\\pgfplotsset{compat=1.18}
+\\usetikzlibrary{calc,patterns,patterns.meta,angles,quotes,arrows.meta,positioning,intersections}
 \\usepackage[loigiai]{ex_test}
 \\everymath{\\displaystyle}
 

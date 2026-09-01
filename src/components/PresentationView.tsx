@@ -4,6 +4,7 @@ import { MathRenderer } from "./MathRenderer";
 import { DrawingCanvas } from "./DrawingCanvas";
 import { InteractiveFigureViewer } from "./InteractiveFigureViewer";
 import { cleanQuestionContent } from "../utils/latexParser";
+import { preprocessTikzInLatex } from "../utils/tikzProcessor";
 import { playSound } from "../utils/audio";
 import { normalizeShortAnswer } from "../utils/scoring";
 import {
@@ -393,7 +394,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
             >
               {currentQ.title}:
             </span>
-            <MathRenderer content={cleanQuestionContent(currentQ.content)} inline />
+            <MathRenderer content={preprocessTikzInLatex(cleanQuestionContent(currentQ.content))} inline />
           </div>
 
           {/* Ảnh minh họa nếu có */}
@@ -454,7 +455,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
                       {opt.label}
                     </div>
                     <div className="flex-1 text-slate-800">
-                      <MathRenderer content={opt.text} inline />
+                      <MathRenderer content={preprocessTikzInLatex(opt.text)} inline />
                     </div>
                   </button>
                 );
@@ -477,7 +478,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
                   >
                     <div className="flex-1 font-semibold text-slate-800">
                       <span className="font-extrabold text-blue-700 mr-2">{item.label})</span>
-                      <MathRenderer content={item.text} inline />
+                      <MathRenderer content={preprocessTikzInLatex(item.text)} inline />
                     </div>
 
                     <div className="flex items-center gap-2 min-w-[160px] self-end sm:self-center">
@@ -624,7 +625,7 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
                 <span>LỜI GIẢI CHI TIẾT & BAREM ĐIỂM:</span>
               </div>
               <div className="text-slate-800 leading-relaxed text-sm sm:text-base font-medium">
-                <MathRenderer content={currentQ.explanation} />
+                <MathRenderer content={preprocessTikzInLatex(currentQ.explanation)} />
               </div>
             </div>
           )}
