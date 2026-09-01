@@ -1,7 +1,11 @@
 import React, { useMemo } from "react";
 import katex from "katex";
-import { renderTikzWithPackages } from "../utils/tikzParser";
-import { preprocessTikzCode, preprocessTikzInLatex } from "../utils/tikzProcessor";
+import { renderTikzWithPackages, DEFAULT_TIKZ_PACKAGES } from "../utils/tikzParser";
+import {
+  preprocessTikzCode,
+  preprocessTikzInLatex,
+  STANDARD_TIKZ_3D_LIBRARIES,
+} from "../utils/tikzProcessor";
 import { parseTkzTab, parseLatexTabular } from "../utils/tableParser";
 import { InteractiveFigureViewer } from "./InteractiveFigureViewer";
 
@@ -10,6 +14,89 @@ interface MathRendererProps {
   className?: string;
   inline?: boolean;
 }
+
+/**
+ * Danh mục macro KaTeX toàn cục hỗ trợ chương trình Toán học phổ thông & nâng cao
+ */
+const KATEX_GLOBAL_MACROS: Record<string, string> = {
+  // Vi phân và tích phân
+  "\\dd": "\\mathrm{d}",
+  "\\d": "\\mathrm{d}",
+  "\\dx": "\\mathrm{d}x",
+  "\\dy": "\\mathrm{d}y",
+  "\\dz": "\\mathrm{d}z",
+  "\\dt": "\\mathrm{d}t",
+  "\\du": "\\mathrm{d}u",
+  "\\dv": "\\mathrm{d}v",
+  "\\dr": "\\mathrm{d}r",
+  "\\e": "\\mathrm{e}",
+  "\\i": "\\mathrm{i}",
+
+  // Vector và góc
+  "\\vect": "\\overrightarrow{#1}",
+  "\\vec": "\\overrightarrow{#1}",
+  "\\vv": "\\overrightarrow{#1}",
+  "\\va": "\\overrightarrow{#1}",
+  "\\underrightarrow": "\\overrightarrow{#1}",
+  "\\wideparen": "\\overset{\\frown}{#1}",
+  "\\arc": "\\overset{\\frown}{#1}",
+  "\\degree": "^{\\circ}",
+  "\\deg": "^{\\circ}",
+  "\\ang": "\\angle #1",
+
+  // Quan hệ và so sánh
+  "\\parallel": "\\mathrel{/\\mkern-5mu/}",
+  "\\notparallel": "\\nparallel",
+  "\\le": "\\leqslant",
+  "\\ge": "\\geqslant",
+  "\\leq": "\\leqslant",
+  "\\geq": "\\geqslant",
+
+  // Tập hợp số và tổ hợp
+  "\\R": "\\mathbb{R}",
+  "\\N": "\\mathbb{N}",
+  "\\Z": "\\mathbb{Z}",
+  "\\Q": "\\mathbb{Q}",
+  "\\CC": "\\mathbb{C}",
+  "\\C": "\\mathrm{C}",
+  "\\A": "\\mathrm{A}",
+  "\\P": "\\mathrm{P}",
+
+  // Giới hạn và phân số
+  "\\limx": "\\lim_{x \\to #1}",
+  "\\limt": "\\lim_{t \\to #1}",
+  "\\limn": "\\lim_{n \\to +\\infty}",
+  "\\dfrac": "\\frac{#1}{#2}",
+  "\\tbinom": "\\binom{#1}{#2}",
+  "\\dbinom": "\\binom{#1}{#2}",
+
+  // Trị tuyệt đối và chuẩn
+  "\\abs": "\\left|#1\\right|",
+  "\\norm": "\\left\\|#1\\right\\|",
+
+  // Hàm lượng giác theo SGK GDPT
+  "\\cot": "\\operatorname{cot}",
+  "\\arccot": "\\operatorname{arccot}",
+  "\\tg": "\\tan",
+  "\\cotg": "\\operatorname{cot}",
+  "\\arcsin": "\\operatorname{arcsin}",
+  "\\arccos": "\\operatorname{arccos}",
+  "\\arctan": "\\operatorname{arctan}",
+  "\\sgn": "\\operatorname{sgn}",
+  "\\gcd": "\\operatorname{gcd}",
+  "\\lcm": "\\operatorname{lcm}",
+  "\\mod": "\\pmod{#1}",
+
+  // Ký hiệu bổ trợ và không gian
+  "\\bm": "\\boldsymbol{#1}",
+  "\\bold": "\\mathbf{#1}",
+  "\\unit": "\\mathrm{#1}",
+  "\\micro": "\\mu",
+  "\\Oxyz": "Oxyz",
+  "\\Oxy": "Oxy",
+  "\\true": "\\text{Đúng}",
+  "\\false": "\\text{Sai}",
+};
 
 /**
  * Hàm giải mã các HTML entities lọt vào công thức LaTeX
@@ -32,11 +119,32 @@ function cleanMath(raw: string): string {
   if (!raw) return "";
   let m = decodeHtmlEntitiesInMath(raw.trim());
 
+  // Xử lý macro \hoac{...} và \heva{...}
+  m = m.replace(/\\hoac\s*\{([\s\S]*?)\}/g, (_, inner) => {
+    const lines = inner.split(/\\\\|\\cr/g).map((l: string) => l.trim()).filter(Boolean);
+    return `\\left[\\begin{array}{l}${lines.join(" \\\\ ")}\\end{array}\\right.`;
+  });
+
+  m = m.replace(/\\heva\s*\{([\s\S]*?)\}/g, (_, inner) => {
+    const lines = inner.split(/\\\\|\\cr/g).map((l: string) => l.trim()).filter(Boolean);
+    return `\\begin{cases}${lines.join(" \\\\ ")}\\end{cases}`;
+  });
+
+  m = m.replace(/\\system\s*\{([\s\S]*?)\}/g, (_, inner) => {
+    const lines = inner.split(/\\\\|\\cr/g).map((l: string) => l.trim()).filter(Boolean);
+    return `\\begin{cases}${lines.join(" \\\\ ")}\\end{cases}`;
+  });
+
   // Chuẩn hóa vector macro
   m = m.replace(/\\underrightarrow\{([^}]+)\}/g, "\\overrightarrow{$1}");
   m = m.replace(/\\vect\{([^}]+)\}/g, "\\overrightarrow{$1}");
   m = m.replace(/\\vec\{([^}]+)\}/g, "\\overrightarrow{$1}");
   m = m.replace(/\\vec\s+([a-zA-Z0-9])/g, "\\overrightarrow{$1}");
+  m = m.replace(/\\vv\{([^}]+)\}/g, "\\overrightarrow{$1}");
+
+  // Chuẩn hóa ký hiệu góc và cung
+  m = m.replace(/\\wideparen\{([^}]+)\}/g, "\\overset{\\frown}{$1}");
+  m = m.replace(/\\arc\{([^}]+)\}/g, "\\overset{\\frown}{$1}");
 
   // Chuẩn hóa các ký hiệu mũi tên thường gặp trong bảng biến thiên
   m = m.replace(/\\nearrow/g, "\\nearrow");
@@ -47,10 +155,13 @@ function cleanMath(raw: string): string {
   // Chuẩn hóa vạch kép trong array bảng biến thiên nếu cần
   m = m.replace(/\\parallel/g, "\\parallel");
 
-  // Dọn dẹp các dấu xuống dòng kép thừa trước \end{array}
+  // Dọn dẹp các dấu xuống dòng kép thừa trước \end{array}, \end{matrix}, \end{aligned}, \end{cases}
   m = m.replace(/\\\\\s*\\end\{array\}/g, "\\end{array}");
   m = m.replace(/\\\\\s*\\end\{matrix\}/g, "\\end{matrix}");
+  m = m.replace(/\\\\\s*\\end\{pmatrix\}/g, "\\end{pmatrix}");
+  m = m.replace(/\\\\\s*\\end\{bmatrix\}/g, "\\end{bmatrix}");
   m = m.replace(/\\\\\s*\\end\{aligned\}/g, "\\end{aligned}");
+  m = m.replace(/\\\\\s*\\end\{cases\}/g, "\\end{cases}");
 
   return m;
 }
@@ -58,6 +169,7 @@ function cleanMath(raw: string): string {
 /**
  * Component render nội dung chứa công thức Toán học LaTeX, Bảng biểu (Tabular, tkz-tab, Bảng xét dấu/biến thiên/thống kê),
  * TikZ Vector Graphics và các macro chuyên sâu trong SGK GDPT 2018.
+ * Tích hợp cấu hình toàn cục các gói TikZ (pgfplots, tkz-euclide, 3d, perspective, angles, calc...)
  * Hỗ trợ inline: $...$ hoặc \(...\)
  * Hỗ trợ block/display: $$...$$ hoặc \[...\]
  * Hỗ trợ môi trường array, tabular, tkz-tab, tikzpicture
@@ -160,12 +272,33 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
     text = text.replace(/\\thispagestyle\{[^}]+\}/gi, "");
     text = text.replace(/\\begin\{document\}|\\end\{document\}/gi, "");
 
+    // Hợp nhất toàn bộ gói thư viện TikZ/pgfplots/tkz-euclide/3d vào danh mục nạp
+    const allGlobalPackages = Array.from(
+      new Set([
+        ...DEFAULT_TIKZ_PACKAGES,
+        ...STANDARD_TIKZ_3D_LIBRARIES,
+        "tkz-euclide",
+        "pgfplots",
+        "3d",
+        "perspective",
+        "tikz-3dplot",
+        "calc",
+        "angles",
+        "quotes",
+        "arrows.meta",
+        "patterns",
+        "positioning",
+        "shapes.geometric",
+        ...detectedLibs,
+      ])
+    );
+
     text = text.replace(
       /\\begin\{center\}\s*(\\begin\{tikzpicture\*?\}[\s\S]*?\\end\{tikzpicture\*?\})\s*\\end\{center\}/gi,
       (_, tikz) => {
         const idx = tikzList.length;
-        const preprocessed = preprocessTikzCode(tikz, { extraLibraries: detectedLibs });
-        const svg = renderTikzWithPackages(preprocessed, detectedLibs);
+        const preprocessed = preprocessTikzCode(tikz, { extraLibraries: allGlobalPackages });
+        const svg = renderTikzWithPackages(preprocessed, allGlobalPackages);
         tikzList.push(svg);
         return `%%%TIKZ_PLACEHOLDER_${idx}%%%`;
       }
@@ -173,8 +306,8 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
 
     text = text.replace(/\\begin\{tikzpicture\*?\}[\s\S]*?\\end\{tikzpicture\*?\}/gi, (tikz) => {
       const idx = tikzList.length;
-      const preprocessed = preprocessTikzCode(tikz, { extraLibraries: detectedLibs });
-      const svg = renderTikzWithPackages(preprocessed, detectedLibs);
+      const preprocessed = preprocessTikzCode(tikz, { extraLibraries: allGlobalPackages });
+      const svg = renderTikzWithPackages(preprocessed, allGlobalPackages);
       tikzList.push(svg);
       return `%%%TIKZ_PLACEHOLDER_${idx}%%%`;
     });
@@ -221,6 +354,7 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
           displayMode: isDisplay,
           throwOnError: false,
           strict: false,
+          macros: KATEX_GLOBAL_MACROS,
         });
       } catch {
         // Fallback lần 2 nếu có lỗi cú pháp nhẹ
@@ -233,6 +367,7 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
             displayMode: isDisplay,
             throwOnError: false,
             strict: false,
+            macros: KATEX_GLOBAL_MACROS,
           });
         } catch {
           rendered = `<span class="text-rose-500 font-mono text-xs">${match}</span>`;
@@ -385,4 +520,5 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
     </div>
   );
 };
+
 

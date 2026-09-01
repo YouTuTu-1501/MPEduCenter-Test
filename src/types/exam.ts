@@ -362,6 +362,8 @@ export interface StudentSubmission {
       score: number;
       feedback: string;
       aiGraded?: boolean;
+      gradedAt?: string;
+      gradedBy?: string;
       breakdown?: { step: string; score: number; maxScore: number }[];
     }
   >;

@@ -506,6 +506,7 @@ function MainApp({ currentUser }: { currentUser: User }) {
             }}
             onOpenLeaderboard={() => setActiveView("leaderboard")}
             onOpenStudentHistory={handleOpenStudentHistory}
+            onSaveSubmission={handleSubmissionComplete}
             users={users}
           />
         ) : (

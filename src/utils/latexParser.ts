@@ -684,8 +684,10 @@ export function exportExamToLatex(exam: Exam): string {
 \\usepackage{amsmath,amssymb}
 \\usepackage{tikz}
 \\usepackage{pgfplots}
+\\usepackage{tkz-euclide}
+\\usepackage{tikz-3dplot}
 \\pgfplotsset{compat=1.18}
-\\usetikzlibrary{calc,patterns,patterns.meta,angles,quotes,arrows.meta,positioning,intersections}
+\\usetikzlibrary{calc,patterns,patterns.meta,angles,quotes,arrows.meta,positioning,intersections,3d,perspective}
 \\usepackage[loigiai]{ex_test}
 \\everymath{\\displaystyle}
 

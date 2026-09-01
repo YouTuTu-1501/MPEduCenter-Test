@@ -458,42 +458,34 @@ export const StudentScratchpad: React.FC<StudentScratchpadProps> = ({
         onTouchCancel={stopDrawing}
       />
 
-      {/* THANH CÔNG CỤ VẼ NHÁP NỔI (Floating Floating Bento Toolbar) */}
-      <div
-        className={`absolute top-3 right-3 z-30 pointer-events-auto flex flex-col items-end gap-2 transition-all duration-200`}
-      >
-        {/* Nút bật/tắt chính và thông báo trạng thái */}
-        <div className="flex items-center gap-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-3 py-1.5 rounded-2xl shadow-md border border-slate-200 dark:border-slate-700">
-          <button
-            type="button"
-            onClick={() => {
-              const next = !isDrawingActive;
-              onToggleDrawingActive(next);
-              if (next && activeTool === "none") {
-                setActiveTool("pen");
-              }
-            }}
-            className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs ${
-              isDrawingActive
-                ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200"
-                : "bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 border border-slate-200"
-            }`}
-            title={
-              isDrawingActive
-                ? "Đang bật chế độ viết nháp (Bấm để tắt và thao tác đáp án)"
-                : "Bật chế độ viết vẽ nháp trực tiếp trên màn hình"
-            }
-          >
-            <Pencil className="w-3.5 h-3.5" />
-            <span>{isDrawingActive ? "Đang viết nháp" : "Viết vẽ nháp"}</span>
-            {strokes.length > 0 && (
-              <span className="ml-0.5 px-1.5 py-0.2 bg-white/20 text-white rounded-full text-[10px] font-black">
-                {strokes.length}
-              </span>
-            )}
-          </button>
+      {/* THANH CÔNG CỤ VẼ NHÁP NỔI (Chỉ hiển thị khi đang kích hoạt viết vẽ nháp) */}
+      {isDrawingActive && (
+        <div
+          className="absolute top-2 right-2 sm:top-3 sm:right-3 z-30 pointer-events-auto flex flex-col items-end gap-2 transition-all duration-200"
+        >
+          {/* Nút bật/tắt chính và thông báo trạng thái */}
+          <div className="flex items-center gap-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-3 py-1.5 rounded-2xl shadow-md border border-slate-200 dark:border-slate-700">
+            <button
+              type="button"
+              onClick={() => {
+                const next = !isDrawingActive;
+                onToggleDrawingActive(next);
+                if (next && activeTool === "none") {
+                  setActiveTool("pen");
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs bg-amber-500 hover:bg-amber-600 text-white shadow-amber-200"
+              title="Đang bật chế độ viết nháp (Bấm để tắt và thao tác đáp án)"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>Đang vẽ nháp</span>
+              {strokes.length > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 bg-white/20 text-white rounded-full text-[10px] font-black">
+                  {strokes.length}
+                </span>
+              )}
+            </button>
 
-          {isDrawingActive && (
             <button
               type="button"
               onClick={() => setIsToolbarCollapsed((prev) => !prev)}
@@ -506,11 +498,10 @@ export const StudentScratchpad: React.FC<StudentScratchpadProps> = ({
                 <ChevronUp className="w-4 h-4" />
               )}
             </button>
-          )}
-        </div>
+          </div>
 
-        {/* Thanh công cụ chi tiết khi đang ở chế độ viết nháp */}
-        {isDrawingActive && !isToolbarCollapsed && (
+          {/* Thanh công cụ chi tiết khi đang ở chế độ viết nháp */}
+          {!isToolbarCollapsed && (
           <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-2 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 flex flex-col gap-2 max-w-[340px] animate-fadeIn">
             {/* Hàng 1: Các công cụ chính (Bút thường, Dạ quang, Tẩy, Ẩn/Hiện, Lưới) */}
             <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-xl">
@@ -702,6 +693,7 @@ export const StudentScratchpad: React.FC<StudentScratchpadProps> = ({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 };

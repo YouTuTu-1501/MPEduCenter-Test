@@ -91,6 +91,26 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
   const [userAnswers, setUserAnswers] = useState<Record<string, any>>({});
   const [flaggedQuestions, setFlaggedQuestions] = useState<Record<string, boolean>>({});
 
+  // Cỡ chữ tùy chỉnh cho thí sinh (lưu vào localStorage)
+  const [fontSizeDelta, setFontSizeDelta] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("edutest_student_font_size");
+      return saved ? parseInt(saved, 10) || 0 : 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  const handleFontSizeChange = (delta: number) => {
+    setFontSizeDelta((prev) => {
+      const next = Math.max(-4, Math.min(8, prev + delta));
+      try {
+        localStorage.setItem("edutest_student_font_size", next.toString());
+      } catch {}
+      return next;
+    });
+  };
+
   // Thời gian & Đồng hồ đếm ngược chính xác
   const [secondsRemaining, setSecondsRemaining] = useState<number>(totalDurationSeconds);
   const [startTime, setStartTime] = useState<number>(Date.now());
@@ -971,6 +991,28 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
 
         {/* Đồng hồ đếm ngược, Nút Nháp, Nút Lưu nháp, Nút Toàn màn hình & Nút nộp bài */}
         <div className="flex items-center gap-2 sm:gap-2.5">
+          {/* Cụm chỉnh cỡ chữ nhanh trên Header */}
+          <div className="hidden sm:flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200" title="Tăng / giảm cỡ chữ bài thi">
+            <button
+              id="btn-exam-font-decrease-header"
+              type="button"
+              onClick={() => handleFontSizeChange(-1)}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-700 hover:bg-white font-bold text-xs shadow-2xs transition"
+              title="Giảm cỡ chữ"
+            >
+              A-
+            </button>
+            <button
+              id="btn-exam-font-increase-header"
+              type="button"
+              onClick={() => handleFontSizeChange(1)}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-700 hover:bg-white font-bold text-xs shadow-2xs transition"
+              title="Tăng cỡ chữ"
+            >
+              A+
+            </button>
+          </div>
+
           {/* Nút Viết vẽ nháp trực tiếp trên đề */}
           <button
             id="btn-exam-toggle-draw-overlay"
@@ -1131,10 +1173,11 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
                   },
                 }}
                 className="flex-1 flex flex-col"
+                style={{ fontSize: `${15 + fontSizeDelta}px` }}
               >
-                {/* Header câu hỏi */}
-                <div className="flex justify-between items-center pb-3 mb-4 border-b border-slate-100">
-                  <div className="flex items-center gap-2">
+                {/* Header câu hỏi: Trình bày khoa học, responsive không bao giờ bị che khuất */}
+                <div className="flex flex-wrap justify-between items-center gap-2 pb-3 mb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="px-3.5 py-1 rounded-full bg-indigo-50 text-indigo-700 font-bold text-xs uppercase tracking-wider border border-indigo-100">
                       {currentQ.partName}
                     </span>
@@ -1143,22 +1186,61 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
                     </span>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => toggleFlag(currentQ.id)}
-                    className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1 transition ${
-                      flaggedQuestions[currentQ.id]
-                        ? "bg-amber-100 text-amber-800 border border-amber-300"
-                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                    }`}
-                  >
-                    <Flag className="w-3.5 h-3.5" />
-                    <span>{flaggedQuestions[currentQ.id] ? "Đã gắn cờ" : "Cần xem lại"}</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {/* Cụm chỉnh cỡ chữ ngay trên câu hỏi */}
+                    <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200" title="Tăng / giảm cỡ chữ">
+                      <button
+                        type="button"
+                        onClick={() => handleFontSizeChange(-1)}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-700 hover:bg-white font-bold text-xs shadow-2xs transition"
+                        title="Giảm cỡ chữ"
+                      >
+                        A-
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleFontSizeChange(1)}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-700 hover:bg-white font-bold text-xs shadow-2xs transition"
+                        title="Tăng cỡ chữ"
+                      >
+                        A+
+                      </button>
+                    </div>
+
+                    {/* Nút bật tắt vẽ nháp nhanh */}
+                    <button
+                      type="button"
+                      onClick={() => setIsDrawingActive((prev) => !prev)}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-bold flex items-center gap-1 transition ${
+                        isDrawingActive
+                          ? "bg-amber-500 text-white shadow-2xs"
+                          : "bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-700"
+                      }`}
+                      title={isDrawingActive ? "Tắt vẽ nháp" : "Vẽ nháp lên câu này"}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">{isDrawingActive ? "Đang vẽ" : "Vẽ nháp"}</span>
+                    </button>
+
+                    {/* Nút Gắn cờ xem lại */}
+                    <button
+                      type="button"
+                      onClick={() => toggleFlag(currentQ.id)}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition ${
+                        flaggedQuestions[currentQ.id]
+                          ? "bg-amber-100 text-amber-900 border border-amber-300 ring-2 ring-amber-300/40"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+                      }`}
+                      title={flaggedQuestions[currentQ.id] ? "Bỏ gắn cờ" : "Gắn cờ câu hỏi này để xem lại sau"}
+                    >
+                      <Flag className={`w-3.5 h-3.5 ${flaggedQuestions[currentQ.id] ? "fill-amber-600 text-amber-600" : ""}`} />
+                      <span>{flaggedQuestions[currentQ.id] ? "Đã cờ" : "Gắn cờ"}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Đề bài */}
-                <div className="font-semibold text-slate-800 leading-relaxed text-sm sm:text-base mb-4">
+                <div className="font-semibold text-slate-800 leading-relaxed mb-4" style={{ fontSize: `${15 + fontSizeDelta}px` }}>
                   <span className="font-black text-blue-600 mr-2">{currentQ.title}:</span>
                   <MathRenderer content={cleanQuestionContent(currentQ.content)} inline />
                 </div>

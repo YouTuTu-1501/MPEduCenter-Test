@@ -229,3 +229,71 @@ export function evaluateExamSubmission(
     timeSpentSeconds,
   };
 }
+
+/**
+ * Cập nhật điểm tự luận do giáo viên chấm và tự động tính toán lại toàn bộ điểm bài thi
+ */
+export function updateEssayGradesAndRecalculate(
+  submission: StudentSubmission,
+  exam: Exam,
+  essayGradesToUpdate: Record<string, { score: number; feedback?: string; gradedBy?: string }>
+): StudentSubmission {
+  const updatedDetails = { ...(submission.details || {}) };
+  let part4Earned = 0;
+  let part4Max = 0;
+
+  const newEssayGrades = { ...(submission.essayGrades || {}) };
+
+  exam.questions.forEach((q) => {
+    if (q.part === "part_4" || q.type === "essay") {
+      const max = q.score || 1.0;
+      part4Max += max;
+      const gradeInfo = essayGradesToUpdate[q.id] !== undefined ? essayGradesToUpdate[q.id] : newEssayGrades[q.id];
+      const earned = gradeInfo ? Math.max(0, Math.min(max, Number(gradeInfo.score) || 0)) : (updatedDetails[q.id]?.earnedScore || 0);
+      part4Earned += earned;
+
+      if (gradeInfo) {
+        newEssayGrades[q.id] = {
+          score: Number(earned.toFixed(2)),
+          feedback: gradeInfo.feedback || "",
+          gradedAt: new Date().toISOString(),
+          gradedBy: gradeInfo.gradedBy || "Giáo viên",
+        };
+      }
+
+      updatedDetails[q.id] = {
+        ...(updatedDetails[q.id] || {}),
+        isCorrect: earned >= max * 0.8,
+        earnedScore: Number(earned.toFixed(2)),
+        maxScore: max,
+        feedback: gradeInfo?.feedback || updatedDetails[q.id]?.feedback || "Đã chấm điểm tự luận",
+        userAnswer: updatedDetails[q.id]?.userAnswer || submission.answers?.[q.id] || "",
+        correctAnswer: q.rubric || q.explanation || "Chấm theo barem",
+      };
+    }
+  });
+
+  const part1Earned = submission.partScores?.part_1?.earned || 0;
+  const part2Earned = submission.partScores?.part_2?.earned || 0;
+  const part3Earned = submission.partScores?.part_3?.earned || 0;
+
+  const totalScore = Number((part1Earned + part2Earned + part3Earned + part4Earned).toFixed(2));
+
+  return {
+    ...submission,
+    score: totalScore,
+    essayGrades: newEssayGrades,
+    partScores: {
+      ...submission.partScores,
+      part_1: submission.partScores?.part_1 || { earned: 0, max: 0 },
+      part_2: submission.partScores?.part_2 || { earned: 0, max: 0 },
+      part_3: submission.partScores?.part_3 || { earned: 0, max: 0 },
+      part_4: {
+        earned: Number(part4Earned.toFixed(2)),
+        max: Number((part4Max || submission.partScores?.part_4?.max || 0).toFixed(2)),
+      },
+    },
+    details: updatedDetails,
+  };
+}
+
