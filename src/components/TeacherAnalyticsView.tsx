@@ -478,22 +478,40 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     const avg = Number((sum / count).toFixed(2));
     const max = Math.max(...scores);
     const min = Math.min(...scores);
-    const passCount = scores.filter((s) => s >= 5.0).length;
+    
+    // Tính tỷ lệ % đạt được trên tổng điểm của từng bài để quy chuẩn công bằng
+    const percentages = uniqueSubmissionsByStudent.map((s) => {
+      const m = s.maxScore || 10;
+      return (s.score / m) * 100;
+    });
+    const avgPercentage = Number((percentages.reduce((a, b) => a + b, 0) / count).toFixed(1));
+
+    // Đạt chuẩn khi đạt từ 50% số điểm tối đa trở lên (tương đương >= 5.0đ trên thang 10)
+    const passCount = uniqueSubmissionsByStudent.filter((s) => {
+      const m = s.maxScore || 10;
+      return s.score / m >= 0.5;
+    }).length;
     const passRate = Number(((passCount / count) * 100).toFixed(1));
 
-    // Phổ điểm theo dải: 0-2, 2-4, 4-6, 6-8, 8-10
+    // Phổ điểm chuẩn hóa theo thang 10 tương đương: 0-2, 2-4, 4-6, 6-8, 8-10
+    const normalizedScores = uniqueSubmissionsByStudent.map((s) => {
+      const m = s.maxScore || 10;
+      return (s.score / m) * 10;
+    });
+
     const distribution = [
-      { range: "0 - 2đ", count: scores.filter((s) => s < 2).length },
-      { range: "2 - 4đ", count: scores.filter((s) => s >= 2 && s < 4).length },
-      { range: "4 - 6đ", count: scores.filter((s) => s >= 4 && s < 6).length },
-      { range: "6 - 8đ", count: scores.filter((s) => s >= 6 && s < 8).length },
-      { range: "8 - 10đ", count: scores.filter((s) => s >= 8).length },
+      { range: "0 - 2đ (<20%)", count: normalizedScores.filter((s) => s < 2).length },
+      { range: "2 - 4đ (20-39%)", count: normalizedScores.filter((s) => s >= 2 && s < 4).length },
+      { range: "4 - 6đ (40-59%)", count: normalizedScores.filter((s) => s >= 4 && s < 6).length },
+      { range: "6 - 8đ (60-79%)", count: normalizedScores.filter((s) => s >= 6 && s < 8).length },
+      { range: "8 - 10đ (≥80%)", count: normalizedScores.filter((s) => s >= 8).length },
     ];
 
     return {
       total: count,
       totalStudents: count,
       avgScore: avg,
+      avgPercentage,
       maxScore: max,
       minScore: min,
       passRate,
@@ -779,18 +797,24 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
       );
     }
 
-    // 2. Lọc mức điểm
+    // 2. Lọc mức điểm (theo tỷ lệ % quy chuẩn trên thang điểm tối đa)
     if (studentScoreTier !== "all") {
-      list = list.filter((s) => isScoreInTier(s.score, studentScoreTier));
+      list = list.filter((s) => isScoreInTier(s.score, studentScoreTier, s.maxScore || 10));
     }
 
-    // 3. Sắp xếp danh sách
+    // 3. Sắp xếp danh sách (quy đổi phần trăm điểm đạt được để sắp xếp công bằng giữa các đề có thang điểm khác nhau)
     const sorted = [...list];
     sorted.sort((a, b) => {
       if (studentSortBy === "score_desc") {
+        const rateA = a.maxScore > 0 ? a.score / a.maxScore : a.score / 10;
+        const rateB = b.maxScore > 0 ? b.score / b.maxScore : b.score / 10;
+        if (rateB !== rateA) return rateB - rateA;
         return b.score - a.score;
       }
       if (studentSortBy === "score_asc") {
+        const rateA = a.maxScore > 0 ? a.score / a.maxScore : a.score / 10;
+        const rateB = b.maxScore > 0 ? b.score / b.maxScore : b.score / 10;
+        if (rateA !== rateB) return rateA - rateB;
         return a.score - b.score;
       }
       if (studentSortBy === "name") {
@@ -813,11 +837,14 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     window.print();
   };
 
-  // Xuất CSV bảng điểm có thông tin Lớp
+  // Xuất CSV bảng điểm có thông tin Lớp, thang điểm và quy đổi %
   const handleExportCSV = () => {
-    let csv = "\uFEFFSBD,Họ và tên,Lớp,Điểm tổng,Phần I,Phần II,Phần III,Phần IV,Thời gian nộp\n";
+    let csv = "\uFEFFSBD,Họ và tên,Lớp,Điểm đạt được,Thang điểm,Tỷ lệ %,Quy chuẩn thang 10,Phần I,Phần II,Phần III,Phần IV,Thời gian nộp\n";
     uniqueSubmissionsByStudent.forEach((s) => {
-      csv += `"${s.studentId}","${s.studentName}","${s.studentClass || ""}",${s.score},${s.partScores.part_1.earned},${s.partScores.part_2.earned},${s.partScores.part_3.earned},${s.partScores.part_4.earned},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
+      const maxScore = s.maxScore || 10;
+      const pct = Number(Math.min(100, Math.max(0, (s.score / maxScore) * 100)).toFixed(1));
+      const stdScore = Number(((s.score / maxScore) * 10).toFixed(2));
+      csv += `"${s.studentId}","${s.studentName}","${s.studentClass || ""}",${s.score},${maxScore},"${pct}%",${stdScore},${s.partScores.part_1.earned},${s.partScores.part_2.earned},${s.partScores.part_3.earned},${s.partScores.part_4.earned},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -1060,7 +1087,10 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
             </div>
             <div>
               <span className="text-xs font-bold text-slate-500">Điểm trung bình</span>
-              <p className="text-2xl font-bold text-emerald-600">{stats.avgScore}đ</p>
+              <p className="text-2xl font-bold text-emerald-600">
+                {stats.avgScore}đ{" "}
+                <span className="text-xs font-semibold text-emerald-700">({stats.avgPercentage}%)</span>
+              </p>
             </div>
           </div>
 
@@ -1079,7 +1109,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
               <BarChart3 className="w-6 h-6" />
             </div>
             <div>
-              <span className="text-xs font-bold text-slate-500">Tỷ lệ Đạt (≥5.0đ)</span>
+              <span className="text-xs font-bold text-slate-500">Tỷ lệ Đạt (≥50% điểm)</span>
               <p className="text-2xl font-bold text-indigo-700">{stats.passRate}%</p>
             </div>
           </div>
@@ -1711,7 +1741,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                       <th className="p-3 text-center">Phần II</th>
                       <th className="p-3 text-center">Phần III</th>
                       <th className="p-3 text-center">Phần IV</th>
-                      <th className="p-3 text-center">Tổng điểm</th>
+                      <th className="p-3 text-center">Tổng điểm & Tỷ lệ %</th>
                       <th className="p-3 text-center">Giám sát</th>
                       <th className="p-3 text-center">Thao tác</th>
                     </tr>
@@ -1746,17 +1776,34 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                         <td className="p-3 text-center">{sub.partScores.part_3.earned}đ</td>
                         <td className="p-3 text-center">{sub.partScores.part_4.earned}đ</td>
                         <td className="p-3 text-center">
-                          <span
-                            className={`px-2.5 py-1 rounded-full font-black text-xs ${
-                              sub.score >= 8
-                                ? "bg-emerald-100 text-emerald-800"
-                                : sub.score >= 5
-                                ? "bg-blue-100 text-blue-800"
-                                : "bg-red-100 text-red-800"
-                            }`}
-                          >
-                            {sub.score} / {sub.maxScore}đ
-                          </span>
+                          {(() => {
+                            const mScore = sub.maxScore || 10;
+                            const percentage = Number(
+                              Math.min(100, Math.max(0, (sub.score / mScore) * 100)).toFixed(1)
+                            );
+                            return (
+                              <div className="flex flex-col items-center justify-center gap-1">
+                                <span className="font-black text-xs text-slate-800 tracking-tight">
+                                  {sub.score} / {mScore}đ
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-black text-[10.5px] border inline-flex items-center gap-0.5 shadow-2xs ${
+                                    percentage >= 80
+                                      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                      : percentage >= 65
+                                      ? "bg-blue-50 text-blue-800 border-blue-200"
+                                      : percentage >= 50
+                                      ? "bg-amber-50 text-amber-800 border-amber-200"
+                                      : "bg-rose-50 text-rose-800 border-rose-200"
+                                  }`}
+                                  title={`Đạt ${percentage}% trên tổng điểm ${mScore}đ (Quy chuẩn hệ 10: ${(percentage / 10).toFixed(2)}đ)`}
+                                >
+                                  <span>{percentage}%</span>
+                                  {percentage === 100 && <span>🔥</span>}
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="p-3 text-center">
                           {(sub.tabSwitchCount || 0) > 0 ? (

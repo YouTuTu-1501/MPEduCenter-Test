@@ -42,8 +42,8 @@ export interface ScoreTier {
 export const SCORE_TIERS: ScoreTier[] = [
   {
     key: "excellent",
-    label: "Xuất sắc (9.0 - 10đ)",
-    shortLabel: "Xuất sắc (≥9đ)",
+    label: "Xuất sắc (≥90% • 9.0 - 10đ)",
+    shortLabel: "Xuất sắc (≥90%)",
     min: 9.0,
     max: 10.0,
     colorClass: "text-emerald-700",
@@ -51,8 +51,8 @@ export const SCORE_TIERS: ScoreTier[] = [
   },
   {
     key: "good",
-    label: "Giỏi (8.0 - 8.9đ)",
-    shortLabel: "Giỏi (8-8.9đ)",
+    label: "Giỏi (80% - 89% • 8.0 - 8.9đ)",
+    shortLabel: "Giỏi (80-89%)",
     min: 8.0,
     max: 8.99,
     colorClass: "text-blue-700",
@@ -60,8 +60,8 @@ export const SCORE_TIERS: ScoreTier[] = [
   },
   {
     key: "fair",
-    label: "Khá (6.5 - 7.9đ)",
-    shortLabel: "Khá (6.5-7.9đ)",
+    label: "Khá (65% - 79% • 6.5 - 7.9đ)",
+    shortLabel: "Khá (65-79%)",
     min: 6.5,
     max: 7.99,
     colorClass: "text-indigo-700",
@@ -69,8 +69,8 @@ export const SCORE_TIERS: ScoreTier[] = [
   },
   {
     key: "average",
-    label: "Trung bình (5.0 - 6.4đ)",
-    shortLabel: "Trung bình (5-6.4đ)",
+    label: "Trung bình (50% - 64% • 5.0 - 6.4đ)",
+    shortLabel: "Trung bình (50-64%)",
     min: 5.0,
     max: 6.49,
     colorClass: "text-amber-700",
@@ -78,8 +78,8 @@ export const SCORE_TIERS: ScoreTier[] = [
   },
   {
     key: "needs_work",
-    label: "Cần cố gắng (< 5.0đ)",
-    shortLabel: "Yếu / Dưới 5đ",
+    label: "Cần cố gắng (< 50% • < 5.0đ)",
+    shortLabel: "Cần cố gắng (<50%)",
     min: 0.0,
     max: 4.99,
     colorClass: "text-rose-700",
@@ -87,11 +87,25 @@ export const SCORE_TIERS: ScoreTier[] = [
   },
 ];
 
-export function isScoreInTier(score: number, tier: ScoreTierKey): boolean {
+export function calculatePercentage(score: number, maxScore: number = 10): number {
+  if (!maxScore || maxScore <= 0) return 0;
+  return Number(Math.min(100, Math.max(0, (score / maxScore) * 100)).toFixed(1));
+}
+
+export function calculateStandardizedScore(score: number, maxScore: number = 10): number {
+  if (!maxScore || maxScore <= 0) return 0;
+  return Number(Math.min(10, Math.max(0, (score / maxScore) * 10)).toFixed(2));
+}
+
+export function isScoreInTier(score: number, tier: ScoreTierKey, maxScore: number = 10): boolean {
   if (tier === "all") return true;
   const targetTier = SCORE_TIERS.find((t) => t.key === tier);
   if (!targetTier) return true;
-  return score >= targetTier.min && score <= targetTier.max;
+  const normalizedScore =
+    maxScore && maxScore > 0 && maxScore !== 10
+      ? (score / maxScore) * 10
+      : score;
+  return normalizedScore >= targetTier.min && normalizedScore <= targetTier.max;
 }
 
 export function extractGradeFromClass(cls?: string): string | null {

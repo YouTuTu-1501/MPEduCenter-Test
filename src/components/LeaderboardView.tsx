@@ -301,8 +301,11 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         studentClass: string;
         studentAvatar: string;
         scores: number[];
+        maxScores: number[];
+        percentages: number[];
         timeSpents: number[];
         latestSubmission: StudentSubmission;
+        bestSubmission: StudentSubmission;
         attemptsCount: number;
       }
     >();
@@ -318,6 +321,8 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
       const sName = userProfile?.name || sub.studentName || "Học sinh";
       const sClass = userProfile?.schoolClass || sub.studentClass || "";
       const sAvatar = userProfile?.avatar || sub.studentAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(sId)}`;
+      const subMaxScore = sub.maxScore && sub.maxScore > 0 ? sub.maxScore : 10;
+      const subPercentage = Number(Math.min(100, Math.max(0, (sub.score / subMaxScore) * 100)).toFixed(1));
 
       if (!studentMap.has(sId)) {
         studentMap.set(sId, {
@@ -326,28 +331,63 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           studentClass: sClass,
           studentAvatar: sAvatar,
           scores: [sub.score],
+          maxScores: [subMaxScore],
+          percentages: [subPercentage],
           timeSpents: [sub.timeSpentSeconds || 0],
           latestSubmission: sub,
+          bestSubmission: sub,
           attemptsCount: 1,
         });
       } else {
         const entry = studentMap.get(sId)!;
         entry.scores.push(sub.score);
+        entry.maxScores.push(subMaxScore);
+        entry.percentages.push(subPercentage);
         entry.timeSpents.push(sub.timeSpentSeconds || 0);
         entry.attemptsCount += 1;
+
+        // Cập nhật bài mới nhất
         if (new Date(sub.submittedAt).getTime() > new Date(entry.latestSubmission.submittedAt).getTime()) {
           entry.latestSubmission = sub;
           entry.studentClass = sClass;
         }
+
+        // Cập nhật bài có tỷ lệ % đạt cao nhất
+        const currentBestPct = Number(
+          Math.min(
+            100,
+            Math.max(0, (entry.bestSubmission.score / (entry.bestSubmission.maxScore || 10)) * 100)
+          ).toFixed(1)
+        );
+        if (
+          subPercentage > currentBestPct ||
+          (subPercentage === currentBestPct &&
+            (sub.timeSpentSeconds || 0) < (entry.bestSubmission.timeSpentSeconds || 0))
+        ) {
+          entry.bestSubmission = sub;
+        }
       }
     });
 
-    // 5. Tính toán chỉ số của từng học sinh
+    // 5. Tính toán chỉ số của từng học sinh với quy chuẩn tỷ lệ %
     let rows = Array.from(studentMap.values()).map((entry) => {
-      const bestScore = Math.max(...entry.scores);
-      const avgScore = Number((entry.scores.reduce((a, b) => a + b, 0) / entry.scores.length).toFixed(1));
+      const bestPercentage = Math.max(...entry.percentages);
+      const avgPercentage = Number(
+        (entry.percentages.reduce((a, b) => a + b, 0) / entry.percentages.length).toFixed(1)
+      );
+      const avgScore = Number((entry.scores.reduce((a, b) => a + b, 0) / entry.scores.length).toFixed(2));
       const minTime = Math.min(...entry.timeSpents);
-      const mainScore = selectedExamId !== "all" ? entry.latestSubmission.score : bestScore;
+
+      // Khi chọn 1 đề cụ thể: lấy bài nộp của đề đó. Khi chọn Tất cả đề: lấy bài có kết quả tốt nhất.
+      const representativeSub = selectedExamId !== "all" ? entry.latestSubmission : entry.bestSubmission;
+      const mainScore = representativeSub.score;
+      const mainMaxScore = representativeSub.maxScore || 10;
+      const mainPercentage = Number(
+        Math.min(100, Math.max(0, (mainScore / mainMaxScore) * 100)).toFixed(1)
+      );
+
+      const bestSubScore = entry.bestSubmission.score;
+      const bestSubMaxScore = entry.bestSubmission.maxScore || 10;
 
       return {
         studentId: entry.studentId,
@@ -355,18 +395,23 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         studentClass: entry.studentClass,
         studentAvatar: entry.studentAvatar,
         score: mainScore,
-        bestScore,
+        maxScore: mainMaxScore,
+        percentage: mainPercentage,
+        bestScore: bestSubScore,
+        bestMaxScore: bestSubMaxScore,
+        bestPercentage,
         avgScore,
+        avgPercentage,
         attemptsCount: entry.attemptsCount,
         timeSpentSeconds: minTime,
         submittedAt: entry.latestSubmission.submittedAt,
-        submission: entry.latestSubmission,
+        submission: representativeSub,
       };
     });
 
-    // 6. Lọc theo Mức điểm (Score Tier)
+    // 6. Lọc theo Mức điểm (Score Tier) - Quy chuẩn theo tỷ lệ % trên thang điểm tối đa
     if (selectedScoreTier !== "all") {
-      rows = rows.filter((r) => isScoreInTier(r.score, selectedScoreTier));
+      rows = rows.filter((r) => isScoreInTier(r.score, selectedScoreTier, r.maxScore));
     }
 
     // 7. Lọc theo Từ khóa tìm kiếm
@@ -380,14 +425,18 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
       });
     }
 
-    // 8. Sắp xếp
+    // 8. Sắp xếp thứ hạng (ưu tiên quy đổi về phần trăm điểm đạt được để xếp hạng công bằng giữa các đề có thang điểm khác nhau)
     rows.sort((a, b) => {
       if (sortBy === "best_score") {
-        if (b.score !== a.score) return b.score - a.score;
+        if (b.percentage !== a.percentage) return b.percentage - a.percentage;
         if (a.timeSpentSeconds !== b.timeSpentSeconds) return a.timeSpentSeconds - b.timeSpentSeconds;
-        return b.attemptsCount - a.attemptsCount;
+        if (b.attemptsCount !== a.attemptsCount) return b.attemptsCount - a.attemptsCount;
+        return b.score - a.score;
       }
-      if (sortBy === "avg_score") return b.avgScore - a.avgScore;
+      if (sortBy === "avg_score") {
+        if (b.avgPercentage !== a.avgPercentage) return b.avgPercentage - a.avgPercentage;
+        return b.avgScore - a.avgScore;
+      }
       if (sortBy === "attempts") return b.attemptsCount - a.attemptsCount;
       if (sortBy === "fastest") return a.timeSpentSeconds - b.timeSpentSeconds;
       if (sortBy === "latest") return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
@@ -411,20 +460,27 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
       return {
         totalStudents: 0,
         avgScore: 0,
+        avgPercentage: 0,
         topScore: 0,
+        topPercentage: 0,
         passRate: 0,
       };
     }
     const scores = leaderboardData.map((d) => d.score);
+    const percentages = leaderboardData.map((d) => d.percentage);
     const avg = Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2));
+    const avgPct = Number((percentages.reduce((a, b) => a + b, 0) / percentages.length).toFixed(1));
     const top = Math.max(...scores);
-    const passCount = scores.filter((s) => s >= 5.0).length;
-    const passRate = Number(((passCount / scores.length) * 100).toFixed(1));
+    const topPct = Math.max(...percentages);
+    const passCount = leaderboardData.filter((d) => d.percentage >= 50).length;
+    const passRate = Number(((passCount / leaderboardData.length) * 100).toFixed(1));
 
     return {
       totalStudents: leaderboardData.length,
       avgScore: avg,
+      avgPercentage: avgPct,
       topScore: top,
+      topPercentage: topPct,
       passRate,
     };
   }, [leaderboardData]);
@@ -441,7 +497,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           gradeNum: g.replace("Lớp ", ""),
           totalStudents: 0,
           avgScore: 0,
+          avgPercentage: 0,
           topScore: 0,
+          topPercentage: 0,
           topStudentName: "Chưa có",
           passRate: 0,
           topClass: "---",
@@ -449,26 +507,29 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         };
       }
       const scores = gRows.map((r) => r.score);
+      const percentages = gRows.map((r) => r.percentage);
       const avg = Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2));
+      const avgPct = Number((percentages.reduce((a, b) => a + b, 0) / percentages.length).toFixed(1));
       const topScore = Math.max(...scores);
+      const topPct = Math.max(...percentages);
       const topStudent = gRows[0];
-      const passCount = scores.filter((s) => s >= 5.0).length;
+      const passCount = gRows.filter((s) => s.percentage >= 50).length;
       const passRate = Number(((passCount / total) * 100).toFixed(1));
 
-      // Lớp có thành tích tốt nhất trong khối
-      const classScores: Record<string, { sum: number; count: number }> = {};
+      // Lớp có thành tích tốt nhất trong khối (tính theo tỷ lệ % điểm trung bình)
+      const classScores: Record<string, { pctSum: number; count: number }> = {};
       gRows.forEach((r) => {
-        if (!classScores[r.studentClass]) classScores[r.studentClass] = { sum: 0, count: 0 };
-        classScores[r.studentClass].sum += r.score;
+        if (!classScores[r.studentClass]) classScores[r.studentClass] = { pctSum: 0, count: 0 };
+        classScores[r.studentClass].pctSum += r.percentage;
         classScores[r.studentClass].count += 1;
       });
       let bestClass = "---";
-      let maxClassAvg = -1;
+      let maxClassAvgPct = -1;
       Object.entries(classScores).forEach(([cls, val]) => {
-        const classAvg = val.sum / val.count;
-        if (classAvg > maxClassAvg) {
-          maxClassAvg = classAvg;
-          bestClass = `Lớp ${cls} (${classAvg.toFixed(1)}đ)`;
+        const classAvgPct = val.pctSum / val.count;
+        if (classAvgPct > maxClassAvgPct) {
+          maxClassAvgPct = classAvgPct;
+          bestClass = `Lớp ${cls} (${classAvgPct.toFixed(1)}%)`;
         }
       });
 
@@ -477,7 +538,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         gradeNum: g.replace("Lớp ", ""),
         totalStudents: total,
         avgScore: avg,
+        avgPercentage: avgPct,
         topScore,
+        topPercentage: topPct,
         topStudentName: topStudent?.studentName || "Chưa có",
         topStudentAvatar: topStudent?.studentAvatar,
         passRate,
@@ -487,12 +550,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
     });
   }, [submissions, exams, selectedExamId, users]);
 
-  // Xuất file CSV
+  // Xuất file CSV có đầy đủ thang điểm và tỷ lệ %
   const handleExportCSV = () => {
-    let csv = "\uFEFFXếp hạng,SBD,Họ và tên,Lớp,Điểm số,Số lượt thi,Thời gian làm (phút),Ngày nộp mới nhất\n";
+    let csv = "\uFEFFXếp hạng,SBD,Họ và tên,Lớp,Điểm đạt được,Thang điểm,Tỷ lệ %,Quy chuẩn thang 10,Điểm TB,Tỷ lệ TB %,Số lượt thi,Thời gian làm (phút),Ngày nộp mới nhất\n";
     leaderboardData.forEach((row) => {
       const minutes = Math.round(row.timeSpentSeconds / 60);
-      csv += `"${row.rank}","${row.studentId}","${row.studentName}","${row.studentClass}",${row.score},${row.attemptsCount},${minutes},"${new Date(row.submittedAt).toLocaleString("vi-VN")}"\n`;
+      const stdScore = Number(((row.score / row.maxScore) * 10).toFixed(2));
+      csv += `"${row.rank}","${row.studentId}","${row.studentName}","${row.studentClass}",${row.score},${row.maxScore},"${row.percentage}%",${stdScore},${row.avgScore},"${row.avgPercentage}%",${row.attemptsCount},${minutes},"${new Date(row.submittedAt).toLocaleString("vi-VN")}"\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -690,14 +754,20 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                     <div className="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-slate-100">
                       <div className="bg-slate-50 p-2.5 rounded-xl">
                         <div className="text-[10px] font-bold text-slate-400 uppercase">Điểm trung bình</div>
-                        <div className="text-lg font-black text-indigo-600">{item.avgScore}đ</div>
+                        <div className="text-lg font-black text-indigo-600">
+                          {item.avgScore}đ{" "}
+                          <span className="text-xs font-bold text-indigo-500">({item.avgPercentage}%)</span>
+                        </div>
                       </div>
                       <div className="bg-slate-50 p-2.5 rounded-xl">
                         <div className="text-[10px] font-bold text-slate-400 uppercase">Thủ khoa khối</div>
-                        <div className="text-lg font-black text-amber-600">{item.topScore}đ</div>
+                        <div className="text-lg font-black text-amber-600">
+                          {item.topScore}đ{" "}
+                          <span className="text-xs font-bold text-amber-500">({item.topPercentage}%)</span>
+                        </div>
                       </div>
                       <div className="bg-slate-50 p-2.5 rounded-xl">
-                        <div className="text-[10px] font-bold text-slate-400 uppercase">Tỷ lệ đạt (≥5.0)</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase">Tỷ lệ đạt (≥50% điểm)</div>
                         <div className="text-base font-black text-emerald-600">{item.passRate}%</div>
                       </div>
                       <div className="bg-slate-50 p-2.5 rounded-xl">
@@ -716,7 +786,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                       <div className="min-w-0 flex-1">
                         <div className="text-[10px] font-bold text-amber-800 uppercase">Thủ khoa:</div>
                         <div className="text-xs font-black text-amber-950 truncate">
-                          {item.topStudentName} ({item.rows[0].studentClass}) • {item.rows[0].score}đ
+                          {item.topStudentName} ({item.rows[0].studentClass}) • {item.rows[0].score}/{item.rows[0].maxScore}đ ({item.rows[0].percentage}%)
                         </div>
                       </div>
                     </div>
@@ -738,9 +808,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                     <tr className="border-b border-slate-200 text-slate-400 font-extrabold uppercase bg-slate-50">
                       <th className="p-3">Khối học</th>
                       <th className="p-3 text-center">Số học sinh</th>
-                      <th className="p-3 text-center">Điểm Trung Bình</th>
+                      <th className="p-3 text-center">Điểm TB & Tỷ lệ %</th>
                       <th className="p-3 text-center">Điểm Thủ Khoa</th>
-                      <th className="p-3 text-center">Tỷ lệ Đạt (≥5.0đ)</th>
+                      <th className="p-3 text-center">Tỷ lệ Đạt (≥50% điểm)</th>
                       <th className="p-3">Lớp dẫn đầu khối</th>
                       <th className="p-3 text-center">Thao tác</th>
                     </tr>
@@ -753,14 +823,24 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                         </td>
                         <td className="p-3 text-center font-bold">{g.totalStudents} em</td>
                         <td className="p-3 text-center">
-                          <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-black">
-                            {g.avgScore}đ
-                          </span>
+                          <div className="inline-flex flex-col items-center">
+                            <span className="px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 font-black">
+                              {g.avgScore}đ
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-bold mt-0.5">
+                              {g.avgPercentage}%
+                            </span>
+                          </div>
                         </td>
                         <td className="p-3 text-center">
-                          <span className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 font-black">
-                            {g.topScore}đ 🏆
-                          </span>
+                          <div className="inline-flex flex-col items-center">
+                            <span className="px-2.5 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-black">
+                              {g.topScore}đ 🏆
+                            </span>
+                            <span className="text-[10px] text-amber-700 font-bold mt-0.5">
+                              {g.topPercentage}%
+                            </span>
+                          </div>
                         </td>
                         <td className="p-3 text-center font-bold text-emerald-600">{g.passRate}%</td>
                         <td className="p-3 font-bold text-slate-800">{g.topClass}</td>
@@ -963,7 +1043,10 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                 </div>
                 <div>
                   <div className="text-[10px] font-bold text-slate-400 uppercase">Điểm trung bình</div>
-                  <div className="text-base font-black text-emerald-600">{currentStats.avgScore}đ</div>
+                  <div className="text-base font-black text-emerald-600">
+                    {currentStats.avgScore}đ{" "}
+                    <span className="text-xs font-bold text-emerald-500">({currentStats.avgPercentage}%)</span>
+                  </div>
                 </div>
               </div>
 
@@ -973,7 +1056,10 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                 </div>
                 <div>
                   <div className="text-[10px] font-bold text-slate-400 uppercase">Thủ khoa điểm cao</div>
-                  <div className="text-base font-black text-indigo-600">{currentStats.topScore}đ</div>
+                  <div className="text-base font-black text-indigo-600">
+                    {currentStats.topScore}đ{" "}
+                    <span className="text-xs font-bold text-indigo-500">({currentStats.topPercentage}%)</span>
+                  </div>
                 </div>
               </div>
 
@@ -982,7 +1068,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                   <TrendingUp className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase">Tỷ lệ Đạt (≥5.0)</div>
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">Tỷ lệ Đạt (≥50% điểm)</div>
                   <div className="text-base font-black text-sky-600">{currentStats.passRate}%</div>
                 </div>
               </div>
@@ -1026,8 +1112,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                     <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold">
                       Lớp {leaderboardData[1].studentClass}
                     </span>
-                    <div className="text-sm sm:text-base font-black text-slate-700">
-                      {leaderboardData[1].score} điểm
+                    <div className="flex flex-col items-center gap-0.5">
+                      <div className="text-xs sm:text-sm font-black text-slate-700">
+                        {leaderboardData[1].score} / {leaderboardData[1].maxScore}đ
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full font-black text-[10.5px] bg-slate-100 text-slate-700 border border-slate-200">
+                        {leaderboardData[1].percentage}%
+                      </span>
                     </div>
                   </div>
 
@@ -1058,8 +1149,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                     <span className="px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-900 text-xs font-extrabold border border-amber-300">
                       Lớp {leaderboardData[0].studentClass}
                     </span>
-                    <div className="text-base sm:text-lg font-black text-amber-600">
-                      {leaderboardData[0].score} điểm 🏆
+                    <div className="flex flex-col items-center gap-0.5">
+                      <div className="text-sm sm:text-base font-black text-amber-600">
+                        {leaderboardData[0].score} / {leaderboardData[0].maxScore}đ 🏆
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full font-black text-[11px] bg-amber-100 text-amber-900 border border-amber-300">
+                        {leaderboardData[0].percentage}%
+                      </span>
                     </div>
                   </div>
 
@@ -1089,8 +1185,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                     <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold">
                       Lớp {leaderboardData[2].studentClass}
                     </span>
-                    <div className="text-sm sm:text-base font-black text-amber-800">
-                      {leaderboardData[2].score} điểm
+                    <div className="flex flex-col items-center gap-0.5">
+                      <div className="text-xs sm:text-sm font-black text-amber-800">
+                        {leaderboardData[2].score} / {leaderboardData[2].maxScore}đ
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full font-black text-[10.5px] bg-amber-50 text-amber-800 border border-amber-200">
+                        {leaderboardData[2].percentage}%
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1115,9 +1216,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                       <th className="p-3.5">Học sinh</th>
                       <th className="p-3.5 text-center">Lớp</th>
                       <th className="p-3.5 text-center">
-                        {selectedExamId !== "all" ? "Điểm số" : "Điểm Cao Nhất"}
+                        {selectedExamId !== "all" ? "Điểm & Tỷ lệ %" : "Điểm & Tỷ lệ % Tốt Nhất"}
                       </th>
-                      <th className="p-3.5 text-center">Điểm TB</th>
+                      <th className="p-3.5 text-center">Điểm TB & %</th>
                       <th className="p-3.5 text-center">Số lượt làm</th>
                       <th className="p-3.5 text-center">Thời gian</th>
                       <th className="p-3.5 text-center">Lần nộp mới nhất</th>
@@ -1191,25 +1292,34 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                             </span>
                           </td>
 
-                          {/* Main Score */}
+                          {/* Main Score & Percentage */}
                           <td className="p-3.5 text-center">
-                            <span
-                              className={`px-3 py-1 rounded-xl font-black text-xs sm:text-sm inline-flex items-center gap-1 ${
-                                row.score >= 8
-                                  ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                                  : row.score >= 5
-                                  ? "bg-indigo-100 text-indigo-800 border border-indigo-200"
-                                  : "bg-rose-100 text-rose-800 border border-rose-200"
-                              }`}
-                            >
-                              <span>{row.score}đ</span>
-                              {row.score === 10 && <span>🔥</span>}
-                            </span>
+                            <div className="flex flex-col items-center justify-center gap-1">
+                              <span className="font-black text-xs sm:text-sm text-slate-800 tracking-tight">
+                                {row.score} / {row.maxScore}đ
+                              </span>
+                              <span
+                                className={`px-2 py-0.5 rounded-full font-black text-[10.5px] border inline-flex items-center gap-0.5 shadow-2xs ${
+                                  row.percentage >= 80
+                                    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                    : row.percentage >= 65
+                                    ? "bg-blue-50 text-blue-800 border-blue-200"
+                                    : row.percentage >= 50
+                                    ? "bg-amber-50 text-amber-800 border-amber-200"
+                                    : "bg-rose-50 text-rose-800 border-rose-200"
+                                }`}
+                                title={`Đạt ${row.percentage}% trên tổng điểm ${row.maxScore}đ (Quy chuẩn hệ 10: ${((row.score / row.maxScore) * 10).toFixed(2)}đ)`}
+                              >
+                                <span>{row.percentage}%</span>
+                                {row.percentage === 100 && <span>🔥</span>}
+                              </span>
+                            </div>
                           </td>
 
-                          {/* Avg Score */}
+                          {/* Avg Score & Percentage */}
                           <td className="p-3.5 text-center font-bold text-slate-700">
-                            {row.avgScore}đ
+                            <div>{row.avgScore}đ</div>
+                            <div className="text-[10px] text-slate-400 font-semibold">({row.avgPercentage}%)</div>
                           </td>
 
                           {/* Attempts */}

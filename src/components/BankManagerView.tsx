@@ -47,6 +47,7 @@ import {
   BarChart2,
   Users,
   Check,
+  CheckCircle2,
   FileSpreadsheet,
   HelpCircle,
   Folder,
@@ -71,6 +72,11 @@ import {
   LayoutList,
   ArrowUpDown,
   RotateCcw,
+  ShieldCheck,
+  EyeOff,
+  Hash,
+  Award,
+  UserCheck,
 } from "lucide-react";
 
 interface BankManagerViewProps {
@@ -96,7 +102,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   submissions = [],
 }) => {
   const { toast } = useToast();
-  const { users } = useAuth();
+  const { users, currentUser } = useAuth();
 
   const realClasses = useMemo(() => {
     const set = new Set<string>();
@@ -129,22 +135,55 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "title_asc" | "code_asc" | "duration">("newest");
   const [viewGrouping, setViewGrouping] = useState<"table" | "grid" | "by_chapter">("table");
 
-  // Modal Nhập đề mới
+  // ================= MODAL NHẬP ĐỀ THI MỚI (10 TUỲ CHỌN) =================
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [showTableBuilder, setShowTableBuilder] = useState<boolean>(false);
   const [latexInputText, setLatexInputText] = useState<string>("");
-  const [importTitle, setImportTitle] = useState<string>("Đề kiểm tra Toán học THPT");
+
+  // 1. Khối
   const [importGrade, setImportGrade] = useState<string>("Lớp 12");
+  // 2. Lớp áp dụng
   const [importTargetClass, setImportTargetClass] = useState<string>("Tất cả các lớp");
+  // 3. Chương
   const [importChapter, setImportChapter] = useState<string>(
     STANDARD_CHAPTERS_BY_GRADE["Lớp 12"]?.[0] || ""
   );
   const [customChapterInput, setCustomChapterInput] = useState<string>("");
   const [isCustomChapter, setIsCustomChapter] = useState<boolean>(false);
+  // 4. Bài
   const [importLessonNumber, setImportLessonNumber] = useState<string>("01");
+  // 5. Lần
   const [importAttemptNumber, setImportAttemptNumber] = useState<string>("01");
+  // 6. Thời lượng
   const [importDuration, setImportDuration] = useState<number>(90);
+  // 7. Giáo viên/đơn vị biên soạn
+  const [importAuthor, setImportAuthor] = useState<string>(
+    currentUser?.name ? `${currentUser.name} - Tổ Toán` : "Tổ Toán - THPT Chuyên"
+  );
+  // 8. Tên bài kiểm tra
+  const [importTitle, setImportTitle] = useState<string>("Đề kiểm tra Toán học THPT");
+  // 9. Mô tả/Lời dặn dò học sinh
+  const [importDescription, setImportDescription] = useState<string>(
+    "Học sinh làm bài nghiêm túc, được sử dụng máy tính cầm tay theo danh mục của Bộ GD&ĐT. Không sử dụng tài liệu trong thời gian làm bài."
+  );
+  // 10. Bảo mật và điều kiện truy cập:
+  const [importIsLocked, setImportIsLocked] = useState<boolean>(false);
+  const [importAllowReview, setImportAllowReview] = useState<boolean>(true);
+  const [importPassword, setImportPassword] = useState<string>("");
+  const [showImportPassword, setShowImportPassword] = useState<boolean>(false);
+  const [importTotalScore, setImportTotalScore] = useState<number>(10);
+
   const [importPreview, setImportPreview] = useState<Exam | null>(null);
+
+  // Tự động đặt tên bài kiểm tra chuẩn hóa
+  const handleAutoGenerateTitle = () => {
+    const chName = isCustomChapter
+      ? (customChapterInput || "Chương")
+      : (importChapter ? importChapter.split(":")[0] : "Chương 1");
+    const generated = `Kiểm tra ${importGrade} - ${chName} - Bài ${importLessonNumber} (Lần ${importAttemptNumber})`;
+    setImportTitle(generated);
+    toast.info("Đã tạo tên đề tự động", `Tên mới: "${generated}"`);
+  };
 
   // Modal Chỉnh sửa toàn diện đề thi hiện có
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
@@ -381,15 +420,43 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
       const text = event.target?.result as string;
       if (text) {
         setLatexInputText(text);
-        const parsed = parseLatexExam(text, file.name.replace(".tex", ""));
+        const parsed = parseLatexExam(text, file.name.replace(/\.(tex|txt)$/i, ""));
         if (parsed.grade) setImportGrade(parsed.grade);
+        if (parsed.targetClass) setImportTargetClass(parsed.targetClass);
         if (parsed.chapter) {
           setImportChapter(parsed.chapter);
           setIsCustomChapter(true);
           setCustomChapterInput(parsed.chapter);
         }
+        if (parsed.lesson || parsed.lessonNumber) {
+          setImportLessonNumber(parsed.lesson || parsed.lessonNumber || "01");
+        }
+        if (parsed.attemptNumber) {
+          setImportAttemptNumber(String(parsed.attemptNumber));
+        }
         if (parsed.durationMinutes) {
           setImportDuration(parsed.durationMinutes);
+        }
+        if (parsed.author) {
+          setImportAuthor(parsed.author);
+        }
+        if (parsed.title) {
+          setImportTitle(parsed.title);
+        }
+        if (parsed.description) {
+          setImportDescription(parsed.description);
+        }
+        if (parsed.isLocked !== undefined) {
+          setImportIsLocked(parsed.isLocked);
+        }
+        if (parsed.allowReview !== undefined) {
+          setImportAllowReview(parsed.allowReview);
+        }
+        if (parsed.password !== undefined) {
+          setImportPassword(parsed.password);
+        }
+        if (parsed.totalScore) {
+          setImportTotalScore(parsed.totalScore);
         }
         setImportPreview(parsed);
         toast.info(
@@ -404,17 +471,28 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   const handleParseText = () => {
     if (!latexInputText.trim()) return;
     const parsed = parseLatexExam(latexInputText, importTitle);
-    if (parsed.durationMinutes) {
+    if (parsed.durationMinutes && !importDuration) {
       setImportDuration(parsed.durationMinutes);
     }
     const finalChapter = isCustomChapter ? customChapterInput : importChapter;
     parsed.grade = importGrade;
+    parsed.targetClass = importTargetClass;
     if (finalChapter) parsed.chapter = finalChapter;
+    parsed.lesson = importLessonNumber;
+    parsed.lessonNumber = importLessonNumber;
+    parsed.attemptNumber = importAttemptNumber;
     parsed.code = computedImportCode;
     parsed.durationMinutes = importDuration || parsed.durationMinutes || 90;
+    parsed.author = importAuthor.trim() || parsed.author;
+    parsed.title = importTitle.trim() || parsed.title;
+    parsed.description = importDescription.trim() || parsed.description;
+    parsed.isLocked = importIsLocked;
+    parsed.allowReview = importAllowReview;
+    parsed.password = importPassword.trim() || undefined;
+    parsed.totalScore = importTotalScore || parsed.totalScore || 10;
     setImportPreview(parsed);
     toast.info(
-      "Phân tích mã nguồn LaTeX",
+      "Phân tích mã nguồn LaTeX thành công",
       `Đã nhận diện ${parsed.questions.length} câu hỏi thuộc ${parsed.grade} - Thời gian: ${parsed.durationMinutes} phút - Mã đề chuẩn: ${parsed.code}.`
     );
   };
@@ -425,12 +503,24 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     const finalCode = computedImportCode || importPreview.code;
     const examToSave: Exam = {
       ...importPreview,
+      id: importPreview.id || `exam_${Date.now()}`,
       code: finalCode,
-      title: importTitle || importPreview.title,
+      title: importTitle.trim() || importPreview.title || `Đề kiểm tra ${importGrade}`,
       grade: importGrade,
       targetClass: importTargetClass,
       chapter: finalChapter || importPreview.chapter,
+      lesson: importLessonNumber || importPreview.lesson,
+      lessonNumber: importLessonNumber || importPreview.lessonNumber,
+      attemptNumber: importAttemptNumber || importPreview.attemptNumber,
       durationMinutes: Number(importDuration) || 90,
+      author: importAuthor.trim() || importPreview.author || "Tổ Toán",
+      description: importDescription.trim() || importPreview.description,
+      isLocked: importIsLocked,
+      allowReview: importAllowReview,
+      password: importPassword.trim() || undefined,
+      totalScore: Number(importTotalScore) || importPreview.totalScore || 10,
+      createdAt: importPreview.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     onSaveExam(examToSave);
     setShowImportModal(false);
@@ -822,144 +912,491 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
           onClick={() => setShowImportModal(false)}
         >
           <div
-            className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-xl border border-slate-200 text-slate-800 flex flex-col"
+            className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-5xl max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-200 text-slate-800 flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center pb-3 mb-4 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                  <FileCode className="w-4 h-4" />
+                <div className="w-9 h-9 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-2xs">
+                  <FileCode className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-lg text-slate-900">
+                  <h3 className="font-black text-lg text-slate-900">
                     Nhập Đề Thi Mới Từ LaTeX (.tex)
                   </h3>
                   <p className="text-xs text-slate-400 font-medium">
-                    Tự động phân loại theo Lớp, Chương và cấu trúc 4 dạng thức chuẩn
+                    Cấu hình đầy đủ 10 thông số chuẩn GDPT 2018: Phân loại, Thời lượng, Biên soạn, Tên bài, Dặn dò và Bảo mật
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowImportModal(false)}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold"
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold transition"
               >
                 ✕
               </button>
             </div>
 
-            {/* Cấu hình Lớp và Chương mục cho đề mới */}
-            <div className="p-4 bg-indigo-50/60 rounded-2xl border border-indigo-100 mb-4 space-y-3">
-              <div className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
-                <Bookmark className="w-4 h-4 text-indigo-600" />
-                <span>Thiết lập Phân loại Lớp & Chương mục:</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
-                {/* Khối Lớp */}
-                <div className="sm:col-span-3">
-                  <label className="block font-bold text-slate-700 mb-1">
-                    1. Khối Lớp:
-                  </label>
-                  <select
-                    value={importGrade}
-                    onChange={(e) => {
-                      const newGrade = e.target.value;
-                      setImportGrade(newGrade);
-                      const stds = STANDARD_CHAPTERS_BY_GRADE[newGrade] || [];
-                      setImportChapter(stds[0] || "");
-                      setIsCustomChapter(false);
-                      setImportTargetClass("Tất cả các lớp");
-                    }}
-                    className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500"
-                  >
-                    {STANDARD_GRADES.map((gr) => (
-                      <option key={gr} value={gr}>
-                        {gr}
-                      </option>
-                    ))}
-                  </select>
+            {/* ================= 10 THIẾT LẬP CẤU HÌNH ĐỀ THI MỚI ================= */}
+            <div className="space-y-4 mb-4">
+              {/* KHUNG I: PHÂN LOẠI & PHẠM VI ÁP DỤNG (MỤC 1 -> 5 & MÃ ĐỀ CHUẨN) */}
+              <div className="p-4 bg-indigo-50/70 rounded-2xl border border-indigo-100 space-y-3.5 shadow-2xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100/80 pb-2.5">
+                  <div className="text-xs font-black text-indigo-950 flex items-center gap-1.5 uppercase tracking-wide">
+                    <Bookmark className="w-4 h-4 text-indigo-600" />
+                    <span>I. Phân loại & Phạm vi áp dụng (Mục 1 – 5)</span>
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 bg-white px-3 py-1 rounded-xl border border-indigo-200 text-xs font-mono font-black text-indigo-700 shadow-2xs">
+                    <Tag className="w-3.5 h-3.5 text-indigo-500" />
+                    <span className="text-[11px] font-sans font-semibold text-slate-500">Mã đề GDPT chuẩn:</span>
+                    <span className="text-indigo-900 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">{computedImportCode}</span>
+                  </div>
                 </div>
 
-                {/* Lớp cụ thể */}
-                <div className="sm:col-span-3">
-                  <label className="block font-bold text-slate-700 mb-1">
-                    2. Lớp áp dụng:
-                  </label>
-                  <select
-                    value={importTargetClass}
-                    onChange={(e) => setImportTargetClass(e.target.value)}
-                    className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500"
-                  >
-                    <option value="Tất cả các lớp">🏫 Tất cả các lớp ({importGrade})</option>
-                    {importAvailableClasses.map((cls) => (
-                      <option key={cls} value={cls}>
-                        Lớp {cls}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Chương */}
-                <div className="sm:col-span-3">
-                  <label className="block font-bold text-slate-700 mb-1">
-                    3. Chương mục:
-                  </label>
-                  {!isCustomChapter ? (
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
+                  {/* 1. Khối */}
+                  <div className="sm:col-span-3">
+                    <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <GraduationCap className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>1. Khối:</span>
+                    </label>
                     <select
-                      value={importChapter}
+                      value={importGrade}
                       onChange={(e) => {
-                        if (e.target.value === "__custom__") {
-                          setIsCustomChapter(true);
-                          setCustomChapterInput("");
-                        } else {
-                          setImportChapter(e.target.value);
-                        }
+                        const newGrade = e.target.value;
+                        setImportGrade(newGrade);
+                        const stds = STANDARD_CHAPTERS_BY_GRADE[newGrade] || [];
+                        setImportChapter(stds[0] || "");
+                        setIsCustomChapter(false);
+                        setImportTargetClass("Tất cả các lớp");
                       }}
-                      className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500 truncate"
+                      className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500 shadow-2xs"
                     >
-                      {(STANDARD_CHAPTERS_BY_GRADE[importGrade] || []).map((ch) => (
-                        <option key={ch} value={ch}>
-                          {ch}
+                      {STANDARD_GRADES.map((gr) => (
+                        <option key={gr} value={gr}>
+                          {gr}
                         </option>
                       ))}
-                      <option value="__custom__">✍️ Nhập chương tùy chỉnh...</option>
                     </select>
-                  ) : (
+                  </div>
+
+                  {/* 2. Lớp áp dụng */}
+                  <div className="sm:col-span-3">
+                    <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <Users className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>2. Lớp áp dụng:</span>
+                    </label>
+                    <select
+                      value={importTargetClass}
+                      onChange={(e) => setImportTargetClass(e.target.value)}
+                      className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500 shadow-2xs"
+                    >
+                      <option value="Tất cả các lớp">🏫 Tất cả các lớp ({importGrade})</option>
+                      {importAvailableClasses.map((cls) => (
+                        <option key={cls} value={cls}>
+                          Lớp {cls}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 3. Chương */}
+                  <div className="sm:col-span-6">
+                    <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>3. Chương:</span>
+                      </span>
+                      {isCustomChapter && (
+                        <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded">
+                          Tự nhập chương
+                        </span>
+                      )}
+                    </label>
+                    {!isCustomChapter ? (
+                      <select
+                        value={importChapter}
+                        onChange={(e) => {
+                          if (e.target.value === "__custom__") {
+                            setIsCustomChapter(true);
+                            setCustomChapterInput("");
+                          } else {
+                            setImportChapter(e.target.value);
+                          }
+                        }}
+                        className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500 truncate shadow-2xs"
+                      >
+                        {(STANDARD_CHAPTERS_BY_GRADE[importGrade] || []).map((ch) => (
+                          <option key={ch} value={ch}>
+                            {ch}
+                          </option>
+                        ))}
+                        <option value="__custom__">✍️ Nhập chương tùy chỉnh...</option>
+                      </select>
+                    ) : (
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          value={customChapterInput}
+                          onChange={(e) => setCustomChapterInput(e.target.value)}
+                          placeholder="Ví dụ: Chương 1: Ứng dụng đạo hàm..."
+                          className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500 shadow-2xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setIsCustomChapter(false)}
+                          className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 rounded-xl text-slate-700 font-bold text-xs"
+                          title="Quay lại danh sách chương chuẩn"
+                        >
+                          ✕ Hủy
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 4. Bài */}
+                  <div className="sm:col-span-3">
+                    <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>4. Bài:</span>
+                    </label>
                     <div className="flex gap-1">
                       <input
                         type="text"
-                        value={customChapterInput}
-                        onChange={(e) => setCustomChapterInput(e.target.value)}
-                        placeholder="Nhập tên chương..."
-                        className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500"
+                        value={importLessonNumber}
+                        onChange={(e) => setImportLessonNumber(e.target.value)}
+                        placeholder="01, 02, 14..."
+                        className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500 shadow-2xs"
+                      />
+                      <select
+                        onChange={(e) => setImportLessonNumber(e.target.value)}
+                        value={importLessonNumber}
+                        className="px-1 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-slate-700 font-bold text-xs"
+                        title="Chọn nhanh bài"
+                      >
+                        {Array.from({ length: 15 }, (_, i) => {
+                          const val = String(i + 1).padStart(2, "0");
+                          return (
+                            <option key={val} value={val}>
+                              B.{val}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* 5. Lần */}
+                  <div className="sm:col-span-3">
+                    <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>5. Lần:</span>
+                    </label>
+                    <select
+                      value={importAttemptNumber}
+                      onChange={(e) => setImportAttemptNumber(e.target.value)}
+                      className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500 shadow-2xs"
+                    >
+                      <option value="01">Lần 1 (01)</option>
+                      <option value="02">Lần 2 (02)</option>
+                      <option value="03">Lần 3 (03)</option>
+                      <option value="04">Lần 4 (04)</option>
+                      <option value="05">Lần 5 (05)</option>
+                      <option value="06">Lần 6 (06)</option>
+                    </select>
+                  </div>
+
+                  {/* Gợi ý quy luật mã đề */}
+                  <div className="sm:col-span-6 flex items-center text-[11px] text-indigo-900 bg-white/80 p-2 rounded-xl border border-indigo-100">
+                    <span>
+                      💡 <strong>Quy luật chuẩn:</strong> [Khối <strong>{importGrade.replace(/\D/g, "") || "12"}</strong>] - [Chương] - [Bài <strong>{importLessonNumber}</strong>] - [Lần <strong>{importAttemptNumber}</strong>] → <strong>{computedImportCode}</strong>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* KHUNG II: THÔNG TIN BÀI KIỂM TRA & ĐƠN VỊ BIÊN SOẠN (MỤC 6 -> 9) */}
+              <div className="p-4 bg-slate-50/90 rounded-2xl border border-slate-200 space-y-3 shadow-2xs">
+                <div className="text-xs font-black text-slate-800 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-200 pb-2">
+                  <FileText className="w-4 h-4 text-indigo-600" />
+                  <span>II. Thông tin bài kiểm tra & Đơn vị biên soạn (Mục 6 – 9)</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
+                  {/* 6. Thời lượng */}
+                  <div className="sm:col-span-4 space-y-1.5">
+                    <label className="block font-bold text-slate-700 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>6. Thời lượng (phút):</span>
+                    </label>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="number"
+                        min="5"
+                        max="300"
+                        step="5"
+                        value={importDuration}
+                        onChange={(e) => setImportDuration(Number(e.target.value) || 90)}
+                        className="w-24 py-2 px-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500 shadow-2xs"
+                      />
+                      <div className="flex flex-wrap items-center gap-1 flex-1">
+                        {[15, 45, 60, 90, 120].map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setImportDuration(m)}
+                            className={`px-2 py-1 rounded-lg font-bold text-[11px] transition ${
+                              importDuration === m
+                                ? "bg-indigo-600 text-white shadow-2xs"
+                                : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"
+                            }`}
+                          >
+                            {m}'
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 7. Giáo viên/đơn vị biên soạn */}
+                  <div className="sm:col-span-8">
+                    <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>7. Giáo viên/Đơn vị biên soạn:</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={importAuthor}
+                      onChange={(e) => setImportAuthor(e.target.value)}
+                      placeholder="Ví dụ: Tổ Toán - THPT Chuyên, Thầy Nguyễn Văn A..."
+                      className="w-full py-2 px-3 rounded-xl border border-slate-300 bg-white font-medium text-slate-800 outline-none focus:border-indigo-500 shadow-2xs"
+                    />
+                  </div>
+
+                  {/* 8. Tên bài kiểm tra */}
+                  <div className="sm:col-span-12">
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="font-bold text-slate-700 flex items-center gap-1">
+                        <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>8. Tên bài kiểm tra:</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleAutoGenerateTitle}
+                        className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-md transition"
+                      >
+                        <Sparkles className="w-3 h-3 text-indigo-500" />
+                        <span>⚡ Tạo tên tự động theo chuẩn</span>
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={importTitle}
+                      onChange={(e) => setImportTitle(e.target.value)}
+                      placeholder="Nhập tên bài kiểm tra..."
+                      className="w-full py-2 px-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-900 outline-none focus:border-indigo-500 shadow-2xs text-sm"
+                    />
+                  </div>
+
+                  {/* 9. Mô tả/Lời dặn dò học sinh */}
+                  <div className="sm:col-span-12">
+                    <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <HelpCircle className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>9. Mô tả/Lời dặn dò học sinh:</span>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={importDescription}
+                      onChange={(e) => setImportDescription(e.target.value)}
+                      placeholder="Nhập lời dặn dò học sinh trước khi bắt đầu thi, quy chế phòng thi, loại máy tính cầm tay được phép..."
+                      className="w-full py-2 px-3 rounded-xl border border-slate-300 bg-white font-normal text-slate-800 outline-none focus:border-indigo-500 shadow-2xs text-xs resize-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* KHUNG III: BẢO MẬT & ĐIỀU KIỆN TRUY CẬP (MỤC 10) */}
+              <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200/80 space-y-3.5 shadow-2xs">
+                <div className="text-xs font-black text-amber-950 flex items-center gap-1.5 uppercase tracking-wide border-b border-amber-200/80 pb-2">
+                  <ShieldCheck className="w-4 h-4 text-amber-600" />
+                  <span>10. Bảo mật và điều kiện truy cập:</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
+                  {/* 10.1 Khóa đề thi */}
+                  <div className="sm:col-span-6 bg-white p-3 rounded-xl border border-amber-200/70 flex flex-col justify-between gap-2 shadow-2xs">
+                    <div>
+                      <span className="font-bold text-slate-800 block mb-0.5 flex items-center gap-1.5">
+                        {importIsLocked ? (
+                          <Lock className="w-3.5 h-3.5 text-rose-600" />
+                        ) : (
+                          <Unlock className="w-3.5 h-3.5 text-emerald-600" />
+                        )}
+                        <span>Khoá đề thi:</span>
+                      </span>
+                      <p className="text-[11px] text-slate-500">
+                        {importIsLocked
+                          ? "Đề đang khóa: Học sinh không thể vào làm bài."
+                          : "Đề đang mở: Học sinh có thể vào làm bài ngay."}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setImportIsLocked(false)}
+                        className={`py-1.5 px-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 transition ${
+                          !importIsLocked
+                            ? "bg-emerald-600 text-white shadow-2xs"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        <Unlock className="w-3 h-3" />
+                        <span>Mở đề</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImportIsLocked(true)}
+                        className={`py-1.5 px-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 transition ${
+                          importIsLocked
+                            ? "bg-rose-600 text-white shadow-2xs"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        <Lock className="w-3 h-3" />
+                        <span>Khóa đề</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 10.2 Xem lại đáp án và Lời giải */}
+                  <div className="sm:col-span-6 bg-white p-3 rounded-xl border border-amber-200/70 flex flex-col justify-between gap-2 shadow-2xs">
+                    <div>
+                      <span className="font-bold text-slate-800 block mb-0.5 flex items-center gap-1.5">
+                        {importAllowReview ? (
+                          <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                        ) : (
+                          <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                        )}
+                        <span>Xem lại đáp án và Lời giải:</span>
+                      </span>
+                      <p className="text-[11px] text-slate-500">
+                        {importAllowReview
+                          ? "Cho phép học sinh xem lời giải chi tiết sau khi nộp."
+                          : "Bảo mật tuyệt đối: Ẩn đáp án và lời giải chi tiết."}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setImportAllowReview(true)}
+                        className={`py-1.5 px-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 transition ${
+                          importAllowReview
+                            ? "bg-indigo-600 text-white shadow-2xs"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        <Eye className="w-3 h-3" />
+                        <span>Cho xem lại</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImportAllowReview(false)}
+                        className={`py-1.5 px-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 transition ${
+                          !importAllowReview
+                            ? "bg-slate-800 text-white shadow-2xs"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        <EyeOff className="w-3 h-3" />
+                        <span>Ẩn đáp án</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 10.3 Mật khẩu truy cập */}
+                  <div className="sm:col-span-6 bg-white p-3 rounded-xl border border-amber-200/70 space-y-1.5 shadow-2xs">
+                    <label className="block font-bold text-slate-800 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Mật khẩu truy cập:</span>
+                      </span>
+                      {importPassword ? (
+                        <span className="text-[10px] text-amber-700 font-black bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                          Đã đặt mã
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400">Tự do</span>
+                      )}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showImportPassword ? "text" : "password"}
+                        value={importPassword}
+                        onChange={(e) => setImportPassword(e.target.value)}
+                        placeholder="Để trống nếu không yêu cầu mật khẩu"
+                        className="w-full py-2 pl-3 pr-10 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800 outline-none focus:border-amber-500"
                       />
                       <button
                         type="button"
-                        onClick={() => setIsCustomChapter(false)}
-                        className="px-2 py-1 bg-slate-200 rounded-lg text-slate-600 font-bold"
-                        title="Chọn lại danh sách chuẩn"
+                        onClick={() => setShowImportPassword(!showImportPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                        title={showImportPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
                       >
-                        ✕
+                        {showImportPassword ? (
+                          <EyeOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Eye className="w-3.5 h-3.5" />
+                        )}
                       </button>
                     </div>
-                  )}
-                </div>
+                    <p className="text-[10px] text-slate-400">
+                      Học sinh phải nhập đúng mật khẩu này mới được vào làm bài.
+                    </p>
+                  </div>
 
-                {/* Thời lượng làm bài */}
-                <div className="sm:col-span-3">
-                  <label className="block font-bold text-slate-700 mb-1">
-                    4. Thời lượng (phút):
-                  </label>
-                  <input
-                    type="number"
-                    min="5"
-                    max="180"
-                    step="5"
-                    value={importDuration}
-                    onChange={(e) => setImportDuration(Number(e.target.value) || 90)}
-                    className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 outline-none focus:border-indigo-500"
-                  />
+                  {/* 10.4 Thang điểm tổng của đề */}
+                  <div className="sm:col-span-6 bg-white p-3 rounded-xl border border-amber-200/70 space-y-1.5 shadow-2xs">
+                    <label className="block font-bold text-slate-800 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <Award className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Thang điểm tổng của đề:</span>
+                      </span>
+                      <span className="font-mono text-xs font-black text-amber-900 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                        {importTotalScore} điểm
+                      </span>
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="1000"
+                        step="0.5"
+                        value={importTotalScore}
+                        onChange={(e) => setImportTotalScore(Number(e.target.value) || 10)}
+                        className="w-24 py-2 px-3 rounded-xl border border-slate-300 bg-white font-black text-slate-800 outline-none focus:border-amber-500 font-mono text-xs"
+                      />
+                      <div className="flex flex-wrap items-center gap-1 flex-1">
+                        {[10, 20, 40, 100].map((sc) => (
+                          <button
+                            key={sc}
+                            type="button"
+                            onClick={() => setImportTotalScore(sc)}
+                            className={`px-2.5 py-1.5 rounded-lg font-bold text-[11px] transition ${
+                              importTotalScore === sc
+                                ? "bg-amber-600 text-white shadow-2xs"
+                                : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                            }`}
+                          >
+                            {sc}đ
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Thang chuẩn GDPT 2018 là 10 điểm. Hệ thống tự động quy đổi tỉ lệ % điểm đạt được để xếp thứ hạng.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1014,39 +1451,61 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
 
               {/* Xem trước kết quả phân tích */}
               {importPreview && (
-                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-3 mt-3">
-                  <div className="flex justify-between items-center font-bold text-emerald-900 text-xs">
-                    <span>
-                      ✅ Nhận diện thành công {importPreview.questions.length} câu hỏi:
+                <div className="p-4 rounded-2xl bg-emerald-50/90 border border-emerald-200 space-y-3 mt-3 shadow-sm">
+                  <div className="flex flex-wrap justify-between items-center gap-2 font-bold text-emerald-900 text-xs">
+                    <span className="flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>Nhận diện thành công {importPreview.questions.length} câu hỏi chuẩn cấu trúc GDPT 2018</span>
                     </span>
-                    <span className="font-mono text-xs bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-300">
+                    <span className="font-mono text-xs bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-300 text-emerald-950 font-black">
                       Mã đề: {computedImportCode}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-bold text-emerald-800">
-                    <div className="bg-white/80 p-2 rounded-lg border border-emerald-100">
-                      P.I: {importPreview.questions.filter((q) => q.part === "part_1").length} câu
+                  {/* Tóm tắt 10 thông số đã cấu hình */}
+                  <div className="p-3 bg-white/90 rounded-xl border border-emerald-200/80 text-xs space-y-2">
+                    <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-indigo-600" />
+                      <span>{importTitle}</span>
                     </div>
-                    <div className="bg-white/80 p-2 rounded-lg border border-emerald-100">
-                      P.II: {importPreview.questions.filter((q) => q.part === "part_2").length} câu
-                    </div>
-                    <div className="bg-white/80 p-2 rounded-lg border border-emerald-100">
-                      P.III: {importPreview.questions.filter((q) => q.part === "part_3").length} câu
-                    </div>
-                    <div className="bg-white/80 p-2 rounded-lg border border-emerald-100">
-                      P.IV: {importPreview.questions.filter((q) => q.part === "part_4").length} câu
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-slate-600 font-medium">
+                      <span>🏫 <strong>Khối & Lớp:</strong> {importGrade} ({importTargetClass})</span>
+                      <span>📖 <strong>Chương:</strong> {isCustomChapter ? customChapterInput : importChapter}</span>
+                      <span>📑 <strong>Bài & Lần:</strong> Bài {importLessonNumber} (Lần {importAttemptNumber})</span>
+                      <span>⏱️ <strong>Thời lượng:</strong> {importDuration} phút</span>
+                      <span>✍️ <strong>Biên soạn:</strong> {importAuthor}</span>
+                      <span>🎯 <strong>Thang điểm:</strong> {importTotalScore} điểm</span>
+                      <span>🛡️ <strong>Bảo mật:</strong> {importIsLocked ? "🔒 Khóa đề" : "🔓 Mở đề"} • {importAllowReview ? "👁️ Cho xem giải" : "🚫 Ẩn giải"} • {importPassword ? "🔑 Có mật khẩu" : "Không mật khẩu"}</span>
                     </div>
                   </div>
 
-                  <div className="flex justify-end pt-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-bold text-emerald-800">
+                    <div className="bg-white/90 p-2.5 rounded-xl border border-emerald-100 shadow-2xs">
+                      <div className="text-[10px] text-slate-400 font-normal">Phần I (Trắc nghiệm)</div>
+                      <div className="text-sm font-black text-emerald-900">{importPreview.questions.filter((q) => q.part === "part_1").length} câu</div>
+                    </div>
+                    <div className="bg-white/90 p-2.5 rounded-xl border border-emerald-100 shadow-2xs">
+                      <div className="text-[10px] text-slate-400 font-normal">Phần II (Đúng/Sai)</div>
+                      <div className="text-sm font-black text-emerald-900">{importPreview.questions.filter((q) => q.part === "part_2").length} câu</div>
+                    </div>
+                    <div className="bg-white/90 p-2.5 rounded-xl border border-emerald-100 shadow-2xs">
+                      <div className="text-[10px] text-slate-400 font-normal">Phần III (Trả lời ngắn)</div>
+                      <div className="text-sm font-black text-emerald-900">{importPreview.questions.filter((q) => q.part === "part_3").length} câu</div>
+                    </div>
+                    <div className="bg-white/90 p-2.5 rounded-xl border border-emerald-100 shadow-2xs">
+                      <div className="text-[10px] text-slate-400 font-normal">Phần IV (Tự luận)</div>
+                      <div className="text-sm font-black text-emerald-900">{importPreview.questions.filter((q) => q.part === "part_4").length} câu</div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
                     <button
                       type="button"
                       onClick={handleConfirmImport}
-                      className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md transition"
+                      className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-2 shadow-md hover:shadow-lg transition cursor-pointer"
                     >
                       <Check className="w-4 h-4" />
-                      <span>Lưu Đề Thi Vào Ngân Hàng</span>
+                      <span>Xác Nhận & Lưu Đề Vào Ngân Hàng</span>
                     </button>
                   </div>
                 </div>

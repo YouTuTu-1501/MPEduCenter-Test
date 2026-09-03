@@ -25,10 +25,12 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
   const codeMatch = latexContent.match(/\\(?:tieude|made)\{([^}]+)\}/);
   if (codeMatch) rawExamCode = codeMatch[1].trim();
 
-  // Trích xuất tiêu đề nếu có
+  // Trích xuất tiêu đề nếu có (\tenmonthi{...}, \tieude{...}, \title{...} hoặc % TITLE: ...)
   let examTitle = defaultTitle;
-  const titleMatch = latexContent.match(/\\(?:tenmonthi|tenkythi|title)\{([^}]+)\}/);
-  if (titleMatch) examTitle = titleMatch[1].trim();
+  const initialTitleMatch =
+    latexContent.match(/\\(?:tenmonthi|tenkythi|tieude|title)\{([^}]+)\}/i) ||
+    latexContent.match(/%\s*(?:TITLE|TIEUDE|TIÊU_ĐỀ):\s*([^\n]+)/i);
+  if (initialTitleMatch) examTitle = initialTitleMatch[1].trim();
 
   // Trích xuất Lớp (Grade) nếu có (\lop{...} hoặc % LOP: ... hoặc từ nội dung)
   let examGrade = "Lớp 12";
@@ -69,6 +71,86 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     examChapter = chapterMatch[1].trim();
   }
 
+  // Trích xuất Lớp áp dụng (Target class) nếu có (\lopapdung{...} hoặc % TARGET_CLASS: ...)
+  let examTargetClass = "Tất cả các lớp";
+  const targetClassMatch =
+    latexContent.match(/\\(?:lopapdung|targetclass)\{([^}]+)\}/i) ||
+    latexContent.match(/%\s*(?:TARGET_CLASS|LOP_AP_DUNG|LOPAPDUNG):\s*([^\n]+)/i);
+  if (targetClassMatch) {
+    examTargetClass = targetClassMatch[1].trim();
+  }
+
+  // Trích xuất Bài / Lesson nếu có (\bai{...} hoặc % LESSON: ... hoặc % BAI: ...)
+  let examLesson = "";
+  const lessonMatch =
+    latexContent.match(/\\(?:bai|lesson)\{([^}]+)\}/i) ||
+    latexContent.match(/%\s*(?:LESSON|BAI|BÀI):\s*([^\n]+)/i);
+  if (lessonMatch) {
+    examLesson = lessonMatch[1].trim();
+  }
+
+  // Trích xuất Lần kiểm tra / Attempt nếu có (\lan{...} hoặc % ATTEMPT: ... hoặc % LAN: ...)
+  let examAttempt = "01";
+  const attemptMatch =
+    latexContent.match(/\\(?:lan|attempt)\{([^}]+)\}/i) ||
+    latexContent.match(/%\s*(?:ATTEMPT|LAN|LẦN):\s*([^\n]+)/i);
+  if (attemptMatch) {
+    examAttempt = attemptMatch[1].trim();
+  }
+
+  // Trích xuất Giáo viên / Đơn vị biên soạn nếu có (\tacgia{...} hoặc \giaovien{...} hoặc % AUTHOR: ...)
+  let examAuthor = "Tổ Toán - THPT Chuyên";
+  const authorMatch =
+    latexContent.match(/\\(?:tacgia|giaovien|author)\{([^}]+)\}/i) ||
+    latexContent.match(/%\s*(?:AUTHOR|TACGIA|TÁC_GIẢ|GIAOVIEN|GIÁO_VIÊN):\s*([^\n]+)/i);
+  if (authorMatch) {
+    examAuthor = authorMatch[1].trim();
+  }
+
+  // Trích xuất Mô tả / Lời dặn dò nếu có (\dando{...} hoặc \mota{...} hoặc % DESCRIPTION: ...)
+  let examDescription = "";
+  const descMatch =
+    latexContent.match(/\\(?:dando|mota|description)\{([^}]+)\}/i) ||
+    latexContent.match(/%\s*(?:DESCRIPTION|DANDO|DẶN_DÒ|MOTA|MÔ_TẢ):\s*([^\n]+)/i);
+  if (descMatch) {
+    examDescription = descMatch[1].trim();
+  }
+
+  // Trích xuất Mật khẩu truy cập nếu có (\matkhau{...} hoặc % PASSWORD: ...)
+  let examPassword = "";
+  const passwordMatch =
+    latexContent.match(/\\(?:matkhau|password)\{([^}]+)\}/i) ||
+    latexContent.match(/%\s*(?:PASSWORD|MATKHAU|MẬT_KHẨU):\s*([^\n]+)/i);
+  if (passwordMatch) {
+    examPassword = passwordMatch[1].trim();
+  }
+
+  // Trích xuất Khóa đề (% IS_LOCKED: true/false)
+  let examIsLocked = false;
+  const lockMatch = latexContent.match(/%\s*(?:IS_LOCKED|LOCKED|KHOA_DE):\s*(true|false|1|0)/i);
+  if (lockMatch) {
+    examIsLocked = lockMatch[1].toLowerCase() === "true" || lockMatch[1] === "1";
+  }
+
+  // Trích xuất Xem lại đáp án (% ALLOW_REVIEW: true/false)
+  let examAllowReview = true;
+  const reviewMatch = latexContent.match(/%\s*(?:ALLOW_REVIEW|XEM_DAP_AN):\s*(true|false|1|0)/i);
+  if (reviewMatch) {
+    examAllowReview = reviewMatch[1].toLowerCase() === "true" || reviewMatch[1] === "1";
+  }
+
+  // Trích xuất Thang điểm tổng nếu có (\thangdiem{...} hoặc % TOTAL_SCORE: ...)
+  let configuredTotalScore: number | null = null;
+  const totalScoreMatch =
+    latexContent.match(/\\(?:thangdiem|totalscore)\{([^}]+)\}/i) ||
+    latexContent.match(/%\s*(?:TOTAL_SCORE|THANG_DIEM|THANGDIEM):\s*([^\n]+)/i);
+  if (totalScoreMatch) {
+    const parsedTotal = parseFloat(totalScoreMatch[1].replace(/[^0-9.]/g, ""));
+    if (!isNaN(parsedTotal) && parsedTotal > 0) {
+      configuredTotalScore = parsedTotal;
+    }
+  }
+
   // Trích xuất Thời gian làm bài nếu có (\thoiluong{...} hoặc \thoigian{...} hoặc % THOI_GIAN: ... hoặc "Thời gian: X phút")
   let examDuration = 90;
   const durationMatch =
@@ -92,8 +174,8 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     examCode = generateStandardExamCode({
       grade: examGrade,
       chapter: examChapter || "01",
-      lesson: examTitle || "01",
-      attempt: 1,
+      lesson: examLesson || examTitle || "01",
+      attempt: examAttempt || 1,
     });
   }
 
@@ -162,11 +244,20 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     code: examCode,
     subject: "Toán học",
     grade: examGrade,
+    targetClass: examTargetClass || "Tất cả các lớp",
     chapter: examChapter || undefined,
+    lesson: examLesson || undefined,
+    lessonNumber: examLesson || undefined,
+    attemptNumber: examAttempt || "01",
     durationMinutes: examDuration,
-    description: `Đề thi trích xuất từ định dạng LaTeX gồm ${questions.length} câu hỏi thuộc 4 dạng thức chuẩn (${examDuration} phút).`,
-    author: "Tổ Toán - Hệ thống Giáo dục",
-    totalScore: Number(totalScore.toFixed(2)) || 10,
+    description:
+      examDescription ||
+      `Đề thi trích xuất từ định dạng LaTeX gồm ${questions.length} câu hỏi thuộc 4 dạng thức chuẩn (${examDuration} phút).`,
+    author: examAuthor || "Tổ Toán - THPT Chuyên",
+    totalScore: configuredTotalScore ?? (Number(totalScore.toFixed(2)) || 10),
+    isLocked: examIsLocked,
+    allowReview: examAllowReview,
+    password: examPassword || undefined,
     questions,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -710,12 +801,22 @@ export function exportExamToLatex(exam: Exam): string {
 
 % Thông tin đề thi & Phân loại
 % GRADE: ${exam.grade}
+% TARGET_CLASS: ${exam.targetClass || "Tất cả các lớp"}
 % CHAPTER: ${exam.chapter || ""}
+% LESSON: ${exam.lesson || exam.lessonNumber || ""}
+% ATTEMPT: ${exam.attemptNumber || "01"}
 % DURATION: ${exam.durationMinutes}
-\\newcommand{\\tenkythi}{${exam.title}}
-\\newcommand{\\tenmonthi}{${exam.subject} - ${exam.grade}}
-\\newcommand{\\lop}{${exam.grade}}
-${exam.chapter ? `\\newcommand{\\chuong}{${exam.chapter}}\n` : ""}\\newcommand{\\thoigian}{${exam.durationMinutes}}
+% AUTHOR: ${exam.author || ""}
+% TITLE: ${exam.title}
+% DESCRIPTION: ${(exam.description || "").replace(/\n/g, " ")}
+% TOTAL_SCORE: ${exam.totalScore || 10}
+% IS_LOCKED: ${exam.isLocked ? "true" : "false"}
+% ALLOW_REVIEW: ${exam.allowReview !== false ? "true" : "false"}
+${exam.password ? `% PASSWORD: ${exam.password}\n` : ""}\newcommand{\tenkythi}{${exam.title}}
+\newcommand{\tenmonthi}{${exam.subject} - ${exam.grade}}
+\newcommand{\lop}{${exam.grade}}
+${exam.targetClass ? `\\newcommand{\\lopapdung}{${exam.targetClass}}\n` : ""}${exam.chapter ? `\\newcommand{\\chuong}{${exam.chapter}}\n` : ""}${exam.lesson || exam.lessonNumber ? `\\newcommand{\\bai}{${exam.lesson || exam.lessonNumber}}\n` : ""}${exam.author ? `\\newcommand{\\tacgia}{${exam.author}}\n` : ""}\\newcommand{\\thoigian}{${exam.durationMinutes}}
+\newcommand{\thangdiem}{${exam.totalScore || 10}}
 
 \\begin{document}
 \\title{${exam.title} - Mã đề: ${exam.code}}

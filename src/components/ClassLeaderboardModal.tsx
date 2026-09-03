@@ -263,21 +263,34 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
       filteredSubs.forEach((sub) => {
         const key = `${sub.studentId}_${sub.examId}`;
         const existing = studentBestMap.get(key);
-        if (!existing || sub.score > existing.score || (sub.score === existing.score && sub.timeSpentSeconds < existing.timeSpentSeconds)) {
+        const subMax = sub.maxScore && sub.maxScore > 0 ? sub.maxScore : 10;
+        const subPct = (sub.score / subMax) * 100;
+        const existMax = existing ? (existing.maxScore && existing.maxScore > 0 ? existing.maxScore : 10) : 10;
+        const existPct = existing ? (existing.score / existMax) * 100 : -1;
+
+        if (
+          !existing ||
+          subPct > existPct ||
+          (subPct === existPct && sub.timeSpentSeconds < existing.timeSpentSeconds)
+        ) {
           studentBestMap.set(key, sub);
         }
       });
 
       let list = Array.from(studentBestMap.values());
 
-      // Lọc theo mức điểm (Score Tier)
+      // Lọc theo mức điểm (Score Tier) quy chuẩn theo thang 10 hoặc tỷ lệ %
       if (selectedScoreTier !== "all") {
-        list = list.filter((item) => isScoreInTier(item.score, selectedScoreTier));
+        list = list.filter((item) => isScoreInTier(item.score, selectedScoreTier, item.maxScore || 10));
       }
 
       // Sắp xếp linh hoạt theo tiêu chí
       list.sort((a, b) => {
+        const rateA = (a.maxScore || 10) > 0 ? a.score / (a.maxScore || 10) : a.score / 10;
+        const rateB = (b.maxScore || 10) > 0 ? b.score / (b.maxScore || 10) : b.score / 10;
+
         if (sortBy === "best_score" || sortBy === "avg_score") {
+          if (rateB !== rateA) return rateB - rateA;
           if (b.score !== a.score) return b.score - a.score;
           if (a.timeSpentSeconds !== b.timeSpentSeconds) return a.timeSpentSeconds - b.timeSpentSeconds;
           return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
@@ -291,31 +304,41 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
         if (sortBy === "name_asc") {
           return a.studentName.localeCompare(b.studentName, "vi");
         }
-        return b.score - a.score;
+        return rateB - rateA;
       });
 
-      return list.map((item, idx) => ({
-        rank: idx + 1,
-        studentId: item.studentId,
-        studentName: item.studentName,
-        studentClass: item.studentClass || "",
-        studentAvatar:
-          item.studentAvatar ||
-          users.find((u) => u.id === item.studentId || u.name === item.studentName)?.avatar ||
-          `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(item.studentName)}`,
-        examId: item.examId,
-        examTitle: item.examTitle,
-        score: item.score,
-        maxScore: item.maxScore || 10,
-        timeSpentSeconds: item.timeSpentSeconds,
-        submittedAt: item.submittedAt,
-        partScores: item.partScores,
-        submission: item,
-        attemptsCount: submissions.filter((s) => s.studentId === item.studentId && s.examId === item.examId).length,
-      }));
+      return list.map((item, idx) => {
+        const mScore = item.maxScore || 10;
+        const percentage = Number(Math.min(100, Math.max(0, (item.score / mScore) * 100)).toFixed(1));
+
+        return {
+          rank: idx + 1,
+          studentId: item.studentId,
+          studentName: item.studentName,
+          studentClass: item.studentClass || "",
+          studentAvatar:
+            item.studentAvatar ||
+            users.find((u) => u.id === item.studentId || u.name === item.studentName)?.avatar ||
+            `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(item.studentName)}`,
+          examId: item.examId,
+          examTitle: item.examTitle,
+          score: item.score,
+          maxScore: mScore,
+          percentage,
+          bestScore: item.score,
+          bestPercentage: percentage,
+          avgScore: item.score,
+          avgPercentage: percentage,
+          timeSpentSeconds: item.timeSpentSeconds,
+          submittedAt: item.submittedAt,
+          partScores: item.partScores,
+          submission: item,
+          attemptsCount: submissions.filter((s) => s.studentId === item.studentId && s.examId === item.examId).length,
+        };
+      });
     }
 
-    // 6. Nếu chọn "Tất cả đề thi": Xếp hạng tổng hợp học sinh theo Điểm Trung Bình hoặc Tổng điểm tích lũy
+    // 6. Nếu chọn "Tất cả đề thi": Xếp hạng tổng hợp học sinh theo Tỷ lệ % Điểm Trung Bình hoặc Kết quả tốt nhất
     const studentAggMap = new Map<
       string,
       {
@@ -324,15 +347,21 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
         studentClass: string;
         studentAvatar?: string;
         scores: number[];
+        maxScores: number[];
+        percentages: number[];
         totalTime: number;
         subs: StudentSubmission[];
+        bestSub: StudentSubmission;
         latestSubmit: string;
       }
     >();
 
     filteredSubs.forEach((sub) => {
       const key = sub.studentId || sub.studentName;
+      const subMax = sub.maxScore && sub.maxScore > 0 ? sub.maxScore : 10;
+      const subPct = Number(Math.min(100, Math.max(0, (sub.score / subMax) * 100)).toFixed(1));
       const cur = studentAggMap.get(key);
+
       if (!cur) {
         studentAggMap.set(key, {
           studentId: sub.studentId,
@@ -340,14 +369,26 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
           studentClass: sub.studentClass || "",
           studentAvatar: sub.studentAvatar,
           scores: [sub.score],
+          maxScores: [subMax],
+          percentages: [subPct],
           totalTime: sub.timeSpentSeconds || 0,
           subs: [sub],
+          bestSub: sub,
           latestSubmit: sub.submittedAt,
         });
       } else {
         cur.scores.push(sub.score);
+        cur.maxScores.push(subMax);
+        cur.percentages.push(subPct);
         cur.totalTime += sub.timeSpentSeconds || 0;
         cur.subs.push(sub);
+
+        const curBestMax = cur.bestSub.maxScore && cur.bestSub.maxScore > 0 ? cur.bestSub.maxScore : 10;
+        const curBestPct = (cur.bestSub.score / curBestMax) * 100;
+        if (subPct > curBestPct) {
+          cur.bestSub = sub;
+        }
+
         if (new Date(sub.submittedAt).getTime() > new Date(cur.latestSubmit).getTime()) {
           cur.latestSubmit = sub.submittedAt;
         }
@@ -355,8 +396,14 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
     });
 
     let aggList = Array.from(studentAggMap.values()).map((st) => {
+      const avgPercentage = Number(
+        (st.percentages.reduce((a, b) => a + b, 0) / st.percentages.length).toFixed(1)
+      );
+      const bestPercentage = Math.max(...st.percentages);
       const avgScore = Number((st.scores.reduce((a, b) => a + b, 0) / st.scores.length).toFixed(2));
-      const maxScore = Math.max(...st.scores);
+      const bestScore = st.bestSub.score;
+      const bestMaxScore = st.bestSub.maxScore || 10;
+
       const userObj = users.find(
         (u) =>
           u.id === st.studentId ||
@@ -373,32 +420,35 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
           st.studentAvatar ||
           `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(st.studentName)}`,
         avgScore,
-        maxScore,
+        avgPercentage,
+        bestScore,
+        bestMaxScore,
+        bestPercentage,
         attemptsCount: st.scores.length,
         totalTime: st.totalTime,
         latestSubmit: st.latestSubmit,
-        lastSubmission: st.subs[0],
+        lastSubmission: st.bestSub,
       };
     });
 
-    // Lọc theo mức điểm
+    // Lọc theo mức điểm (quy chuẩn % trên thang điểm)
     if (selectedScoreTier !== "all") {
-      aggList = aggList.filter((item) => isScoreInTier(item.avgScore, selectedScoreTier));
+      aggList = aggList.filter((item) => isScoreInTier(item.avgScore, selectedScoreTier, 10));
     }
 
-    // Sắp xếp linh hoạt
+    // Sắp xếp linh hoạt theo tỷ lệ %
     aggList.sort((a, b) => {
       if (sortBy === "best_score") {
-        if (b.maxScore !== a.maxScore) return b.maxScore - a.maxScore;
-        return b.avgScore - a.avgScore;
+        if (b.bestPercentage !== a.bestPercentage) return b.bestPercentage - a.bestPercentage;
+        return b.avgPercentage - a.avgPercentage;
       }
       if (sortBy === "avg_score") {
-        if (b.avgScore !== a.avgScore) return b.avgScore - a.avgScore;
+        if (b.avgPercentage !== a.avgPercentage) return b.avgPercentage - a.avgPercentage;
         return b.attemptsCount - a.attemptsCount;
       }
       if (sortBy === "attempts") {
         if (b.attemptsCount !== a.attemptsCount) return b.attemptsCount - a.attemptsCount;
-        return b.avgScore - a.avgScore;
+        return b.avgPercentage - a.avgPercentage;
       }
       if (sortBy === "fastest") {
         return a.totalTime - b.totalTime;
@@ -409,52 +459,77 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
       if (sortBy === "name_asc") {
         return a.studentName.localeCompare(b.studentName, "vi");
       }
-      return b.avgScore - a.avgScore;
+      return b.avgPercentage - a.avgPercentage;
     });
 
-    return aggList.map((item, idx) => ({
-      rank: idx + 1,
-      studentId: item.studentId,
-      studentName: item.studentName,
-      studentClass: item.studentClass,
-      studentAvatar: item.studentAvatar,
-      score: sortBy === "best_score" ? item.maxScore : item.avgScore,
-      maxScore: 10,
-      bestScore: item.maxScore,
-      avgScore: item.avgScore,
-      attemptsCount: item.attemptsCount,
-      timeSpentSeconds: item.totalTime,
-      submittedAt: item.latestSubmit,
-      submission: item.lastSubmission,
-    }));
+    return aggList.map((item, idx) => {
+      const isBest = sortBy === "best_score";
+      const displayScore = isBest ? item.bestScore : item.avgScore;
+      const displayMaxScore = isBest ? item.bestMaxScore : 10;
+      const displayPct = isBest ? item.bestPercentage : item.avgPercentage;
+
+      return {
+        rank: idx + 1,
+        studentId: item.studentId,
+        studentName: item.studentName,
+        studentClass: item.studentClass,
+        studentAvatar: item.studentAvatar,
+        score: displayScore,
+        maxScore: displayMaxScore,
+        percentage: displayPct,
+        bestScore: item.bestScore,
+        bestMaxScore: item.bestMaxScore,
+        bestPercentage: item.bestPercentage,
+        avgScore: item.avgScore,
+        avgPercentage: item.avgPercentage,
+        attemptsCount: item.attemptsCount,
+        timeSpentSeconds: item.totalTime,
+        submittedAt: item.latestSubmit,
+        submission: item.lastSubmission,
+      };
+    });
   }, [submissions, selectedGrade, selectedClass, selectedExamId, selectedScoreTier, sortBy, searchKeyword, users, exams]);
 
   // Thống kê nhanh của bảng xếp hạng
   const classStats = useMemo(() => {
     if (leaderboardData.length === 0) {
-      return { totalStudents: 0, avgScore: 0, topScore: 0, passRate: 0 };
+      return { totalStudents: 0, avgScore: 0, avgPercentage: 0, topScore: 0, topPercentage: 0, passRate: 0 };
     }
     const scores = leaderboardData.map((d) => d.score);
+    const percentages = leaderboardData.map((d) => d.percentage);
     const avg = Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2));
+    const avgPct = Number((percentages.reduce((a, b) => a + b, 0) / percentages.length).toFixed(1));
     const top = Math.max(...scores);
-    const passCount = scores.filter((s) => s >= 5.0).length;
-    const passRate = Number(((passCount / scores.length) * 100).toFixed(1));
+    const topPct = Math.max(...percentages);
+    const passCount = leaderboardData.filter((d) => d.percentage >= 50).length;
+    const passRate = Number(((passCount / leaderboardData.length) * 100).toFixed(1));
 
     return {
       totalStudents: leaderboardData.length,
       avgScore: avg,
+      avgPercentage: avgPct,
       topScore: top,
+      topPercentage: topPct,
       passRate,
     };
   }, [leaderboardData]);
 
   // Xuất file bảng xếp hạng
   const handleExportCSV = () => {
-    const isSpecificExam = selectedExamId !== "all";
-    let csv = "\uFEFFXếp hạng,SBD,Họ và tên,Lớp,Điểm số,Số lượt thi,Thời gian làm (phút),Ngày nộp mới nhất\n";
+    let csv = "\uFEFFXếp hạng,SBD,Họ và tên,Lớp,Điểm đạt được,Thang điểm tối đa,Tỷ lệ %,Quy chuẩn thang 10,Điểm TB,Tỷ lệ TB %,Số lượt thi,Thời gian làm (phút),Ngày nộp mới nhất\n";
     leaderboardData.forEach((row) => {
       const minutes = Math.round(row.timeSpentSeconds / 60);
-      csv += `"${row.rank}","${row.studentId}","${row.studentName}","${row.studentClass}",${row.score},${row.attemptsCount},${minutes},"${new Date(row.submittedAt).toLocaleString("vi-VN")}"\n`;
+      const mScore = row.maxScore || 10;
+      const standardized10 = Number(((row.score / mScore) * 10).toFixed(2));
+      const rowDate = (() => {
+        try {
+          return new Date(row.submittedAt).toLocaleString("vi-VN");
+        } catch {
+          return row.submittedAt || "";
+        }
+      })();
+
+      csv += `"${row.rank}","${row.studentId}","${row.studentName}","${row.studentClass}",${row.score},${mScore},"${row.percentage}%",${standardized10},${row.avgScore},"${row.avgPercentage}%",${row.attemptsCount},${minutes},"${rowDate}"\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -945,7 +1020,10 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
             </div>
             <div>
               <div className="text-[10px] font-bold text-slate-400 uppercase">Điểm trung bình</div>
-              <div className="text-base font-black text-emerald-600">{classStats.avgScore}đ</div>
+              <div className="text-base font-black text-emerald-600">
+                {classStats.avgScore}đ{" "}
+                <span className="text-xs font-bold text-emerald-500">({classStats.avgPercentage}%)</span>
+              </div>
             </div>
           </div>
 
@@ -955,7 +1033,10 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
             </div>
             <div>
               <div className="text-[10px] font-bold text-slate-400 uppercase">Điểm cao nhất (Thủ khoa)</div>
-              <div className="text-base font-black text-indigo-600">{classStats.topScore}đ</div>
+              <div className="text-base font-black text-indigo-600">
+                {classStats.topScore}đ{" "}
+                <span className="text-xs font-bold text-indigo-500">({classStats.topPercentage}%)</span>
+              </div>
             </div>
           </div>
 
@@ -964,7 +1045,7 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
               <TrendingUp className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-[10px] font-bold text-slate-400 uppercase">Tỷ lệ Đạt (≥5.0)</div>
+              <div className="text-[10px] font-bold text-slate-400 uppercase">Tỷ lệ Đạt (≥50% điểm)</div>
               <div className="text-base font-black text-sky-600">{classStats.passRate}%</div>
             </div>
           </div>
@@ -1005,8 +1086,13 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
                 <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold">
                   Lớp {leaderboardData[1].studentClass}
                 </span>
-                <div className="text-sm font-black text-slate-700">
-                  {leaderboardData[1].score} điểm
+                <div className="flex flex-col items-center gap-0.5">
+                  <div className="text-xs sm:text-sm font-black text-slate-700">
+                    {leaderboardData[1].score} / {leaderboardData[1].maxScore}đ
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full font-black text-[10px] bg-slate-100 text-slate-700 border border-slate-200">
+                    {leaderboardData[1].percentage}%
+                  </span>
                 </div>
               </div>
 
@@ -1037,8 +1123,13 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
                 <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-extrabold border border-amber-300">
                   Lớp {leaderboardData[0].studentClass}
                 </span>
-                <div className="text-base font-black text-amber-600">
-                  {leaderboardData[0].score} điểm 🏆
+                <div className="flex flex-col items-center gap-0.5">
+                  <div className="text-sm sm:text-base font-black text-amber-600">
+                    {leaderboardData[0].score} / {leaderboardData[0].maxScore}đ 🏆
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full font-black text-[10.5px] bg-amber-100 text-amber-900 border border-amber-300">
+                    {leaderboardData[0].percentage}%
+                  </span>
                 </div>
               </div>
 
@@ -1068,8 +1159,13 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
                 <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold">
                   Lớp {leaderboardData[2].studentClass}
                 </span>
-                <div className="text-sm font-black text-amber-800">
-                  {leaderboardData[2].score} điểm
+                <div className="flex flex-col items-center gap-0.5">
+                  <div className="text-xs sm:text-sm font-black text-amber-800">
+                    {leaderboardData[2].score} / {leaderboardData[2].maxScore}đ
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full font-black text-[10px] bg-amber-50 text-amber-800 border border-amber-200">
+                    {leaderboardData[2].percentage}%
+                  </span>
                 </div>
               </div>
             </div>
@@ -1095,7 +1191,7 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
                     <th className="p-3">Học sinh</th>
                     <th className="p-3 text-center">Lớp</th>
                     <th className="p-3 text-center">
-                      {selectedExamId !== "all" ? "Điểm số" : "Điểm Trung Bình"}
+                      {selectedExamId !== "all" ? "Điểm & Tỷ lệ %" : "Điểm & Tỷ lệ %"}
                     </th>
                     <th className="p-3 text-center">Số lượt làm</th>
                     <th className="p-3 text-center">Thời gian</th>
@@ -1170,20 +1266,28 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
                           </span>
                         </td>
 
-                        {/* Score */}
+                        {/* Score & Percentage */}
                         <td className="p-3 text-center">
-                          <span
-                            className={`px-3 py-1 rounded-xl font-black text-xs sm:text-sm inline-flex items-center gap-1 ${
-                              row.score >= 8
-                                ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                                : row.score >= 5
-                                ? "bg-indigo-100 text-indigo-800 border border-indigo-200"
-                                : "bg-rose-100 text-rose-800 border border-rose-200"
-                            }`}
-                          >
-                            <span>{row.score}đ</span>
-                            {row.score === 10 && <span>🔥</span>}
-                          </span>
+                          <div className="flex flex-col items-center justify-center gap-0.5">
+                            <span className="font-black text-xs sm:text-sm text-slate-800">
+                              {row.score} / {row.maxScore}đ
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-black text-[10px] border inline-flex items-center gap-0.5 ${
+                                row.percentage >= 80
+                                  ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                  : row.percentage >= 65
+                                  ? "bg-blue-50 text-blue-800 border-blue-200"
+                                  : row.percentage >= 50
+                                  ? "bg-amber-50 text-amber-800 border-amber-200"
+                                  : "bg-rose-50 text-rose-800 border-rose-200"
+                              }`}
+                              title={`Đạt ${row.percentage}% trên tổng điểm ${row.maxScore}đ (Quy chuẩn hệ 10: ${((row.score / row.maxScore) * 10).toFixed(2)}đ)`}
+                            >
+                              <span>{row.percentage}%</span>
+                              {row.percentage === 100 && <span>🔥</span>}
+                            </span>
+                          </div>
                         </td>
 
                         {/* Attempts */}
