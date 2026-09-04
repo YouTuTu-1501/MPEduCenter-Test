@@ -16,6 +16,7 @@ export interface TikzNode {
   isBadge?: boolean;
   isExplicitShifted?: boolean;
   isFixed?: boolean;
+  rotate?: number;
 }
 
 export interface TikzRectShape {
@@ -977,6 +978,26 @@ export function parseNodeShift(optStr: string, coordsMap?: Map<string, Point2D>)
 }
 
 /**
+ * Kiểm tra xem chuỗi options của node có chứa chỉ định hướng tương đối (above, below, left, right...) hay không
+ */
+export function isDirectionalOption(optStr: string): boolean {
+  if (!optStr) return false;
+  const s = optStr.toLowerCase();
+  return (
+    s.includes("above") ||
+    s.includes("below") ||
+    s.includes("left") ||
+    s.includes("right") ||
+    s.includes("north") ||
+    s.includes("south") ||
+    s.includes("east") ||
+    s.includes("west") ||
+    /(?:^|[, ])anchor\s*=\s*(?:north|south|east|west)/i.test(s) ||
+    /^[+-]?[0-9]+(?:\.[0-9]+)?$/.test(s.trim())
+  );
+}
+
+/**
  * Parse tọa độ dạng (x,y), (x,y,z), (axis cs:x,y), (rel axis cs:rx,ry), (angle:radius), ($(A)!0.5!(B)$), ($(B)+(E)-(A)$), ($(O)+(0,5)$)...
  */
 export function parseCoordinateValue(coordStr: string, coordsMap: Map<string, Point2D>): Point2D | null {
@@ -1844,7 +1865,9 @@ export function formatLatexToSvgText(
   x: number,
   y: number,
   isBadge: boolean,
-  nIdx: number
+  nIdx: number,
+  rotate?: number,
+  color?: string
 ): string {
   let label = (rawLabel || "").trim();
   if (!label) return "";
@@ -2006,17 +2029,26 @@ export function formatLatexToSvgText(
     }
   }
 
-  if (!tspans) {
+  const isSymbolMark = /^[\\/|+=~-]+$/.test(label.trim()) || label === "×" || label === "∥";
+  if (isSymbolMark && !tspans) {
+    tspans = `<tspan font-style="normal">${label}</tspan>`;
+    approxCharCount = label.length;
+  } else if (!tspans) {
     tspans = `<tspan font-style="italic">${label}</tspan>`;
     approxCharCount = label.length;
   }
+
+  const rotateAttr =
+    rotate !== undefined && !isNaN(rotate) && rotate !== 0
+      ? ` transform="rotate(${-rotate} ${x.toFixed(1)} ${y.toFixed(1)})"`
+      : "";
 
   // 8. Nếu là Badge (nhãn hộp nổi bật cho hàm số, công thức, số đo độ dài)
   if (isBadge) {
     const boxW = Math.max(34, approxCharCount * 8.5 + 16);
     const boxH = 22;
     return `
-      <g id="tikz-node-badge-${nIdx}" class="select-none pointer-events-none">
+      <g id="tikz-node-badge-${nIdx}" class="select-none pointer-events-none"${rotateAttr}>
         <rect 
           x="${(x - boxW / 2).toFixed(1)}" 
           y="${(y - boxH / 2).toFixed(1)}" 
@@ -2034,13 +2066,18 @@ export function formatLatexToSvgText(
           y="${y.toFixed(1)}" 
           text-anchor="middle" 
           dominant-baseline="central" 
-          style="font-family: 'KaTeX_Math', 'Cambria Math', 'Times New Roman', Times, serif; font-size: 13px; font-weight: 600; fill: #1e293b;"
+          style="font-family: 'KaTeX_Math', 'Cambria Math', 'Times New Roman', Times, serif; font-size: 13px; font-weight: 600; fill: ${color || "#1e293b"};"
         >${tspans}</text>
       </g>`;
   }
 
-  // 9. Nhãn điểm vector thông thường (Đỉnh A, B, C, S, gốc O, trục tọa độ x, y...)
+  // 9. Nhãn điểm vector thông thường (Đỉnh A, B, C, S, gốc O, trục tọa độ x, y, góc, hoặc ký hiệu đoạn thẳng như /, //, |)
   // Sử dụng viền trắng stroke halo (paint-order: stroke fill) để nhãn không bao giờ bị chìm hoặc che khuất bởi nét vẽ
+  const fSize = isSymbolMark ? "15.5px" : "14.5px";
+  const fWeight = isSymbolMark ? "700" : "600";
+  const strokeW = isSymbolMark ? "2.0px" : "3.2px";
+  const fillColor = color || (isSymbolMark ? "#1e293b" : "#0f172a");
+
   return `
     <text 
       id="tikz-node-label-${nIdx}" 
@@ -2048,8 +2085,8 @@ export function formatLatexToSvgText(
       y="${y.toFixed(1)}" 
       text-anchor="middle" 
       dominant-baseline="central" 
-      class="select-none pointer-events-none"
-      style="font-family: 'KaTeX_Math', 'Cambria Math', 'Times New Roman', Times, serif; font-size: 14.5px; font-weight: 600; fill: #0f172a; paint-order: stroke fill; stroke: #ffffff; stroke-width: 3.5px; stroke-linejoin: round; stroke-linecap: round;"
+      class="select-none pointer-events-none"${rotateAttr}
+      style="font-family: 'KaTeX_Math', 'Cambria Math', 'Times New Roman', Times, serif; font-size: ${fSize}; font-weight: ${fWeight}; fill: ${fillColor}; paint-order: stroke fill; stroke: #ffffff; stroke-width: ${strokeW}; stroke-linejoin: round; stroke-linecap: round;"
     >${tspans}</text>`;
 }
 
@@ -2409,6 +2446,134 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     }
   }
 
+  // 8.1b. \tkzMarkSegment & \tkzMarkSegments: Vẽ các vạch ký hiệu đoạn thẳng bằng nhau (mark=|, mark=||, mark=|||, mark=x, mark=oo...)
+  const tkzMarkSegmentRegex = /\\(?:tkzMarkSegments?)(?:\s*\[([^\]]*)\])?\s*\(([^)]+)\)/g;
+  let tkzMarkSegM: RegExpExecArray | null;
+  while ((tkzMarkSegM = tkzMarkSegmentRegex.exec(cleanCode)) !== null) {
+    const optStr = tkzMarkSegM[1] || "";
+    const rawArgs = tkzMarkSegM[2].trim();
+    const tokens = rawArgs.replace(/[()]/g, " ").split(/[\s,]+/).filter(Boolean);
+
+    let markType = "|";
+    const markMatch = optStr.match(/mark\s*=\s*([^,\]]+)/i);
+    if (markMatch) markType = markMatch[1].trim();
+
+    let pos = 0.5;
+    const posMatch = optStr.match(/pos\s*=\s*([0-9.]+)/i);
+    if (posMatch) pos = parseFloat(posMatch[1]) || 0.5;
+
+    let size = 0.18;
+    const sizeMatch = optStr.match(/size\s*=\s*([0-9.]+\s*(?:mm|cm|pt)?)/i);
+    if (sizeMatch) size = parseTikzDimension(sizeMatch[1], 0.18);
+
+    const strokeColor = parseTikzColor(optStr, "#1e293b");
+
+    for (let i = 0; i + 1 < tokens.length; i += 2) {
+      const p1 = coordsMap.get(tokens[i]);
+      const p2 = coordsMap.get(tokens[i + 1]);
+      if (p1 && p2) {
+        const mx = p1.x + pos * (p2.x - p1.x);
+        const my = p1.y + pos * (p2.y - p1.y);
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len;
+        const ny = dx / len;
+        const tx = dx / len;
+        const ty = dy / len;
+        const halfS = size * 0.5;
+        const gap = 0.05;
+
+        if (markType === "||" || markType === "s||") {
+          paths.push({
+            type: "line",
+            points: [
+              { x: mx - tx * gap - nx * halfS, y: my - ty * gap - ny * halfS },
+              { x: mx - tx * gap + nx * halfS, y: my - ty * gap + ny * halfS },
+            ],
+            strokeColor,
+            strokeWidth: 1.3,
+          });
+          paths.push({
+            type: "line",
+            points: [
+              { x: mx + tx * gap - nx * halfS, y: my + ty * gap - ny * halfS },
+              { x: mx + tx * gap + nx * halfS, y: my + ty * gap + ny * halfS },
+            ],
+            strokeColor,
+            strokeWidth: 1.3,
+          });
+        } else if (markType === "|||" || markType === "s|||") {
+          paths.push({
+            type: "line",
+            points: [
+              { x: mx - nx * halfS, y: my - ny * halfS },
+              { x: mx + nx * halfS, y: my + ny * halfS },
+            ],
+            strokeColor,
+            strokeWidth: 1.3,
+          });
+          paths.push({
+            type: "line",
+            points: [
+              { x: mx - tx * gap - nx * halfS, y: my - ty * gap - ny * halfS },
+              { x: mx - tx * gap + nx * halfS, y: my - ty * gap + ny * halfS },
+            ],
+            strokeColor,
+            strokeWidth: 1.3,
+          });
+          paths.push({
+            type: "line",
+            points: [
+              { x: mx + tx * gap - nx * halfS, y: my + ty * gap - ny * halfS },
+              { x: mx + tx * gap + nx * halfS, y: my + ty * gap + ny * halfS },
+            ],
+            strokeColor,
+            strokeWidth: 1.3,
+          });
+        } else if (markType === "x" || markType === "times") {
+          paths.push({
+            type: "line",
+            points: [
+              { x: mx - tx * halfS - nx * halfS, y: my - ty * halfS - ny * halfS },
+              { x: mx + tx * halfS + nx * halfS, y: my + ty * halfS + ny * halfS },
+            ],
+            strokeColor,
+            strokeWidth: 1.3,
+          });
+          paths.push({
+            type: "line",
+            points: [
+              { x: mx - tx * halfS + nx * halfS, y: my - ty * halfS + ny * halfS },
+              { x: mx + tx * halfS - nx * halfS, y: my + ty * halfS - ny * halfS },
+            ],
+            strokeColor,
+            strokeWidth: 1.3,
+          });
+        } else if (markType === "oo") {
+          paths.push({
+            type: "circle",
+            center: { x: mx, y: my },
+            radius: halfS * 0.7,
+            strokeColor,
+            strokeWidth: 1.3,
+            fillColor: "#ffffff",
+          });
+        } else {
+          paths.push({
+            type: "line",
+            points: [
+              { x: mx - nx * halfS, y: my - ny * halfS },
+              { x: mx + nx * halfS, y: my + ny * halfS },
+            ],
+            strokeColor,
+            strokeWidth: 1.3,
+          });
+        }
+      }
+    }
+  }
+
   // 8.2. \tkzLabelAngle & \tkzLabelAngles
   const tkzLabelAngleRegex = /\\(?:tkzLabelAngles?)(?:\s*\[([^\]]*)\])?\s*\(([^)]+)\)\s*\{([^}]+)\}/g;
   let tkzLabelM: RegExpExecArray | null;
@@ -2452,9 +2617,9 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           id: `tkz_angle_lbl_${nodes.length}`,
           x: labelPt.x,
           y: labelPt.y,
-          pos: "above",
+          pos: "center",
           label,
-          isBadge: true,
+          isBadge: false,
           isFixed: true,
           isExplicitShifted: true,
         });
@@ -3331,9 +3496,9 @@ export function parseTikzToSvg(rawTikzCode: string): string {
                 id: `angle_lbl_${nodes.length}`,
                 x: labelPt.x,
                 y: labelPt.y,
-                pos: "above",
+                pos: "center",
                 label: quoteLabel,
-                isBadge: true,
+                isBadge: false,
                 isFixed: true,
                 isExplicitShifted: true,
               });
@@ -3501,14 +3666,27 @@ export function parseTikzToSvg(rawTikzCode: string): string {
               strokeWidth: 1.2,
             });
           } else if (label) {
+            let rotate: number | undefined = undefined;
+            const rotMatch = optStr.match(/rotate\s*=\s*([+-]?[0-9.]+)/i);
+            if (rotMatch) {
+              rotate = parseFloat(rotMatch[1]);
+            }
+
+            const hasDirection = isDirectionalOption(optStr);
+            const isAngleText = /[\^°]|\\circ|\\ang|\bdeg\b/.test(label) || /^[0-9]+°?$/.test(label.replace(/[\${}]/g, "").trim());
+            const isSymbolMark = /^[\\/|+=~-]+$/.test(label.replace(/[\${}]/g, "").trim()) || /\\times|\\parallel/.test(label);
+            const shouldFixCenter = !hasDirection || isAngleText || isSymbolMark || hasExplicitShift || rotate !== undefined;
+
             nodes.push({
               id: nodeName || `node_${nodes.length}`,
               x: explicitPt.x,
               y: explicitPt.y,
-              pos: optStr || "above",
+              pos: hasDirection ? optStr : "center",
               label,
-              isExplicitShifted: hasExplicitShift,
-              isFixed: hasExplicitShift,
+              isBadge: optStr.includes("badge") || optStr.includes("box"),
+              isExplicitShifted: shouldFixCenter,
+              isFixed: shouldFixCenter,
+              rotate,
             });
           }
         }
@@ -3689,15 +3867,27 @@ export function parseTikzToSvg(rawTikzCode: string): string {
             nodePt = { x: nodePt.x + dx, y: nodePt.y + dy };
           }
 
+          let rotate: number | undefined = undefined;
+          const rotMatch = optStr.match(/rotate\s*=\s*([+-]?[0-9.]+)/i);
+          if (rotMatch) {
+            rotate = parseFloat(rotMatch[1]);
+          }
+
+          const hasDirection = isDirectionalOption(optStr);
+          const isAngleText = /[\^°]|\\circ|\\ang|\bdeg\b/.test(label) || /^[0-9]+°?$/.test(label.replace(/[\${}]/g, "").trim());
+          const isSymbolMark = /^[\\/|+=~-]+$/.test(label.replace(/[\${}]/g, "").trim()) || /\\times|\\parallel/.test(label);
+          const shouldFixCenter = !hasDirection || isAngleText || isSymbolMark || hasExplicitShift || rotate !== undefined;
+
           nodes.push({
             id: nodeName || `path_node_${nodes.length}`,
             x: nodePt.x,
             y: nodePt.y,
-            pos: optStr || "above",
+            pos: hasDirection ? optStr : "center",
             label,
-            isBadge: optStr.includes("midway"),
-            isExplicitShifted: hasExplicitShift,
-            isFixed: hasExplicitShift,
+            isBadge: optStr.includes("badge") || optStr.includes("box"),
+            isExplicitShifted: shouldFixCenter,
+            isFixed: shouldFixCenter,
+            rotate,
           });
         }
       }
@@ -3910,18 +4100,21 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     while (diff < 0) diff += 360;
     while (diff >= 360) diff -= 360;
 
-    // Trong TikZ (thư viện angles/tkz-euclide):
-    // Cung góc luôn được vẽ theo chiều ngược chiều kim đồng hồ trong hệ tọa độ toán học (tăng góc từ angle1 đến angle2).
-    // Trong hệ tọa độ màn hình SVG (với trục Y hướng xuống):
-    // - Chiều tăng góc lượng giác toán học tương ứng với chiều NGƯỢC chiều kim đồng hồ trên màn hình (sweepFlag = 0).
-    // - largeArcFlag = 1 nếu diff > 180 (góc phản xạ/lồi > 180°), ngược lại = 0.
+    let startA = angle1;
+    let endA = angle2;
+    if (diff > 180) {
+      startA = angle2;
+      endA = angle1;
+      diff = 360 - diff;
+    }
+
     const largeArcFlag = diff > 180 ? 1 : 0;
     const sweepFlag = 0;
 
-    const startX = vx + r * Math.cos((angle1 * Math.PI) / 180);
-    const startY = vy - r * Math.sin((angle1 * Math.PI) / 180);
-    const endX = vx + r * Math.cos((angle2 * Math.PI) / 180);
-    const endY = vy - r * Math.sin((angle2 * Math.PI) / 180);
+    const startX = vx + r * Math.cos((startA * Math.PI) / 180);
+    const startY = vy - r * Math.sin((startA * Math.PI) / 180);
+    const endX = vx + r * Math.cos((endA * Math.PI) / 180);
+    const endY = vy - r * Math.sin((endA * Math.PI) / 180);
 
     if (m.fillColor && m.fillColor !== "none") {
       svgElements += `
@@ -3944,10 +4137,10 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
     if (m.doubleArc) {
       const r2 = r * 0.82;
-      const sX2 = vx + r2 * Math.cos((angle1 * Math.PI) / 180);
-      const sY2 = vy - r2 * Math.sin((angle1 * Math.PI) / 180);
-      const eX2 = vx + r2 * Math.cos((angle2 * Math.PI) / 180);
-      const eY2 = vy - r2 * Math.sin((angle2 * Math.PI) / 180);
+      const sX2 = vx + r2 * Math.cos((startA * Math.PI) / 180);
+      const sY2 = vy - r2 * Math.sin((startA * Math.PI) / 180);
+      const eX2 = vx + r2 * Math.cos((endA * Math.PI) / 180);
+      const eY2 = vy - r2 * Math.sin((endA * Math.PI) / 180);
       svgElements += `
         <path 
           id="tikz-angle-arc-double-${mIdx}"
@@ -4024,6 +4217,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     isBadge?: boolean;
     isFixed?: boolean;
     isExplicitShifted?: boolean;
+    rotate?: number;
+    color?: string;
   }
 
   const layoutNodes: LayoutNode[] = uniqueNodes.map((node, idx) => {
@@ -4043,6 +4238,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         isBadge: node.isBadge,
         isFixed: true,
         isExplicitShifted: true,
+        rotate: node.rotate,
+        color: node.color,
       };
     }
 
@@ -4117,6 +4314,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       isBadge: node.isBadge,
       isFixed: false,
       isExplicitShifted: false,
+      rotate: node.rotate,
+      color: node.color,
     };
   });
 
@@ -4196,7 +4395,7 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
   // D. Render các nhãn LaTeX dạng vector native tương thích 100% với Safari/WebKit trên iPhone, iPad
   layoutNodes.forEach((ln, nIdx) => {
-    svgElements += formatLatexToSvgText(ln.label, ln.x, ln.y, !!ln.isBadge, nIdx);
+    svgElements += formatLatexToSvgText(ln.label, ln.x, ln.y, !!ln.isBadge, nIdx, ln.rotate, ln.color);
   });
 
   const displayWidth = Math.min(580, width);

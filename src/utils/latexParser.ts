@@ -387,6 +387,10 @@ export function cleanQuestionContent(content: string): string {
   text = text.replace(/\\usepackage(?:\s*\[[^\]]*\])?\{[^}]+\}/gi, "");
   text = text.replace(/\\tikzset\{[\s\S]*?\}/gi, "");
 
+  // 6. Chuẩn hóa lệnh khoảng trắng LaTeX "\ " (control space) và xóa dấu \ trơ trọi ở cuối câu dẫn/cuối dòng
+  text = text.replace(/\\ /g, " ");
+  text = text.replace(/(?<!\\)\\(?:\s*)$/, "");
+
   return text.trim();
 }
 
@@ -531,7 +535,11 @@ function parseSingleExBlock(
       for (let j = 0; j < 4; j++) {
         const itemRaw = argsExtracted.args[j].trim();
         const isTrue = itemRaw.includes("\\True");
-        const cleanText = itemRaw.replace(/\\True\b/g, "").trim();
+        const cleanText = itemRaw
+          .replace(/\\True\b/g, "")
+          .replace(/\\ /g, " ")
+          .replace(/(?<!\\)\\(?:\s*)$/, "")
+          .trim();
         tfItems.push({
           label: labels[j],
           text: cleanText,
@@ -568,7 +576,11 @@ function parseSingleExBlock(
       for (let j = 0; j < 4; j++) {
         const optRaw = argsExtracted.args[j].trim();
         const isTrue = optRaw.includes("\\True");
-        const cleanText = optRaw.replace(/\\True\b/g, "").trim();
+        const cleanText = optRaw
+          .replace(/\\True\b/g, "")
+          .replace(/\\ /g, " ")
+          .replace(/(?<!\\)\\(?:\s*)$/, "")
+          .trim();
         if (isTrue) correctAnswer = labels[j];
         options.push({
           label: labels[j],
@@ -590,6 +602,9 @@ function parseSingleExBlock(
 
   // Làm sạch bổ sung để đảm bảo tuyệt đối không còn sót \loigiai trong content
   content = cleanQuestionContent(content);
+  if (explanation) {
+    explanation = cleanQuestionContent(explanation);
+  }
 
   // Tự động phân chia phần thi phù hợp nếu chưa khớp
   let mappedPart: PartType = part;

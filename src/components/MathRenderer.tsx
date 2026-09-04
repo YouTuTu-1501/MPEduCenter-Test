@@ -446,6 +446,8 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
     // Thay thế xuống dòng và khoảng trắng CHỈ trên phần plain text
     text = text.replace(/\\\\/g, "<br/>");
     text = text.replace(/\\ /g, "&nbsp;");
+    text = text.replace(/\\\n/g, "&nbsp;<br/>");
+    text = text.replace(/(?<!\\)\\(?:\s*)$/, ""); // Xóa dấu \ trơ trọi còn sót lại ở cuối chuỗi văn bản (do \ bị trim mất khoảng trắng)
     text = text.replace(/\n/g, "<br/>");
 
     // =========================================================================
@@ -503,7 +505,6 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
             <InteractiveFigureViewer
               key={`tikz-viewer-${sIdx}`}
               svgHtml={svg}
-              caption="Hình vẽ minh họa (TikZ Vector) • Dùng công cụ để Phóng to / Thu nhỏ / Xoay"
             />
           );
         }
