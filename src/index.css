@@ -35,6 +35,10 @@
   overflow-x: auto;
   overflow-y: hidden;
   padding: 4px 0;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 .katex {
