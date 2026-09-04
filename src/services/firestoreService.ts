@@ -727,6 +727,30 @@ export const subscribeLiveRoom = (
   }
 };
 
+export const createLiveRoomInFirestore = async (room: LiveRoom): Promise<void> => {
+  try {
+    const cleanData = cleanForFirestore(room);
+    const ref = doc(db, LIVEROOMS_COLLECTION, room.pin);
+    await setDoc(ref, cleanData);
+  } catch (err) {
+    console.warn("Lỗi tạo LiveRoom trên Firestore:", err);
+  }
+};
+
+export const getLiveRoomFromFirestore = async (pin: string): Promise<LiveRoom | null> => {
+  try {
+    const ref = doc(db, LIVEROOMS_COLLECTION, pin);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      return snap.data() as LiveRoom;
+    }
+    return null;
+  } catch (err) {
+    console.warn("Lỗi đọc LiveRoom từ Firestore:", err);
+    return null;
+  }
+};
+
 export const updateLiveRoomInFirestore = async (
   pin: string,
   data: Partial<LiveRoom>
@@ -737,6 +761,28 @@ export const updateLiveRoomInFirestore = async (
     await setDoc(ref, cleanData, { merge: true });
   } catch (err) {
     console.warn("Lỗi cập nhật LiveRoom lên Firestore:", err);
+  }
+};
+
+export const joinLiveRoomInFirestore = async (
+  pin: string,
+  student: any
+): Promise<LiveRoom | null> => {
+  try {
+    const room = await getLiveRoomFromFirestore(pin);
+    if (!room) return null;
+    const students = Array.isArray(room.students) ? [...room.students] : [];
+    const idx = students.findIndex((s) => s.id === student.id || (student.name && s.name === student.name));
+    if (idx >= 0) {
+      students[idx] = { ...students[idx], ...student, isOnline: true, lastActive: new Date().toISOString() };
+    } else {
+      students.push(student);
+    }
+    await updateLiveRoomInFirestore(pin, { students });
+    return { ...room, students };
+  } catch (err) {
+    console.warn("Lỗi tham gia LiveRoom trên Firestore:", err);
+    return null;
   }
 };
 

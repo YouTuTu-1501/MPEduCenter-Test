@@ -557,22 +557,13 @@ function MainApp({ currentUser }: { currentUser: User }) {
 
       {/* Phân hệ 6: Phòng thi trực tiếp đồng bộ thời gian thực */}
       {activeView === "live" && (
-        safeSelectedExam ? (
-          <RealtimeLiveRoomView
-            exam={safeSelectedExam}
-            onExit={() => setActiveView(isStudent ? "student_portal" : "bank")}
-          />
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-            <p className="text-slate-500 font-semibold mb-3">Chưa có đề thi nào để tạo phòng thi trực tiếp</p>
-            <button
-              onClick={() => setActiveView(isStudent ? "student_portal" : "bank")}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs"
-            >
-              Quay lại danh sách đề thi
-            </button>
-          </div>
-        )
+        <RealtimeLiveRoomView
+          initialExam={safeSelectedExam || exams[0] || null}
+          exams={exams}
+          currentUser={currentUser}
+          onSelectExam={(ex) => handleSelectExam(ex, "live")}
+          onExit={() => setActiveView(isStudent ? "student_portal" : "bank")}
+        />
       )}
 
       {/* Phân hệ 7: Quản trị Toàn diện & Phân quyền Người dùng (Dành riêng cho Admin) */}

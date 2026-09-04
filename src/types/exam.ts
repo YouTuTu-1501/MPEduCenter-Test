@@ -459,6 +459,10 @@ export interface LiveRoom {
   pin: string;
   examId: string;
   examTitle: string;
+  examSnapshot?: Exam;
+  creatorId?: string;
+  creatorName?: string;
+  creatorRole?: "admin" | "teacher" | "student";
   status: "waiting" | "in_progress" | "ended";
   mode: "teacher_paced" | "student_paced";
   currentQuestionIndex: number;

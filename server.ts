@@ -21,6 +21,10 @@ interface LiveRoomData {
   pin: string;
   examId: string;
   examTitle: string;
+  examSnapshot?: any;
+  creatorId?: string;
+  creatorName?: string;
+  creatorRole?: "admin" | "teacher" | "student";
   status: "waiting" | "in_progress" | "ended";
   mode: "teacher_paced" | "student_paced";
   currentQuestionIndex: number;
@@ -222,13 +226,34 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
 
   // Quản lý phòng thi Realtime (Live Rooms)
   app.post("/api/rooms/create", (req, res) => {
-    const { examId, examTitle, mode = "teacher_paced" } = req.body;
-    const pin = Math.floor(100000 + Math.random() * 900000).toString();
+    const {
+      examId,
+      examTitle,
+      examSnapshot,
+      mode = "teacher_paced",
+      pin: customPin,
+      creatorId,
+      creatorName,
+      creatorRole,
+    } = req.body;
+
+    // Chỉ Quản trị viên và Giáo viên mới có quyền tạo phòng thi
+    if (creatorRole && creatorRole !== "admin" && creatorRole !== "teacher") {
+      return res.status(403).json({
+        error: "Quyền hạn không hợp lệ: Chỉ Quản trị viên và Giáo viên mới có quyền khởi tạo phòng thi.",
+      });
+    }
+
+    const pin = customPin || Math.floor(100000 + Math.random() * 900000).toString();
     const room: LiveRoomData = {
       id: "room_" + Date.now(),
       pin,
       examId,
       examTitle: examTitle || "Đề kiểm tra trực tiếp",
+      examSnapshot: examSnapshot || null,
+      creatorId: creatorId || "",
+      creatorName: creatorName || "",
+      creatorRole: creatorRole || "teacher",
       status: "waiting",
       mode,
       currentQuestionIndex: 0,
