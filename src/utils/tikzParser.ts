@@ -1836,6 +1836,224 @@ export function renderLatexLabel(rawLabel: string): string {
 }
 
 /**
+ * Chuyển đổi nhãn LaTeX toán học sang đồ họa vector SVG native (<text> + <tspan>)
+ * Tương thích 100% với WebKit/Safari iOS trên iPhone & iPad, loại bỏ hoàn toàn lỗi vỡ layout của <foreignObject>
+ */
+export function formatLatexToSvgText(
+  rawLabel: string,
+  x: number,
+  y: number,
+  isBadge: boolean,
+  nIdx: number
+): string {
+  let label = (rawLabel || "").trim();
+  if (!label) return "";
+
+  // 1. Loại bỏ các lệnh kích thước font chữ LaTeX
+  label = label.replace(/\\(?:footnotesize|scriptsize|tiny|small|normalsize|large|Large|LARGE|huge|Huge)\b/g, "").trim();
+
+  // 2. Chuẩn hóa góc và độ
+  label = label.replace(/\\ang\{([^}]+)\}/g, "$1°");
+  label = label.replace(/(\d+)\s*độ/gi, "$1°");
+  label = label.replace(/\^\{\\circ\}/g, "°");
+  label = label.replace(/\^\\circ/g, "°");
+  label = label.replace(/\\circ/g, "°");
+
+  // 3. Loại bỏ ký tự bao bọc $ hoặc $$ hoặc \( \)
+  if (label.startsWith("$$") && label.endsWith("$$")) {
+    label = label.slice(2, -2).trim();
+  } else if (label.startsWith("$") && label.endsWith("$")) {
+    label = label.slice(1, -1).trim();
+  } else if (label.startsWith("\\(") && label.endsWith("\\)")) {
+    label = label.slice(2, -2).trim();
+  }
+  // Loại bỏ các dấu $ còn sót lại bên trong nếu có
+  label = label.replace(/\$/g, "");
+
+  // Bỏ cặp ngoặc nhọn bao quanh đơn lẻ nếu có {x} -> x
+  if (label.startsWith("{") && label.endsWith("}") && !label.includes(" ")) {
+    label = label.slice(1, -1).trim();
+  }
+
+  // 4. Thay thế các ký tự Hy Lạp sang Unicode chuẩn
+  const greekLetters: Record<string, string> = {
+    "\\alpha": "α", "\\beta": "β", "\\gamma": "γ", "\\delta": "δ", "\\Delta": "Δ",
+    "\\epsilon": "ε", "\\varepsilon": "ε", "\\zeta": "ζ", "\\eta": "η",
+    "\\theta": "θ", "\\vartheta": "θ", "\\iota": "ι", "\\kappa": "κ",
+    "\\lambda": "λ", "\\Lambda": "Λ", "\\mu": "μ", "\\nu": "ν",
+    "\\xi": "ξ", "\\Xi": "Ξ", "\\pi": "π", "\\Pi": "Π",
+    "\\rho": "ρ", "\\varrho": "ρ", "\\sigma": "σ", "\\Sigma": "Σ",
+    "\\tau": "τ", "\\upsilon": "υ", "\\phi": "φ", "\\varphi": "φ", "\\Phi": "Φ",
+    "\\chi": "χ", "\\psi": "ψ", "\\Psi": "Ψ", "\\omega": "ω", "\\Omega": "Ω",
+  };
+  for (const [tex, sym] of Object.entries(greekLetters)) {
+    label = label.split(tex).join(sym);
+  }
+
+  // 5. Thay thế các ký hiệu toán học phổ biến sang Unicode chuẩn
+  label = label.replace(/\\sqrt\[([^\]]+)\]\{([^}]+)\}/g, "$1√$2");
+  label = label.replace(/\\sqrt\{([^}]+)\}/g, "√$1");
+  label = label.replace(/\\sqrt\s*([0-9a-zA-Z])/g, "√$1");
+  label = label.replace(/\\vec\{([a-zA-Z]+)\}/g, "$1⃗");
+  label = label.replace(/\\overrightarrow\{([^}]+)\}/g, "$1⃗");
+  label = label.replace(/\\widehat\{([^}]+)\}/g, "∠$1");
+  label = label.replace(/\\angle\s*([a-zA-Z]+)/g, "∠$1");
+  label = label.replace(/\\cdot/g, "·");
+  label = label.replace(/\\times/g, "×");
+  label = label.replace(/\\pm/g, "±");
+  label = label.replace(/\\mp/g, "∓");
+  label = label.replace(/\\approx/g, "≈");
+  label = label.replace(/\\neq/g, "≠");
+  label = label.replace(/\\le(q)?\b/g, "≤");
+  label = label.replace(/\\ge(q)?\b/g, "≥");
+  label = label.replace(/\\infty/g, "∞");
+  label = label.replace(/\\parallel/g, "∥");
+  label = label.replace(/\\perp/g, "⟂");
+  label = label.replace(/\\in/g, "∈");
+  label = label.replace(/\\notin/g, "∉");
+  label = label.replace(/\\subset(eq)?\b/g, "⊆");
+  label = label.replace(/\\cup/g, "∪");
+  label = label.replace(/\\cap/g, "∩");
+  label = label.replace(/\\emptyset/g, "∅");
+  label = label.replace(/\\pmb\{([^}]+)\}/g, "$1");
+  label = label.replace(/\\boldsymbol\{([^}]+)\}/g, "$1");
+
+  // Dấu phẩy trên (Prime)
+  label = label.replace(/'{3}/g, "‴");
+  label = label.replace(/'{2}/g, "″");
+  label = label.replace(/'/g, "′");
+
+  // Chuẩn hóa phân số \frac{a}{b} -> a/b
+  label = label.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1/$2");
+
+  // Loại bỏ các lệnh font text
+  label = label.replace(/\\(?:text|mathrm|mathbf|mathit|textsf)\{([^}]+)\}/g, " $1");
+  label = label.replace(/\\,/g, " ").replace(/\\;/g, " ").replace(/\\quad/g, "  ").replace(/\\ /g, " ");
+
+  // 6. Xử lý Subscripts (_) và Superscripts (^)
+  const subMap: Record<string, string> = {
+    "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+    "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+    "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+    "a": "ₐ", "e": "ₑ", "h": "ₕ", "i": "ᵢ", "j": "ⱼ", "k": "ₖ", "l": "ₗ", "m": "ₘ", "n": "ₙ", "o": "ₒ", "p": "ₚ", "r": "ᵣ", "s": "ₛ", "t": "ₜ", "u": "ᵤ", "v": "ᵥ", "x": "ₓ",
+  };
+  const supMap: Record<string, string> = {
+    "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+    "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+    "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+    "n": "ⁿ", "i": "ⁱ", "x": "ˣ", "y": "ʸ",
+  };
+
+  label = label.replace(/\_\{([0-9a-z+-=()]+)\}/g, (_, inner) => {
+    if ([...inner].every((c) => subMap[c])) {
+      return [...inner].map((c) => subMap[c]).join("");
+    }
+    return `_${inner}_`;
+  });
+  label = label.replace(/\_([0-9a-z+-=()])/g, (_, c) => subMap[c] || `_${c}_`);
+
+  label = label.replace(/\^\{([0-9a-z+-=()]+)\}/g, (_, inner) => {
+    if ([...inner].every((c) => supMap[c])) {
+      return [...inner].map((c) => supMap[c]).join("");
+    }
+    return `^${inner}^`;
+  });
+  label = label.replace(/\^([0-9a-z+-=()])/g, (_, c) => supMap[c] || `^${c}^`);
+
+  // 7. Tạo danh sách các tspans cho các phần còn lại
+  const tokens: Array<{ text: string; italic: boolean; isSub?: boolean; isSup?: boolean }> = [];
+  const parts = label.split(/(_[a-zA-Z0-9]+_|\^[a-zA-Z0-9]+\^)/g);
+  for (const part of parts) {
+    if (!part) continue;
+    if (part.startsWith("_") && part.endsWith("_")) {
+      tokens.push({ text: part.slice(1, -1), italic: false, isSub: true });
+    } else if (part.startsWith("^") && part.endsWith("^")) {
+      tokens.push({ text: part.slice(1, -1), italic: false, isSup: true });
+    } else {
+      let curr = "";
+      let currItalic = false;
+      for (const char of part) {
+        const isLetter = /[a-zA-Z]/.test(char);
+        if (curr === "") {
+          curr = char;
+          currItalic = isLetter;
+        } else if (isLetter === currItalic) {
+          curr += char;
+        } else {
+          tokens.push({ text: curr, italic: currItalic });
+          curr = char;
+          currItalic = isLetter;
+        }
+      }
+      if (curr) {
+        tokens.push({ text: curr, italic: currItalic });
+      }
+    }
+  }
+
+  let tspans = "";
+  let approxCharCount = 0;
+  for (const t of tokens) {
+    approxCharCount += t.text.length;
+    if (t.isSub) {
+      tspans += `<tspan baseline-shift="sub" font-size="75%" font-style="normal">${t.text}</tspan>`;
+    } else if (t.isSup) {
+      tspans += `<tspan baseline-shift="super" font-size="75%" font-style="normal">${t.text}</tspan>`;
+    } else if (t.italic) {
+      tspans += `<tspan font-style="italic">${t.text}</tspan>`;
+    } else {
+      tspans += `<tspan font-style="normal">${t.text}</tspan>`;
+    }
+  }
+
+  if (!tspans) {
+    tspans = `<tspan font-style="italic">${label}</tspan>`;
+    approxCharCount = label.length;
+  }
+
+  // 8. Nếu là Badge (nhãn hộp nổi bật cho hàm số, công thức, số đo độ dài)
+  if (isBadge) {
+    const boxW = Math.max(34, approxCharCount * 8.5 + 16);
+    const boxH = 22;
+    return `
+      <g id="tikz-node-badge-${nIdx}" class="select-none pointer-events-none">
+        <rect 
+          x="${(x - boxW / 2).toFixed(1)}" 
+          y="${(y - boxH / 2).toFixed(1)}" 
+          width="${boxW.toFixed(1)}" 
+          height="${boxH}" 
+          rx="5" 
+          ry="5" 
+          fill="#ffffff" 
+          fill-opacity="0.95" 
+          stroke="#cbd5e1" 
+          stroke-width="0.9" 
+        />
+        <text 
+          x="${x.toFixed(1)}" 
+          y="${y.toFixed(1)}" 
+          text-anchor="middle" 
+          dominant-baseline="central" 
+          style="font-family: 'KaTeX_Math', 'Cambria Math', 'Times New Roman', Times, serif; font-size: 13px; font-weight: 600; fill: #1e293b;"
+        >${tspans}</text>
+      </g>`;
+  }
+
+  // 9. Nhãn điểm vector thông thường (Đỉnh A, B, C, S, gốc O, trục tọa độ x, y...)
+  // Sử dụng viền trắng stroke halo (paint-order: stroke fill) để nhãn không bao giờ bị chìm hoặc che khuất bởi nét vẽ
+  return `
+    <text 
+      id="tikz-node-label-${nIdx}" 
+      x="${x.toFixed(1)}" 
+      y="${y.toFixed(1)}" 
+      text-anchor="middle" 
+      dominant-baseline="central" 
+      class="select-none pointer-events-none"
+      style="font-family: 'KaTeX_Math', 'Cambria Math', 'Times New Roman', Times, serif; font-size: 14.5px; font-weight: 600; fill: #0f172a; paint-order: stroke fill; stroke: #ffffff; stroke-width: 3.5px; stroke-linejoin: round; stroke-linecap: round;"
+    >${tspans}</text>`;
+}
+
+/**
  * Hàm phân tích và dựng hình từ mã TikZ / tkz-euclide sang SVG vector
  */
 export function parseTikzToSvg(rawTikzCode: string): string {
@@ -3976,47 +4194,23 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     }
   }
 
-  // D. Render các nhãn KaTeX lên SVG (Không dùng nền đè để nhãn điểm trong suốt, không che khuất các đường vẽ và trục tọa độ)
+  // D. Render các nhãn LaTeX dạng vector native tương thích 100% với Safari/WebKit trên iPhone, iPad
   layoutNodes.forEach((ln, nIdx) => {
-    const renderedHtml = renderLatexLabel(ln.label);
-
-    if (ln.isBadge) {
-      svgElements += `
-        <foreignObject 
-          id="tikz-node-badge-${nIdx}"
-          x="${(ln.x - 45).toFixed(1)}" 
-          y="${(ln.y - 16).toFixed(1)}" 
-          width="90" 
-          height="32"
-          style="overflow: visible; pointer-events: none;"
-        >
-          <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-800 font-semibold text-[13px] whitespace-nowrap leading-none select-none bg-transparent">
-            <span class="px-0.5 py-0.5 inline-block leading-none">${renderedHtml}</span>
-          </div>
-        </foreignObject>`;
-    } else {
-      svgElements += `
-        <foreignObject 
-          id="tikz-node-label-${nIdx}"
-          x="${(ln.x - 40).toFixed(1)}" 
-          y="${(ln.y - 18).toFixed(1)}" 
-          width="80" 
-          height="36"
-          style="overflow: visible; pointer-events: none;"
-        >
-          <div xmlns="http://www.w3.org/1999/xhtml" class="flex items-center justify-center w-full h-full text-slate-900 font-semibold text-[13.5px] whitespace-nowrap leading-none select-none bg-transparent">
-            <span class="px-0.5 py-0.5 inline-block leading-none">${renderedHtml}</span>
-          </div>
-        </foreignObject>`;
-    }
+    svgElements += formatLatexToSvgText(ln.label, ln.x, ln.y, !!ln.isBadge, nIdx);
   });
 
+  const displayWidth = Math.min(580, width);
+  const displayHeight = (displayWidth / width) * height;
+
   return `
-    <div class="my-4 flex flex-col items-center justify-center p-4 bg-white rounded-2xl border border-slate-200 shadow-xs max-w-full overflow-x-auto select-none">
+    <div class="my-4 flex flex-col items-center justify-center p-4 bg-white rounded-2xl border border-slate-200 shadow-xs max-w-full overflow-x-auto select-none" style="touch-action: pan-y; -webkit-overflow-scrolling: touch;">
       <svg 
         id="tikz-rendered-svg"
+        xmlns="http://www.w3.org/2000/svg"
         viewBox="0 0 ${width.toFixed(1)} ${height.toFixed(1)}" 
-        style="max-width: 100%; width: ${Math.min(580, width)}px; height: auto;"
+        width="${displayWidth.toFixed(1)}"
+        height="${displayHeight.toFixed(1)}"
+        style="max-width: 100%; height: auto; aspect-ratio: ${width.toFixed(1)} / ${height.toFixed(1)}; display: block; -webkit-user-select: none; user-select: none;"
         class="overflow-visible"
       >
         <defs>

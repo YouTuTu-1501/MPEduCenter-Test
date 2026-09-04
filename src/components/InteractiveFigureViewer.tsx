@@ -45,6 +45,10 @@ export const InteractiveFigureViewer: React.FC<InteractiveFigureViewerProps> = (
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  // Xử lý cử chỉ cảm ứng trên điện thoại (iPhone/Safari, iPad, Android)
+  const touchStartDistRef = useRef<number | null>(null);
+  const touchStartScaleRef = useRef<number>(1);
+
   // Xử lý Phóng to / Thu nhỏ
   const handleZoomIn = () => {
     setScale((prev) => Math.min(4.0, Number((prev + 0.25).toFixed(2))));
@@ -87,6 +91,52 @@ export const InteractiveFigureViewer: React.FC<InteractiveFigureViewerProps> = (
     setIsDragging(false);
   };
 
+  // Xử lý cảm ứng Touch Events trên iPhone/Safari & màn hình cảm ứng
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      // Chạm 1 ngón: Di chuyển hình vẽ (Pan)
+      const touch = e.touches[0];
+      setIsDragging(true);
+      setDragStart({ x: touch.clientX - position.x, y: touch.clientY - position.y });
+    } else if (e.touches.length === 2) {
+      // Chạm 2 ngón: Kích hoạt Pinch-to-Zoom (Thu phóng cảm ứng)
+      setIsDragging(false);
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      touchStartDistRef.current = dist;
+      touchStartScaleRef.current = scale;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 1 && isDragging) {
+      // Khi phóng to hoặc xem toàn màn hình, chặn cuộn trang để di chuyển hình vẽ
+      if (scale > 1 || isFullscreenModal) {
+        if (e.cancelable) e.preventDefault();
+      }
+      const touch = e.touches[0];
+      setPosition({
+        x: touch.clientX - dragStart.x,
+        y: touch.clientY - dragStart.y,
+      });
+    } else if (e.touches.length === 2 && touchStartDistRef.current !== null) {
+      // Phóng to / thu nhỏ mượt mà bằng 2 ngón tay
+      if (e.cancelable) e.preventDefault();
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const ratio = dist / touchStartDistRef.current;
+      const nextScale = Math.max(0.4, Math.min(4.0, Number((touchStartScaleRef.current * ratio).toFixed(2))));
+      setScale(nextScale);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+    touchStartDistRef.current = null;
+  };
+
   // Cuộn chuột để zoom nhanh
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey || isFullscreenModal) {
@@ -120,21 +170,25 @@ export const InteractiveFigureViewer: React.FC<InteractiveFigureViewerProps> = (
 
   // Render nội dung bên trong (SVG / Image / Children)
   const renderContent = (isModal: boolean = false) => {
-    const transformStyle = {
-      transform: `translate(${position.x}px, ${position.y}px) scale(${scale}) rotate(${rotation}deg)`,
+    const transformStyle: React.CSSProperties = {
+      transform: `translate3d(${position.x}px, ${position.y}px, 0px) scale(${scale}) rotate(${rotation}deg)`,
       transformOrigin: "center center",
       transition: isDragging ? "none" : "transform 0.15s ease-out",
+      WebkitBackfaceVisibility: "hidden",
+      backfaceVisibility: "hidden",
+      WebkitUserSelect: "none",
+      userSelect: "none",
     };
 
     return (
       <div
         style={transformStyle}
-        className={`inline-block select-none ${isDragging ? "cursor-grabbing" : scale > 1 ? "cursor-grab" : "cursor-default"}`}
+        className={`inline-block select-none max-w-full ${isDragging ? "cursor-grabbing" : scale > 1 ? "cursor-grab" : "cursor-default"}`}
       >
         {svgHtml ? (
           <div
             dangerouslySetInnerHTML={{ __html: svgHtml }}
-            className="flex items-center justify-center [&>div]:!my-0 [&>div]:!border-0 [&>div]:!bg-transparent [&>div]:!shadow-none"
+            className="flex items-center justify-center max-w-full [&>div]:!my-0 [&>div]:!border-0 [&>div]:!bg-transparent [&>div]:!shadow-none [&>svg]:!max-w-full"
           />
         ) : src ? (
           <img
@@ -257,7 +311,15 @@ export const InteractiveFigureViewer: React.FC<InteractiveFigureViewerProps> = (
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
         onWheel={handleWheel}
+        style={{
+          touchAction: scale > 1 ? "none" : "pan-y",
+          WebkitOverflowScrolling: "touch",
+        }}
         className={`relative w-full overflow-hidden rounded-2xl bg-white border border-slate-200 p-4 flex items-center justify-center min-h-[220px] transition-shadow ${
           showGrid
             ? "bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:16px_16px]"
@@ -275,9 +337,9 @@ export const InteractiveFigureViewer: React.FC<InteractiveFigureViewerProps> = (
 
         {/* Ghi chú gợi ý thao tác khi zoom */}
         {scale > 1 && (
-          <div className="absolute bottom-2 left-2 z-20 px-2.5 py-1 rounded-lg bg-slate-900/75 text-white text-[10px] font-medium backdrop-blur-xs flex items-center gap-1 pointer-events-none">
-            <Move className="w-3 h-3" />
-            <span>Kéo chuột để di chuyển góc nhìn ({Math.round(scale * 100)}%)</span>
+          <div className="absolute bottom-2 left-2 z-20 px-2.5 py-1 rounded-lg bg-slate-900/80 text-white text-[10.5px] font-medium backdrop-blur-xs flex items-center gap-1.5 pointer-events-none shadow-sm">
+            <Move className="w-3 h-3 text-indigo-400" />
+            <span>Kéo hoặc chạm 2 ngón để di chuyển ({Math.round(scale * 100)}%)</span>
           </div>
         )}
       </div>
@@ -305,7 +367,7 @@ export const InteractiveFigureViewer: React.FC<InteractiveFigureViewerProps> = (
                 CHẾ ĐỘ SOI CHI TIẾT HÌNH VẼ
               </span>
               <span className="text-xs text-slate-300 hidden sm:inline">
-                (Cuộn chuột hoặc bấm +/- để zoom • Kéo chuột để di chuyển • Phím Esc để thoát)
+                (Chạm 2 ngón để zoom • Kéo để di chuyển • Phím Esc để thoát)
               </span>
             </div>
 
@@ -328,15 +390,23 @@ export const InteractiveFigureViewer: React.FC<InteractiveFigureViewerProps> = (
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
             onWheel={handleWheel}
             onClick={(e) => e.stopPropagation()}
+            style={{
+              touchAction: "none",
+              WebkitOverflowScrolling: "touch",
+            }}
             className={`flex-1 relative w-full overflow-hidden rounded-3xl bg-slate-900/90 border border-slate-800 flex items-center justify-center ${
               showGrid
                 ? "bg-[radial-gradient(#334155_1.2px,transparent_1.2px)] [background-size:24px_24px]"
                 : ""
             }`}
           >
-            <div className="p-8 bg-white/5 rounded-3xl backdrop-blur-xs border border-white/10">
+            <div className="p-4 sm:p-8 bg-white/5 rounded-3xl backdrop-blur-xs border border-white/10 max-w-full flex items-center justify-center">
               {renderContent(true)}
             </div>
 
@@ -345,7 +415,7 @@ export const InteractiveFigureViewer: React.FC<InteractiveFigureViewerProps> = (
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               <span>Tỷ lệ: <b>{Math.round(scale * 100)}%</b></span>
               {rotation > 0 && <span>• Xoay: <b>{rotation}°</b></span>}
-              <span>• Kéo chuột để di chuyển</span>
+              <span className="hidden sm:inline">• Kéo hoặc chạm 2 ngón để điều khiển</span>
             </div>
           </div>
         </div>
