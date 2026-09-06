@@ -168,14 +168,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (!adminExists) {
           const rootAdmin = INITIAL_USERS[0];
           validUsers = [rootAdmin, ...validUsers];
-          saveUserToFirestore(rootAdmin).catch((e) => console.warn(e));
         }
 
-        // Tự động cấp SBD cố định cho bất kỳ tài khoản nào chưa có
-        let needBackfill = false;
+        // Tự động cấp SBD cố định an toàn cho bất kỳ tài khoản nào chưa có (lưu local, không gọi ghi lặp lên Firestore)
         const completeUsers = validUsers.map((u, idx) => {
           if (!u.candidateNumber) {
-            needBackfill = true;
             return {
               ...u,
               candidateNumber:
@@ -190,10 +187,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
           return u;
         });
-
-        if (needBackfill) {
-          saveUsersBatchToFirestore(completeUsers).catch((e) => console.warn(e));
-        }
 
         setUsers(completeUsers);
       }

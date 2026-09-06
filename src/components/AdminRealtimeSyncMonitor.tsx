@@ -37,6 +37,11 @@ import {
   clearAuditLogs,
   analyzeSystemAnomalies,
 } from "../services/auditLogService";
+import {
+  isFirestoreQuotaExceeded,
+  getFirestoreQuotaDetails,
+  resetFirestoreQuotaCircuitBreaker,
+} from "../services/firestoreService";
 import { useToast } from "../context/ToastContext";
 
 interface AdminRealtimeSyncMonitorProps {
@@ -63,6 +68,17 @@ export const AdminRealtimeSyncMonitor: React.FC<AdminRealtimeSyncMonitorProps> =
   const [firestoreStatus, setFirestoreStatus] = useState<"connected" | "syncing" | "offline">("connected");
   const [serverApiStatus, setServerApiStatus] = useState<"healthy" | "offline">("healthy");
   const [localStorageStatus, setLocalStorageStatus] = useState<"healthy" | "warning">("healthy");
+  const [quotaDetails, setQuotaDetails] = useState(getFirestoreQuotaDetails());
+
+  useEffect(() => {
+    const handleQuotaExceeded = () => {
+      setQuotaDetails(getFirestoreQuotaDetails());
+    };
+    window.addEventListener("edutest:firestore_quota_exceeded", handleQuotaExceeded);
+    return () => {
+      window.removeEventListener("edutest:firestore_quota_exceeded", handleQuotaExceeded);
+    };
+  }, []);
 
   // State Nhật ký (Audit Logs) & Bộ lọc
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
@@ -309,18 +325,57 @@ export const AdminRealtimeSyncMonitor: React.FC<AdminRealtimeSyncMonitorProps> =
           </div>
         </div>
 
+        {/* Cảnh báo Hạn mức Ghi Firestore Free-Tier nếu chạm ngưỡng */}
+        {quotaDetails.isExceeded && (
+          <div className="mt-5 p-4 rounded-2xl bg-amber-500/15 border border-amber-400/30 text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <div className="text-sm font-bold text-amber-300">
+                  Firestore đạt hạn mức ghi miễn phí trong ngày (Daily Write Quota Exceeded)
+                </div>
+                <div className="text-xs text-amber-200/80 mt-1 max-w-2xl leading-relaxed">
+                  Dự án đã sử dụng hết định mức lượt ghi miễn phí hàng ngày của Google Cloud Firestore. Hệ thống đã kích hoạt <strong>Chế độ dự phòng Ngoại tuyến & Bộ nhớ đệm Cục bộ an toàn</strong>. Mọi đề thi, tài khoản và bài làm học sinh vẫn được bảo toàn 100% trên máy chủ Express và trình duyệt. Hạn mức ghi đám mây sẽ tự động làm mới vào đầu ngày mới.
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+              <a
+                href="https://console.firebase.google.com/project/mpeducenter-test/firestore/databases/ai-studio-edutestprokimtra-4406e629-beff-4e6e-8844-a674f6708ec1/data?openUpgradeDialog=true"
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold text-xs transition inline-flex items-center gap-1 shadow-xs"
+              >
+                <span>Xem Quota GCP</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  resetFirestoreQuotaCircuitBreaker();
+                  setQuotaDetails(getFirestoreQuotaDetails());
+                  toast.info("Đã đặt lại bộ bảo vệ", "Hệ thống sẽ thử kết nối trực tiếp Firestore cho các thao tác kế tiếp.");
+                }}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs border border-slate-700 transition"
+              >
+                Thử lại kết nối
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Thống kê hạ tầng đồng bộ (3-Pillar Status Grid) */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-6 pt-6 border-t border-slate-700/60">
           <div className="bg-slate-800/60 backdrop-blur-xs p-4 rounded-2xl border border-slate-700/60 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <div className={`w-10 h-10 rounded-xl ${quotaDetails.isExceeded ? "bg-amber-500/15 border-amber-500/30 text-amber-400" : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"} border flex items-center justify-center`}>
                 <Database className="w-5 h-5" />
               </div>
               <div>
                 <div className="text-xs text-slate-400 font-medium">Cloud Firestore</div>
                 <div className="text-sm font-black text-white flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                  <span>Trực tuyến (Live Listener)</span>
+                  <span className={`w-2 h-2 rounded-full ${quotaDetails.isExceeded ? "bg-amber-400" : "bg-emerald-400"}`}></span>
+                  <span>{quotaDetails.isExceeded ? "Dự phòng Ngoại tuyến (Đạt hạn mức)" : "Trực tuyến (Live Listener)"}</span>
                 </div>
               </div>
             </div>

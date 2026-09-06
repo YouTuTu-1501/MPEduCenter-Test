@@ -20,6 +20,8 @@ function getGeminiClient(): GoogleGenAI | null {
 const DATA_DIR = path.join(process.cwd(), "data");
 const SUBMISSIONS_FILE = path.join(DATA_DIR, "submissions.json");
 const ROOMS_FILE = path.join(DATA_DIR, "rooms.json");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+const EXAMS_FILE = path.join(DATA_DIR, "exams.json");
 
 if (!fs.existsSync(DATA_DIR)) {
   try {
@@ -49,6 +51,52 @@ function saveSubmissionsToDisk(subs: any[]) {
     fs.writeFileSync(SUBMISSIONS_FILE, JSON.stringify(subs, null, 2), "utf-8");
   } catch (e) {
     console.warn("Lỗi ghi submissions vào file:", e);
+  }
+}
+
+// Tải dữ liệu người dùng từ đĩa
+function loadUsersFromDisk(): any[] {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const raw = fs.readFileSync(USERS_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn("Lỗi tải users từ file:", e);
+  }
+  return [];
+}
+
+// Lưu dữ liệu người dùng xuống đĩa
+function saveUsersToDisk(users: any[]) {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), "utf-8");
+  } catch (e) {
+    console.warn("Lỗi ghi users vào file:", e);
+  }
+}
+
+// Tải dữ liệu đề thi từ đĩa
+function loadExamsFromDisk(): any[] {
+  try {
+    if (fs.existsSync(EXAMS_FILE)) {
+      const raw = fs.readFileSync(EXAMS_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn("Lỗi tải exams từ file:", e);
+  }
+  return [];
+}
+
+// Lưu dữ liệu đề thi xuống đĩa
+function saveExamsToDisk(exams: any[]) {
+  try {
+    fs.writeFileSync(EXAMS_FILE, JSON.stringify(exams, null, 2), "utf-8");
+  } catch (e) {
+    console.warn("Lỗi ghi exams vào file:", e);
   }
 }
 
@@ -111,7 +159,8 @@ interface LiveRoomData {
 
 const liveRooms: Map<string, LiveRoomData> = loadRoomsFromDisk();
 const userSubmissions: any[] = loadSubmissionsFromDisk();
-const customExams: any[] = [];
+const customExams: any[] = loadExamsFromDisk();
+const customUsers: any[] = loadUsersFromDisk();
 
 async function startServer() {
   const app = express();
@@ -316,7 +365,67 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
     } else {
       customExams.push(newExam);
     }
+    saveExamsToDisk(customExams);
     res.json({ success: true, exam: newExam });
+  });
+
+  app.delete("/api/exams/:id", (req, res) => {
+    const { id } = req.params;
+    const index = customExams.findIndex((e) => e.id === id);
+    if (index >= 0) {
+      customExams.splice(index, 1);
+      saveExamsToDisk(customExams);
+    }
+    res.json({ success: true });
+  });
+
+  // Quản lý người dùng dự phòng (Users Backup / Local Mode)
+  app.get("/api/users", (req, res) => {
+    res.json(customUsers);
+  });
+
+  app.post("/api/users", (req, res) => {
+    const user = req.body;
+    if (user && user.id) {
+      const idx = customUsers.findIndex((u) => u.id === user.id);
+      if (idx >= 0) {
+        customUsers[idx] = { ...customUsers[idx], ...user };
+      } else {
+        customUsers.push(user);
+      }
+      saveUsersToDisk(customUsers);
+      return res.json({ success: true, user });
+    }
+    res.status(400).json({ error: "Invalid user data" });
+  });
+
+  app.post("/api/users/batch", (req, res) => {
+    const incoming = req.body;
+    if (Array.isArray(incoming)) {
+      incoming.forEach((user: any) => {
+        if (user && user.id) {
+          const idx = customUsers.findIndex((u) => u.id === user.id);
+          if (idx >= 0) {
+            customUsers[idx] = { ...customUsers[idx], ...user };
+          } else {
+            customUsers.push(user);
+          }
+        }
+      });
+      saveUsersToDisk(customUsers);
+      return res.json({ success: true, count: customUsers.length });
+    }
+    res.status(400).json({ error: "Array expected" });
+  });
+
+  app.delete("/api/users/:id", (req, res) => {
+    const { id } = req.params;
+    const idx = customUsers.findIndex((u) => u.id === id);
+    if (idx >= 0) {
+      customUsers.splice(idx, 1);
+      saveUsersToDisk(customUsers);
+    }
+    res.json({ success: true });
   });
 
   // Quản lý phòng thi Realtime (Live Rooms)

@@ -16,6 +16,7 @@ import { db } from "../lib/firebase";
 import { User, INITIAL_USERS } from "../types/auth";
 import { Exam, StudentSubmission, LiveRoom } from "../types/exam";
 import { initialSampleSubmissions } from "../data/sampleSubmissions";
+import { initialSampleExams } from "../data/defaultExam";
 
 /**
  * Hàm làm sạch đối tượng trước khi gửi lên Firestore
@@ -26,6 +27,90 @@ export const cleanForFirestore = <T>(obj: T): T => {
   return JSON.parse(
     JSON.stringify(obj, (k, v) => (v === undefined ? null : v))
   );
+};
+
+// ----------------------------------------------------
+// Quản lý Quota & Circuit Breaker cho Firestore
+// Tránh lỗi "Write stream exhausted maximum allowed queued writes" và "Quota limit exceeded"
+// ----------------------------------------------------
+const QUOTA_KEY = "edutest_firestore_quota_status";
+let isFirestoreWriteQuotaExceeded = false;
+let quotaExceededMessage = "";
+let quotaExceededAt: number | null = null;
+
+try {
+  const saved = localStorage.getItem(QUOTA_KEY);
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    if (parsed && parsed.timestamp && Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000) {
+      isFirestoreWriteQuotaExceeded = true;
+      quotaExceededMessage = parsed.message || "Quota limit exceeded";
+      quotaExceededAt = parsed.timestamp;
+    }
+  }
+} catch {}
+
+export const isFirestoreQuotaExceeded = (): boolean => isFirestoreWriteQuotaExceeded;
+
+export const getFirestoreQuotaDetails = () => ({
+  isExceeded: isFirestoreWriteQuotaExceeded,
+  message: quotaExceededMessage,
+  timestamp: quotaExceededAt,
+  databaseId: "ai-studio-edutestprokimtra-4406e629-beff-4e6e-8844-a674f6708ec1",
+  projectId: "mpeducenter-test",
+});
+
+export const resetFirestoreQuotaCircuitBreaker = (): void => {
+  isFirestoreWriteQuotaExceeded = false;
+  quotaExceededMessage = "";
+  quotaExceededAt = null;
+  try {
+    localStorage.removeItem(QUOTA_KEY);
+  } catch {}
+};
+
+export const handleFirestoreWriteError = (err: any, context: string): void => {
+  const errMsg = err?.message || String(err);
+  const errCode = err?.code || "";
+
+  if (
+    errCode === "resource-exhausted" ||
+    errMsg.includes("resource-exhausted") ||
+    errMsg.includes("Quota limit exceeded") ||
+    errMsg.includes("Write stream exhausted") ||
+    errMsg.includes("Free daily write units")
+  ) {
+    if (!isFirestoreWriteQuotaExceeded) {
+      isFirestoreWriteQuotaExceeded = true;
+      quotaExceededMessage = errMsg;
+      quotaExceededAt = Date.now();
+      try {
+        localStorage.setItem(
+          QUOTA_KEY,
+          JSON.stringify({
+            timestamp: quotaExceededAt,
+            message: errMsg,
+          })
+        );
+      } catch {}
+      console.warn(
+        `[EduTest Pro Firestore Quota Guard] Đã kích hoạt chế độ dự phòng Offline/Local do hạn mức ghi miễn phí trong ngày của Firestore đã đạt giới hạn: ${errMsg}`
+      );
+      try {
+        window.dispatchEvent(
+          new CustomEvent("edutest:firestore_quota_exceeded", {
+            detail: {
+              context,
+              message: errMsg,
+              timestamp: Date.now(),
+            },
+          })
+        );
+      } catch {}
+    }
+  } else {
+    console.warn(`[Firestore Error] ${context}:`, err);
+  }
 };
 
 // ----------------------------------------------------
@@ -143,6 +228,25 @@ export const subscribeUsers = (
     }
   } catch {}
 
+  // Đồng thời thử nạp từ backend server nếu có
+  try {
+    fetch("/api/users")
+      .then((res) => res.json())
+      .then((serverUsers) => {
+        if (Array.isArray(serverUsers) && serverUsers.length > 0) {
+          const currentDeleted = getDeletedUserIds();
+          const valid = serverUsers.filter((u: any) => u && u.id && !currentDeleted.has(u.id));
+          if (valid.length > 0) {
+            try {
+              localStorage.setItem("mpeducenter_users", JSON.stringify(valid));
+            } catch {}
+            callback(valid);
+          }
+        }
+      })
+      .catch(() => {});
+  } catch {}
+
   try {
     const q = query(collection(db, USERS_COLLECTION));
     return onSnapshot(
@@ -178,11 +282,13 @@ export const subscribeUsers = (
         callback(users);
       },
       (err) => {
+        handleFirestoreWriteError(err, "subscribeUsers");
         console.warn("Firestore subscribeUsers fallback to localStorage:", err);
         if (onError) onError(err);
       }
     );
   } catch (error) {
+    handleFirestoreWriteError(error, "subscribeUsers init");
     console.warn("Firestore error:", error);
     return () => {};
   }
@@ -191,16 +297,53 @@ export const subscribeUsers = (
 export const saveUserToFirestore = async (user: User): Promise<void> => {
   try {
     removeDeletedUserId(user.id);
+
+    // 1. Lưu tức thì vào LocalStorage
+    try {
+      const local = localStorage.getItem("mpeducenter_users");
+      const current: User[] = local ? JSON.parse(local) : [];
+      const updated = current.filter((u) => u.id !== user.id);
+      updated.push(user);
+      localStorage.setItem("mpeducenter_users", JSON.stringify(updated));
+    } catch {}
+
+    // 2. Lưu vào backend server Express
+    fetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(user),
+    }).catch(() => {});
+
+    // 3. Nếu Quota Firestore đã đầy trong ngày, bỏ qua gọi Firestore để không nghẽn luồng ghi
+    if (isFirestoreWriteQuotaExceeded) return;
+
     const cleanUser = cleanForFirestore(user);
     const ref = doc(db, USERS_COLLECTION, user.id);
     await setDoc(ref, cleanUser, { merge: true });
   } catch (err) {
-    console.warn("Lỗi khi lưu người dùng lên Firestore (lưu cache local):", err);
+    handleFirestoreWriteError(err, "saveUserToFirestore");
   }
 };
 
 export const saveUsersBatchToFirestore = async (users: User[]): Promise<void> => {
   try {
+    // 1. Cập nhật LocalStorage
+    try {
+      const deleted = getDeletedUserIds();
+      const valid = users.filter((u) => u && u.id && !deleted.has(u.id));
+      localStorage.setItem("mpeducenter_users", JSON.stringify(valid));
+    } catch {}
+
+    // 2. Gửi batch lên backend server Express
+    fetch("/api/users/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(users),
+    }).catch(() => {});
+
+    // 3. Nếu Quota Firestore đã đầy, không đẩy tiếp vào hàng đợi Firestore
+    if (isFirestoreWriteQuotaExceeded) return;
+
     for (const u of users) {
       removeDeletedUserId(u.id);
       const cleanUser = cleanForFirestore(u);
@@ -208,7 +351,7 @@ export const saveUsersBatchToFirestore = async (users: User[]): Promise<void> =>
       await setDoc(ref, cleanUser, { merge: true });
     }
   } catch (err) {
-    console.warn("Lỗi khi lưu danh sách người dùng lên Firestore:", err);
+    handleFirestoreWriteError(err, "saveUsersBatchToFirestore");
   }
 };
 
@@ -234,16 +377,23 @@ export const deleteUserFromFirestore = async (userId: string): Promise<void> => 
       await purgeUserSubmissions(userId);
     } catch {}
 
-    // 4. Xóa trên Firestore Database
+    // 4. Xóa trên backend server Express
+    fetch(`/api/users/${userId}`, { method: "DELETE" }).catch(() => {});
+
+    // 5. Nếu Quota đã đầy, bỏ qua Firestore
+    if (isFirestoreWriteQuotaExceeded) return;
+
+    // 6. Xóa trên Firestore Database
     const ref = doc(db, USERS_COLLECTION, userId);
     await deleteDoc(ref);
   } catch (err) {
-    console.warn("Lỗi khi xóa người dùng trên Firestore:", err);
+    handleFirestoreWriteError(err, "deleteUserFromFirestore");
   }
 };
 
 export const seedInitialUsers = async (): Promise<void> => {
   try {
+    if (isFirestoreWriteQuotaExceeded) return;
     const deleted = getDeletedUserIds();
     const toSeed = INITIAL_USERS.filter((u) => !deleted.has(u.id));
     for (const u of toSeed) {
@@ -252,7 +402,7 @@ export const seedInitialUsers = async (): Promise<void> => {
       await setDoc(ref, cleanUser, { merge: true });
     }
   } catch (err) {
-    console.warn("Lỗi nạp người dùng mẫu:", err);
+    handleFirestoreWriteError(err, "seedInitialUsers");
   }
 };
 
@@ -285,6 +435,25 @@ export const subscribeExams = (
     callback([]);
   }
 
+  // Đồng thời thử nạp từ backend server nếu có
+  try {
+    fetch("/api/exams")
+      .then((res) => res.json())
+      .then((serverExams) => {
+        if (Array.isArray(serverExams) && serverExams.length > 0) {
+          const currentDeleted = getDeletedExamIds();
+          const valid = serverExams.filter((e: any) => e && e.id && !currentDeleted.has(e.id));
+          if (valid.length > 0) {
+            try {
+              localStorage.setItem("edutest_exams", JSON.stringify(valid));
+            } catch {}
+            callback(valid);
+          }
+        }
+      })
+      .catch(() => {});
+  } catch {}
+
   try {
     const q = query(collection(db, EXAMS_COLLECTION));
     return onSnapshot(
@@ -313,11 +482,13 @@ export const subscribeExams = (
         callback(exams);
       },
       (err) => {
+        handleFirestoreWriteError(err, "subscribeExams");
         console.warn("Firestore subscribeExams fallback to local:", err);
         if (onError) onError(err);
       }
     );
   } catch (error) {
+    handleFirestoreWriteError(error, "subscribeExams init");
     console.warn("Firestore subscribeExams error:", error);
     return () => {};
   }
@@ -326,11 +497,31 @@ export const subscribeExams = (
 export const saveExamToFirestore = async (exam: Exam): Promise<void> => {
   try {
     removeDeletedExamId(exam.id);
+
+    // 1. Lưu LocalStorage
+    try {
+      const local = localStorage.getItem("edutest_exams");
+      const current: Exam[] = local ? JSON.parse(local) : [];
+      const updated = current.filter((e) => e.id !== exam.id);
+      updated.push(exam);
+      localStorage.setItem("edutest_exams", JSON.stringify(updated));
+    } catch {}
+
+    // 2. Gửi backend server Express
+    fetch("/api/exams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(exam),
+    }).catch(() => {});
+
+    // 3. Nếu Quota Firestore đã đầy, bỏ qua gọi Firestore
+    if (isFirestoreWriteQuotaExceeded) return;
+
     const cleanExam = cleanForFirestore(exam);
     const ref = doc(db, EXAMS_COLLECTION, exam.id);
     await setDoc(ref, cleanExam, { merge: true });
   } catch (err) {
-    console.warn("Lỗi khi lưu đề thi lên Firestore:", err);
+    handleFirestoreWriteError(err, "saveExamToFirestore");
   }
 };
 
@@ -349,28 +540,45 @@ export const deleteExamFromFirestore = async (examId: string): Promise<void> => 
       }
     } catch {}
 
+    // Gửi xóa trên backend server Express
+    fetch(`/api/exams/${examId}`, { method: "DELETE" }).catch(() => {});
+
+    if (isFirestoreWriteQuotaExceeded) return;
+
     const ref = doc(db, EXAMS_COLLECTION, examId);
     await deleteDoc(ref);
   } catch (err) {
-    console.warn("Lỗi khi xóa đề thi trên Firestore:", err);
+    handleFirestoreWriteError(err, "deleteExamFromFirestore");
   }
 };
 
 export const clearAllExams = async (): Promise<void> => {
   try {
     localStorage.setItem("edutest_exams", JSON.stringify([]));
+    if (isFirestoreWriteQuotaExceeded) return;
+
     const examDocs = await getDocs(collection(db, EXAMS_COLLECTION));
     for (const d of examDocs.docs) {
       await deleteDoc(d.ref);
     }
   } catch (err) {
-    console.warn("Lỗi khi xóa toàn bộ đề thi:", err);
+    handleFirestoreWriteError(err, "clearAllExams");
   }
 };
 
 export const seedInitialExams = async (): Promise<void> => {
-  // Không tự động tạo dữ liệu mẫu ảo
-  return;
+  try {
+    if (isFirestoreWriteQuotaExceeded) return;
+    const deleted = getDeletedExamIds();
+    const toSeed = initialSampleExams.filter((e) => !deleted.has(e.id));
+    for (const e of toSeed) {
+      const cleanExam = cleanForFirestore(e);
+      const ref = doc(db, EXAMS_COLLECTION, e.id);
+      await setDoc(ref, cleanExam, { merge: true });
+    }
+  } catch (err) {
+    handleFirestoreWriteError(err, "seedInitialExams");
+  }
 };
 
 // ----------------------------------------------------
@@ -507,10 +715,14 @@ export const syncUserToSubmissions = async (user: User): Promise<void> => {
 
         if (hasChanges) {
           localStorage.setItem("edutest_submissions", JSON.stringify(updated));
-          for (const sub of updated) {
-            if (sub.studentId === user.id) {
-              const cleanSub = cleanForFirestore(sub);
-              await setDoc(doc(db, SUBMISSIONS_COLLECTION, sub.id), cleanSub, { merge: true }).catch(() => {});
+          if (!isFirestoreWriteQuotaExceeded) {
+            for (const sub of updated) {
+              if (sub.studentId === user.id) {
+                const cleanSub = cleanForFirestore(sub);
+                await setDoc(doc(db, SUBMISSIONS_COLLECTION, sub.id), cleanSub, { merge: true }).catch((e) => {
+                  handleFirestoreWriteError(e, "syncUserToSubmissions");
+                });
+              }
             }
           }
         }
@@ -602,6 +814,7 @@ export const subscribeSubmissions = (
         callback(combinedSubs);
       },
       (err) => {
+        handleFirestoreWriteError(err, "subscribeSubmissions");
         console.warn("Firestore subscribeSubmissions fallback to local:", err);
         const fallback = getLocalSubmissions();
         callback(fallback);
@@ -609,6 +822,7 @@ export const subscribeSubmissions = (
       }
     );
   } catch (error) {
+    handleFirestoreWriteError(error, "subscribeSubmissions init");
     console.warn("Firestore subscribeSubmissions error:", error);
     const fallback = getLocalSubmissions();
     callback(fallback);
@@ -659,13 +873,16 @@ export const saveSubmissionToFirestore = async (
     }).catch(() => {});
   } catch {}
 
-  // 3. Lưu bền vững vào Firebase Firestore
+  // 3. Nếu Quota Firestore đã đầy trong ngày, bỏ qua gọi Firestore để không nghẽn luồng ghi
+  if (isFirestoreWriteQuotaExceeded) return;
+
+  // 4. Lưu bền vững vào Firebase Firestore
   try {
     const cleanSub = cleanForFirestore(sub);
     const ref = doc(db, SUBMISSIONS_COLLECTION, sub.id);
     await setDoc(ref, cleanSub, { merge: true });
   } catch (err) {
-    console.warn("Lỗi khi lưu bài nộp lên Firestore (đã lưu cache an toàn):", err);
+    handleFirestoreWriteError(err, "saveSubmissionToFirestore");
   }
 };
 
@@ -680,16 +897,19 @@ export const deleteSubmissionFromFirestore = async (
     localStorage.setItem("edutest_submissions", JSON.stringify(updated));
   } catch {}
 
+  if (isFirestoreWriteQuotaExceeded) return;
+
   try {
     const ref = doc(db, SUBMISSIONS_COLLECTION, subId);
     await deleteDoc(ref);
   } catch (err) {
-    console.warn("Lỗi khi xóa bài nộp trên Firestore:", err);
+    handleFirestoreWriteError(err, "deleteSubmissionFromFirestore");
   }
 };
 
 export const seedInitialSubmissions = async (): Promise<void> => {
   try {
+    if (isFirestoreWriteQuotaExceeded) return;
     for (const sub of initialSampleSubmissions) {
       const cleanSub = cleanForFirestore(sub);
       const ref = doc(db, SUBMISSIONS_COLLECTION, sub.id);
@@ -699,7 +919,7 @@ export const seedInitialSubmissions = async (): Promise<void> => {
       localStorage.setItem("edutest_submissions", JSON.stringify(initialSampleSubmissions));
     } catch {}
   } catch (err) {
-    console.warn("Lỗi nạp bài nộp mẫu:", err);
+    handleFirestoreWriteError(err, "seedInitialSubmissions");
   }
 };
 
@@ -729,11 +949,20 @@ export const subscribeLiveRoom = (
 
 export const createLiveRoomInFirestore = async (room: LiveRoom): Promise<void> => {
   try {
+    // 1. Luôn gửi backend server Express
+    fetch("/api/rooms/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(room),
+    }).catch(() => {});
+
+    if (isFirestoreWriteQuotaExceeded) return;
+
     const cleanData = cleanForFirestore(room);
     const ref = doc(db, LIVEROOMS_COLLECTION, room.pin);
     await setDoc(ref, cleanData);
   } catch (err) {
-    console.warn("Lỗi tạo LiveRoom trên Firestore:", err);
+    handleFirestoreWriteError(err, "createLiveRoomInFirestore");
   }
 };
 
@@ -746,7 +975,7 @@ export const getLiveRoomFromFirestore = async (pin: string): Promise<LiveRoom | 
     }
     return null;
   } catch (err) {
-    console.warn("Lỗi đọc LiveRoom từ Firestore:", err);
+    handleFirestoreWriteError(err, "getLiveRoomFromFirestore");
     return null;
   }
 };
@@ -756,11 +985,20 @@ export const updateLiveRoomInFirestore = async (
   data: Partial<LiveRoom>
 ): Promise<void> => {
   try {
+    // Gửi backend server Express
+    fetch(`/api/rooms/${pin}/update-state`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }).catch(() => {});
+
+    if (isFirestoreWriteQuotaExceeded) return;
+
     const cleanData = cleanForFirestore(data);
     const ref = doc(db, LIVEROOMS_COLLECTION, pin);
     await setDoc(ref, cleanData, { merge: true });
   } catch (err) {
-    console.warn("Lỗi cập nhật LiveRoom lên Firestore:", err);
+    handleFirestoreWriteError(err, "updateLiveRoomInFirestore");
   }
 };
 
