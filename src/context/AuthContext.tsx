@@ -5,6 +5,7 @@ import {
   PermissionKey,
   INITIAL_USERS,
   ROLE_PERMISSIONS,
+  generateCandidateNumber,
 } from "../types/auth";
 import { useToast } from "./ToastContext";
 import {
@@ -109,7 +110,30 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (Array.isArray(parsed) && parsed.length > 0) {
           const validUsers = parsed.filter((u: User) => u && u.id && !deletedUserIds.has(u.id));
           if (validUsers.length > 0) {
-            return validUsers;
+            let needSave = false;
+            const migrated = validUsers.map((u, idx) => {
+              if (!u.candidateNumber) {
+                needSave = true;
+                return {
+                  ...u,
+                  candidateNumber:
+                    u.id === "usr_admin_01"
+                      ? "SBD-00001"
+                      : u.id === "usr_teacher_01"
+                      ? "SBD-00002"
+                      : u.id === "usr_teacher_02"
+                      ? "SBD-00003"
+                      : generateCandidateNumber(validUsers, idx),
+                };
+              }
+              return u;
+            });
+            if (needSave) {
+              try {
+                localStorage.setItem("mpeducenter_users", JSON.stringify(migrated));
+              } catch {}
+            }
+            return migrated;
           }
         }
       }
@@ -147,7 +171,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           saveUserToFirestore(rootAdmin).catch((e) => console.warn(e));
         }
 
-        setUsers(validUsers);
+        // Tự động cấp SBD cố định cho bất kỳ tài khoản nào chưa có
+        let needBackfill = false;
+        const completeUsers = validUsers.map((u, idx) => {
+          if (!u.candidateNumber) {
+            needBackfill = true;
+            return {
+              ...u,
+              candidateNumber:
+                u.id === "usr_admin_01"
+                  ? "SBD-00001"
+                  : u.id === "usr_teacher_01"
+                  ? "SBD-00002"
+                  : u.id === "usr_teacher_02"
+                  ? "SBD-00003"
+                  : generateCandidateNumber(validUsers, idx),
+            };
+          }
+          return u;
+        });
+
+        if (needBackfill) {
+          saveUsersBatchToFirestore(completeUsers).catch((e) => console.warn(e));
+        }
+
+        setUsers(completeUsers);
       }
     });
     return () => unsubscribe();
@@ -400,10 +448,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    const candidateNumber = generateCandidateNumber(users);
     const newUser: User = {
       id: `usr_${Date.now()}`,
       name: data.name.trim(),
       email: cleanEmail,
+      candidateNumber,
       password: data.password || "123456",
       role: "student",
       schoolClass: data.schoolClass?.trim() || "",
@@ -459,9 +509,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const addUser = (userData: Omit<User, "id" | "createdAt">): User => {
+    const candidateNumber = userData.candidateNumber || generateCandidateNumber(users);
     const newUser: User = {
       ...userData,
       id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      candidateNumber,
       createdAt: new Date().toISOString().split("T")[0],
       status: userData.status || "active",
       avatar: userData.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userData.name)}`,
@@ -469,7 +521,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     setUsers((prev) => [newUser, ...prev]);
     saveUserToFirestore(newUser).catch((e) => console.warn(e));
-    toast.success("Cấp tài khoản thành công", `Tài khoản ${newUser.name} (${newUser.email}) đã được tạo.`);
+    toast.success("Cấp tài khoản thành công", `Tài khoản ${newUser.name} (SBD: ${newUser.candidateNumber}) đã được cấp.`);
     return newUser;
   };
 
@@ -477,6 +529,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const createdUsers: User[] = newUsersList.map((u, index) => ({
       ...u,
       id: `usr_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 6)}`,
+      candidateNumber: u.candidateNumber || generateCandidateNumber(users, index),
       createdAt: new Date().toISOString().split("T")[0],
       status: u.status || "active",
       avatar: u.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(u.name)}`,
@@ -487,7 +540,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     saveUsersBatchToFirestore(createdUsers).catch((e) => console.warn(e));
     toast.success(
       "Cấp tài khoản hàng loạt thành công!",
-      `Đã tạo và cấp ${createdUsers.length} tài khoản người dùng lên hệ thống.`
+      `Đã tạo và cấp ${createdUsers.length} tài khoản người dùng kèm số báo danh (SBD) cố định.`
     );
     return createdUsers;
   };

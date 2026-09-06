@@ -1,16 +1,20 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Exam, LiveRoom, LiveStudent, Question } from "../types/exam";
+import { Exam, LiveRoom, LiveStudent, Question, StudentSubmission } from "../types/exam";
 import { User } from "../types/auth";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { MathRenderer } from "./MathRenderer";
 import { cleanQuestionContent } from "../utils/latexParser";
 import { playSound } from "../utils/audio";
+import { evaluateExamSubmission } from "../utils/scoring";
+import confetti from "canvas-confetti";
 import {
   subscribeLiveRoom,
   updateLiveRoomInFirestore,
   createLiveRoomInFirestore,
   getLiveRoomFromFirestore,
   joinLiveRoomInFirestore,
+  saveSubmissionToFirestore,
 } from "../services/firestoreService";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
@@ -37,6 +41,8 @@ import {
   Lock,
   GraduationCap,
   ShieldCheck,
+  Award,
+  SquareCheck,
 } from "lucide-react";
 
 interface RealtimeLiveRoomViewProps {
@@ -46,6 +52,7 @@ interface RealtimeLiveRoomViewProps {
   currentUser?: User;
   onSelectExam?: (exam: Exam) => void;
   onExit: () => void;
+  onSubmissionComplete?: (sub: StudentSubmission) => void;
 }
 
 export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
@@ -55,17 +62,23 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
   currentUser,
   onSelectExam,
   onExit,
+  onSubmissionComplete,
 }) => {
-  const { currentUser: authUser, isAdmin, isTeacher, hasPermission } = useAuth();
+  const { currentUser: authUser, isAdmin, isTeacher } = useAuth();
+  const { toast } = useToast();
   const effectiveUser = currentUser || authUser;
 
   // QUYỀN HẠN: Chỉ Quản trị viên và Giáo viên mới có quyền tạo phòng
-  const canHost = Boolean(
+  // Học sinh tuyệt đối chỉ có quyền tham gia thi bằng mã PIN
+  const isStudentUser =
+    effectiveUser?.role === "student" ||
+    (!isAdmin && !isTeacher && effectiveUser?.role !== "admin" && effectiveUser?.role !== "teacher");
+
+  const canHost = !isStudentUser && Boolean(
     isAdmin ||
     isTeacher ||
     effectiveUser?.role === "admin" ||
-    effectiveUser?.role === "teacher" ||
-    (effectiveUser?.customPermissions && effectiveUser.customPermissions.includes("host_live_room"))
+    effectiveUser?.role === "teacher"
   );
 
   // Đề thi thực sự của phòng thi (luôn đồng bộ chuẩn theo mã PIN)
@@ -80,12 +93,24 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
   const [role, setRole] = useState<"teacher" | "student" | null>(null);
   const [room, setRoom] = useState<LiveRoom | null>(null);
 
+  // ĐỀ THI ĐÍCH THỰC CỦA PHÒNG THI (Ưu tiên tuyệt đối snapshot đính kèm trong LiveRoom)
+  const effectiveExam: Exam | null = useMemo(() => {
+    if (room?.examSnapshot && Array.isArray(room.examSnapshot.questions) && room.examSnapshot.questions.length > 0) {
+      return room.examSnapshot as Exam;
+    }
+    return activeExam;
+  }, [room?.examSnapshot, activeExam]);
+
   // Thông tin học sinh
   const [studentName, setStudentName] = useState<string>(() => effectiveUser?.name || "");
   const [studentPin, setStudentPin] = useState<string>("");
   const [myStudentId, setMyStudentId] = useState<string>(() => effectiveUser?.id || "");
   const [isJoining, setIsJoining] = useState<boolean>(false);
   const [joinError, setJoinError] = useState<string>("");
+
+  // Quản lý thứ tự câu hỏi khi học sinh làm ở chế độ tự do (student_paced)
+  const [studentQuestionIndex, setStudentQuestionIndex] = useState<number>(0);
+  const [submittedSubmission, setSubmittedSubmission] = useState<StudentSubmission | null>(null);
 
   // Đồng bộ thông tin người dùng nếu tải muộn
   useEffect(() => {
@@ -115,13 +140,13 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
 
   // Đồng bộ đề thi ban đầu nếu chưa vào phòng
   useEffect(() => {
-    if (!room) {
+    if (!room && role === null) {
       const current = initialExam || exam || exams.find((e) => e.id === teacherSelectedExamId) || exams[0] || null;
       if (current) {
         setActiveExam(current);
       }
     }
-  }, [initialExam, exam, teacherSelectedExamId]);
+  }, [initialExam, exam, teacherSelectedExamId, room, role]);
 
   // =========================================================================
   // 1. QUẢN TRỊ VIÊN & GIÁO VIÊN: TẠO PHÒNG THI MỚI
@@ -129,23 +154,26 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
   const handleCreateRoom = async (mode: "teacher_paced" | "student_paced") => {
     // Ràng buộc nghiêm ngặt quyền tạo phòng
     if (!canHost) {
-      setJoinError("Bạn không có quyền tạo phòng thi. Chỉ Quản trị viên và Giáo viên mới có quyền tạo phòng.");
+      setJoinError("Chỉ Quản trị viên và Giáo viên mới có quyền tạo phòng thi.");
       return;
     }
 
     const targetExam =
-      availableExams.find((e) => e.id === teacherSelectedExamId) || activeExam || initialExam || exam;
+      availableExams.find((e) => e.id === teacherSelectedExamId) ||
+      availableExams.find((e) => e.code === teacherSelectedExamId) ||
+      activeExam ||
+      initialExam ||
+      exam;
 
     if (!targetExam) {
       alert("Vui lòng chọn đề thi trước khi tạo phòng!");
       return;
     }
 
+    const cleanExamSnapshot: Exam = JSON.parse(JSON.stringify(targetExam));
+
     // Đảm bảo cập nhật activeExam chính xác
-    setActiveExam(targetExam);
-    if (onSelectExam) {
-      onSelectExam(targetExam);
-    }
+    setActiveExam(cleanExamSnapshot);
 
     // Tạo mã PIN 6 số ngẫu nhiên
     const pin = Math.floor(100000 + Math.random() * 900000).toString();
@@ -160,7 +188,7 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
       examId: targetExam.id,
       examTitle: targetExam.title,
       // LƯU TOÀN BỘ BẢN SAO ĐỀ THI (snapshot) VÀO PHÒNG THI ĐỂ BẤT KỲ HỌC SINH NÀO NHẬP MÃ PIN ĐỀU CÓ 100% ĐỀ CHÍNH XÁC
-      examSnapshot: targetExam,
+      examSnapshot: cleanExamSnapshot,
       creatorId,
       creatorName,
       creatorRole: creatorRole as any,
@@ -185,7 +213,7 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
           pin,
           examId: targetExam.id,
           examTitle: targetExam.title,
-          examSnapshot: targetExam,
+          examSnapshot: cleanExamSnapshot,
           mode,
           creatorId,
           creatorName,
@@ -204,16 +232,12 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
   };
 
   // =========================================================================
-  // 2. HỌC SINH: THAM GIA PHÒNG THI BẰNG MÃ PIN (TỰ ĐỘNG ĐỒNG BỘ ĐÚNG ĐỀ)
+  // 2. HỌC SINH: THAM GIA PHÒNG THI BẰNG MÃ PIN (SỬ DỤNG TÀI KHOẢN & SBD CỐ ĐỊNH)
   // =========================================================================
   const handleJoinRoom = async () => {
     const cleanPin = studentPin.trim();
-    if (!cleanPin) {
-      setJoinError("Vui lòng nhập mã PIN 6 số do giáo viên cung cấp.");
-      return;
-    }
-    if (!studentName.trim()) {
-      setJoinError("Vui lòng nhập họ và tên của bạn để tham gia thi.");
+    if (!cleanPin || cleanPin.length < 6) {
+      setJoinError("Vui lòng nhập đầy đủ mã PIN 6 số do giáo viên cung cấp.");
       return;
     }
 
@@ -241,9 +265,14 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
       }
 
       // 3. TÌM & NẠP CHÍNH XÁC ĐỀ THI CỦA PHÒNG THI NÀY
-      let matchedExam: Exam | null = foundRoom.examSnapshot || null;
+      let matchedExam: Exam | null = null;
 
-      // Nếu phòng chưa có examSnapshot nhúng, tìm trong danh sách đề sẵn có
+      // Ưu tiên 1: Snapshot nhúng trực tiếp trong phòng thi (chính xác 100% đề GV tạo)
+      if (foundRoom.examSnapshot && Array.isArray(foundRoom.examSnapshot.questions) && foundRoom.examSnapshot.questions.length > 0) {
+        matchedExam = foundRoom.examSnapshot;
+      }
+
+      // Ưu tiên 2: Tìm trong danh sách đề có sẵn của ứng dụng
       if (!matchedExam) {
         const foundInList = availableExams.find(
           (e) =>
@@ -256,7 +285,7 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
         }
       }
 
-      // Nếu vẫn chưa có, thử tải trực tiếp từ Firestore doc "exams/{examId}"
+      // Ưu tiên 3: Tải từ Firestore document "exams/{examId}"
       if (!matchedExam && foundRoom.examId) {
         try {
           const examDoc = await getDoc(doc(db, "exams", foundRoom.examId));
@@ -268,30 +297,32 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
         }
       }
 
-      if (!matchedExam) {
+      if (!matchedExam || !Array.isArray(matchedExam.questions) || matchedExam.questions.length === 0) {
         setJoinError(
-          `Đã kết nối tới phòng thi "${foundRoom.examTitle}", nhưng chưa nạp được nội dung đề thi. Hãy nhờ giáo viên kiểm tra lại!`
+          `Đã kết nối tới phòng thi "${foundRoom.examTitle}", nhưng nội dung câu hỏi đề thi chưa sẵn sàng. Vui lòng nhờ giáo viên kiểm tra lại!`
         );
         setIsJoining(false);
         return;
       }
 
-      // CẬP NHẬT ĐỀ THI CỦA MÀN HÌNH THEO ĐÚNG ĐỀ THI CỦA PHÒNG
+      // Gắn examSnapshot vào foundRoom để đảm bảo toàn vẹn dữ liệu
+      foundRoom.examSnapshot = matchedExam;
       setActiveExam(matchedExam);
-      if (onSelectExam) {
-        onSelectExam(matchedExam);
-      }
 
-      // Tạo hồ sơ học sinh
-      const studentId = myStudentId || "stu_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6);
+      // Định danh thí sinh bằng chính tên tài khoản và Số báo danh (SBD) cố định
+      const finalStudentName = effectiveUser?.name || "Học sinh";
+      const finalCandidateNumber =
+        effectiveUser?.candidateNumber || `SBD-${(effectiveUser?.id || "10001").slice(-5)}`;
+      const studentId = effectiveUser?.id || myStudentId || "stu_" + Date.now();
       setMyStudentId(studentId);
 
       const studentObj: LiveStudent = {
         id: studentId,
-        name: studentName.trim(),
+        name: finalStudentName,
+        candidateNumber: finalCandidateNumber,
         avatar:
-          currentUser?.avatar ||
-          `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(studentName.trim())}`,
+          effectiveUser?.avatar ||
+          `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(finalStudentName)}`,
         currentScore: 0,
         answers: {},
         isOnline: true,
@@ -307,11 +338,13 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
         body: JSON.stringify({
           studentName: studentObj.name,
           studentId: studentObj.id,
+          candidateNumber: studentObj.candidateNumber,
         }),
       }).catch(() => {});
 
       setRoom(foundRoom);
       setRole("student");
+      setStudentQuestionIndex(0);
     } catch (err: any) {
       console.error("Lỗi tham gia phòng:", err);
       setJoinError("Đã xảy ra lỗi khi tham gia phòng thi. Vui lòng thử lại!");
@@ -332,7 +365,7 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
       if (updatedRoom) {
         setRoom(updatedRoom);
         // Đồng bộ đề thi nếu có snapshot mới
-        if (updatedRoom.examSnapshot && (!activeExam || activeExam.id !== updatedRoom.examSnapshot.id)) {
+        if (updatedRoom.examSnapshot && Array.isArray(updatedRoom.examSnapshot.questions) && updatedRoom.examSnapshot.questions.length > 0) {
           setActiveExam(updatedRoom.examSnapshot);
         }
       }
@@ -345,7 +378,7 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
         if (res.ok) {
           const updated = await res.json();
           setRoom((prev) => (prev ? { ...prev, ...updated } : updated));
-          if (updated.examSnapshot && (!activeExam || activeExam.id !== updated.examSnapshot.id)) {
+          if (updated.examSnapshot && Array.isArray(updated.examSnapshot.questions) && updated.examSnapshot.questions.length > 0) {
             setActiveExam(updated.examSnapshot);
           }
         }
@@ -377,8 +410,8 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
   };
 
   const handleTeacherChangeQuestion = async (delta: number) => {
-    if (!room || !activeExam) return;
-    const totalQ = activeExam.questions?.length || 1;
+    if (!room || !effectiveExam) return;
+    const totalQ = effectiveExam.questions?.length || 1;
     const newIdx = Math.max(0, Math.min(totalQ - 1, room.currentQuestionIndex + delta));
 
     const updateData = { currentQuestionIndex: newIdx, timerRemaining: 60 };
@@ -392,16 +425,78 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
     }).catch(() => {});
   };
 
+  // Kết thúc phòng thi & Chấm điểm toàn bộ học sinh
+  const handleEndRoom = async () => {
+    if (!room || !effectiveExam) return;
+    if (!window.confirm("Bạn có chắc chắn muốn kết thúc bài thi cho toàn bộ học sinh và lưu kết quả vào hệ thống?")) return;
+
+    const updateData = { status: "ended" as const };
+    setRoom((prev) => (prev ? { ...prev, ...updateData } : null));
+
+    try {
+      await updateLiveRoomInFirestore(room.pin, updateData);
+      fetch(`/api/rooms/${room.pin}/update-state`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updateData),
+      }).catch(() => {});
+
+      // Tổng hợp và lưu bài nộp cho toàn bộ học sinh có làm bài
+      const subsToSave: StudentSubmission[] = [];
+      for (const stu of room.students || []) {
+        if (stu.answers && Object.keys(stu.answers).length > 0) {
+          const sub = evaluateExamSubmission(
+            effectiveExam,
+            stu.answers,
+            stu.name || "Học sinh",
+            stu.id,
+            60,
+            {
+              candidateNumber: stu.candidateNumber,
+              studentClass: effectiveExam.grade ? effectiveExam.grade.replace(/\D/g, "") : "6",
+              studentAvatar: stu.avatar,
+            }
+          );
+          sub.examId = effectiveExam.id;
+          sub.examTitle = effectiveExam.title;
+          subsToSave.push(sub);
+        }
+      }
+
+      for (const s of subsToSave) {
+        saveSubmissionToFirestore(s).catch(console.warn);
+        if (onSubmissionComplete) onSubmissionComplete(s);
+      }
+
+      if (subsToSave.length > 0) {
+        fetch("/api/submissions/batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(subsToSave),
+        }).catch(console.warn);
+      }
+
+      toast.success("Đã kết thúc phòng thi", `Đã lưu kết quả thi của ${subsToSave.length} học sinh vào hệ thống.`);
+    } catch (err) {
+      console.warn("Lỗi khi kết thúc phòng thi:", err);
+    }
+  };
+
   // =========================================================================
-  // 5. TRẢ LỜI CÂU HỎI (HỌC SINH)
+  // 5. TRẢ LỜI CÂU HỎI & NỘP BÀI (HỌC SINH)
   // =========================================================================
+  const activeQuestionIndex =
+    room?.mode === "student_paced" && role === "student"
+      ? studentQuestionIndex
+      : (room?.currentQuestionIndex || 0);
+
   const currentQ = useMemo(() => {
-    if (!activeExam || !room || !activeExam.questions) return null;
-    return activeExam.questions[room.currentQuestionIndex] || null;
-  }, [activeExam, room?.currentQuestionIndex]);
+    if (!effectiveExam || !room || !Array.isArray(effectiveExam.questions)) return null;
+    return effectiveExam.questions[activeQuestionIndex] || null;
+  }, [effectiveExam, room?.currentQuestionIndex, activeQuestionIndex]);
 
   const handleStudentAnswer = async (ans: any) => {
-    if (!room || !activeExam || !currentQ) return;
+    if (!room || !effectiveExam || !currentQ) return;
 
     setMyAnswers((prev) => ({ ...prev, [currentQ.id]: ans }));
     playSound("correct");
@@ -451,6 +546,81 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
     }
   };
 
+  // Nộp bài thi của học sinh
+  const handleFinishAndSubmit = async () => {
+    if (!effectiveExam || !room || submittedSubmission) return;
+
+    const finalStudentName = effectiveUser?.name || studentName.trim() || "Học sinh";
+    const finalCandidateNumber =
+      effectiveUser?.candidateNumber || `SBD-${(effectiveUser?.id || "10001").slice(-5)}`;
+    const finalStudentId = effectiveUser?.id || myStudentId || "stu_" + Date.now();
+
+    // Chấm điểm bài thi
+    const sub = evaluateExamSubmission(
+      effectiveExam,
+      myAnswers,
+      finalStudentName,
+      finalStudentId,
+      60,
+      {
+        candidateNumber: finalCandidateNumber,
+        studentEmail: effectiveUser?.email,
+        studentClass: effectiveExam.grade ? effectiveExam.grade.replace(/\D/g, "") : "6",
+        studentAvatar:
+          effectiveUser?.avatar ||
+          `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(finalStudentName)}`,
+      }
+    );
+
+    sub.examId = effectiveExam.id;
+    sub.examTitle = effectiveExam.title;
+
+    setSubmittedSubmission(sub);
+    playSound("fanfare");
+    confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+
+    // Lưu bài nộp
+    try {
+      if (onSubmissionComplete) {
+        onSubmissionComplete(sub);
+      }
+      await saveSubmissionToFirestore(sub);
+      await fetch("/api/submissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sub),
+      });
+
+      // Cập nhật trạng thái đã nộp vào phòng
+      const updatedStudents = (room.students || []).map((stu) => {
+        if (stu.id === myStudentId) {
+          return {
+            ...stu,
+            candidateNumber: finalCandidateNumber,
+            submitted: true,
+            currentScore: sub.score,
+            answers: myAnswers,
+            lastActive: new Date().toISOString(),
+          };
+        }
+        return stu;
+      });
+
+      await updateLiveRoomInFirestore(room.pin, { students: updatedStudents });
+      fetch(`/api/rooms/${room.pin}/submit-answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: myStudentId,
+          submitted: true,
+          scoreDelta: 0,
+        }),
+      }).catch(() => {});
+    } catch (err) {
+      console.warn("Lỗi lưu kết quả bài thi:", err);
+    }
+  };
+
   // =========================================================================
   // MÀN HÌNH CHỌN VAI TRÒ & NHẬP MÃ PIN (PHÂN QUYỀN RBAC)
   // =========================================================================
@@ -475,27 +645,41 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
               </p>
             </div>
 
-            {/* Thông tin hồ sơ học sinh */}
-            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80 flex items-center gap-3 text-xs">
-              <img
-                src={
-                  effectiveUser?.avatar ||
-                  `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(studentName || "student")}`
-                }
-                alt="avatar"
-                className="w-10 h-10 rounded-xl bg-slate-200 object-cover"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-slate-900 truncate">{studentName || "Thí sinh"}</span>
-                  <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700 font-black text-[10px]">
-                    Học sinh
-                  </span>
+            {/* Thông tin hồ sơ thí sinh gắn liền với tài khoản & SBD tự động */}
+            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <img
+                  src={
+                    effectiveUser?.avatar ||
+                    `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(effectiveUser?.name || "student")}`
+                  }
+                  alt="avatar"
+                  className="w-11 h-11 rounded-xl bg-slate-200 object-cover border border-slate-200 shrink-0"
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-black text-slate-900 text-sm truncate">{effectiveUser?.name || "Thí sinh"}</span>
+                    <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-extrabold text-[10px]">
+                      Học sinh
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                    {effectiveUser?.schoolClass ? `Lớp ${effectiveUser.schoolClass}` : effectiveUser?.email || "Tài khoản học sinh"}
+                  </p>
                 </div>
-                <p className="text-[11px] text-slate-500 truncate">
-                  {effectiveUser?.schoolClass ? `Lớp ${effectiveUser.schoolClass}` : "Tài khoản học sinh"}
-                </p>
               </div>
+
+              <div className="text-right shrink-0">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block">Số báo danh (SBD)</span>
+                <span className="text-xs font-mono font-black text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 block mt-0.5 shadow-2xs">
+                  {effectiveUser?.candidateNumber || `SBD-${(effectiveUser?.id || "10001").slice(-5)}`}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-2.5 bg-emerald-50 rounded-xl border border-emerald-200/80 flex items-center gap-2 text-[11px] text-emerald-800">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Hệ thống tự động sử dụng tên tài khoản và Số báo danh cố định gắn với tài khoản của bạn.</span>
             </div>
 
             {joinError && (
@@ -521,20 +705,6 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
                   }}
                   placeholder="Nhập 6 số (VD: 842109)..."
                   className="w-full py-3.5 px-4 rounded-2xl bg-slate-50 border-2 border-slate-300 text-xl sm:text-2xl font-black text-center tracking-[0.3em] text-slate-900 outline-none focus:border-emerald-600 focus:bg-white transition shadow-inner"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1.5">Họ và tên thí sinh:</label>
-                <input
-                  type="text"
-                  value={studentName}
-                  onChange={(e) => {
-                    setStudentName(e.target.value);
-                    setJoinError("");
-                  }}
-                  placeholder="Nhập họ và tên..."
-                  className="w-full py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold text-slate-800 outline-none focus:border-emerald-500 focus:bg-white transition"
                 />
               </div>
 
@@ -728,18 +898,24 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
                   />
                 </div>
 
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">Tên hiển thị:</label>
-                  <input
-                    type="text"
-                    value={studentName}
-                    onChange={(e) => {
-                      setStudentName(e.target.value);
-                      setJoinError("");
-                    }}
-                    placeholder="Họ và tên..."
-                    className="w-full py-2 px-3 rounded-xl bg-white border border-slate-300 text-xs font-bold outline-none focus:border-emerald-500"
-                  />
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <img
+                      src={effectiveUser?.avatar}
+                      alt=""
+                      className="w-8 h-8 rounded-lg object-cover border border-slate-200 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-slate-800 truncate">{effectiveUser?.name || "Người dùng"}</div>
+                      <div className="text-[10px] text-slate-500 truncate">{effectiveUser?.email}</div>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-[9px] text-slate-400 uppercase font-bold block">SBD</span>
+                    <span className="text-[11px] font-mono font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                      {effectiveUser?.candidateNumber || `SBD-${(effectiveUser?.id || "10001").slice(-5)}`}
+                    </span>
+                  </div>
                 </div>
 
                 <button
@@ -772,7 +948,7 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
   // GIAO DIỆN GIÁO VIÊN ĐIỀU KHIỂN PHÒNG THI
   // =========================================================================
   if (role === "teacher") {
-    const totalQuestions = activeExam?.questions?.length || 0;
+    const totalQuestions = effectiveExam?.questions?.length || 0;
 
     return (
       <div className="min-h-screen bg-slate-950 text-white p-4 sm:p-6 flex flex-col font-sans">
@@ -787,14 +963,17 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold text-[10px]">
-                  {activeExam?.grade || "Toán"}
+                  {effectiveExam?.grade || room?.examSnapshot?.grade || "Toán"}
                 </span>
-                <h2 className="font-black text-base sm:text-lg">{room.examTitle}</h2>
+                <span className="px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 font-bold text-[10px]">
+                  {room.mode === "teacher_paced" ? "GV điều phối" : "HS tự do làm bài"}
+                </span>
+                <h2 className="font-black text-base sm:text-lg">{effectiveExam?.title || room.examTitle}</h2>
               </div>
               <p className="text-xs text-slate-400 font-semibold flex items-center gap-2 mt-1">
                 <span>{(room.students || []).length} học sinh tham gia</span> •{" "}
-                <span className={room.status === "waiting" ? "text-amber-400" : "text-emerald-400 font-bold"}>
-                  Trạng thái: {room.status === "waiting" ? "Đang đợi bắt đầu" : "Đang làm bài"}
+                <span className={room.status === "waiting" ? "text-amber-400" : room.status === "ended" ? "text-rose-400" : "text-emerald-400 font-bold"}>
+                  Trạng thái: {room.status === "waiting" ? "Đang đợi bắt đầu" : room.status === "ended" ? "Đã kết thúc" : "Đang làm bài"}
                 </span>
               </p>
             </div>
@@ -805,39 +984,55 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
               <button
                 type="button"
                 onClick={handleStartRoom}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 font-black text-xs sm:text-sm shadow-lg shadow-emerald-900 transition flex items-center gap-1.5"
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 font-black text-xs sm:text-sm shadow-lg shadow-emerald-900 transition flex items-center gap-1.5 cursor-pointer"
               >
                 <Play className="w-4 h-4" />
                 <span>BẮT ĐẦU THI</span>
               </button>
+            ) : room.status === "in_progress" ? (
+              <>
+                {room.mode === "teacher_paced" && (
+                  <div className="flex items-center gap-2 bg-slate-800 p-1 rounded-2xl border border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => handleTeacherChangeQuestion(-1)}
+                      disabled={room.currentQuestionIndex === 0}
+                      className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-30 font-bold text-xs cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      ❮ Câu trước
+                    </button>
+                    <span className="text-xs font-black px-2">
+                      Câu {room.currentQuestionIndex + 1}/{totalQuestions}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleTeacherChangeQuestion(1)}
+                      disabled={room.currentQuestionIndex >= totalQuestions - 1}
+                      className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-30 font-bold text-xs cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      Câu sau ❯
+                    </button>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleEndRoom}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <SquareCheck className="w-3.5 h-3.5" />
+                  <span>Kết thúc & Lưu điểm</span>
+                </button>
+              </>
             ) : (
-              <div className="flex items-center gap-2 bg-slate-800 p-1 rounded-2xl border border-slate-700">
-                <button
-                  type="button"
-                  onClick={() => handleTeacherChangeQuestion(-1)}
-                  disabled={room.currentQuestionIndex === 0}
-                  className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-30 font-bold text-xs"
-                >
-                  ❮ Câu trước
-                </button>
-                <span className="text-xs font-black px-2">
-                  Câu {room.currentQuestionIndex + 1}/{totalQuestions}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleTeacherChangeQuestion(1)}
-                  disabled={room.currentQuestionIndex >= totalQuestions - 1}
-                  className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-30 font-bold text-xs"
-                >
-                  Câu sau ❯
-                </button>
-              </div>
+              <span className="px-3 py-1.5 rounded-xl bg-slate-800 text-rose-300 font-bold text-xs border border-slate-700">
+                Phòng thi đã kết thúc
+              </span>
             )}
 
             <button
               type="button"
               onClick={onExit}
-              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white font-bold text-xs transition flex items-center gap-1"
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white font-bold text-xs transition flex items-center gap-1 cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span>Thoát</span>
@@ -957,7 +1152,14 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
                         <span className="w-5 font-black text-slate-400">{i + 1}.</span>
                         <img src={stu.avatar} alt="avatar" className="w-8 h-8 rounded-full bg-slate-700" />
                         <div>
-                          <p className="font-bold text-slate-200">{stu.name}</p>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-bold text-slate-200">{stu.name}</p>
+                            {stu.candidateNumber && (
+                              <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">
+                                {stu.candidateNumber}
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[10px] text-slate-500">
                             {stu.answers && currentQ && stu.answers[currentQ.id] !== undefined
                               ? "✓ Đã nộp đáp án"
@@ -980,7 +1182,57 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
   // =========================================================================
   // GIAO DIỆN HỌC SINH THAM GIA PHÒNG THI
   // =========================================================================
-  const totalQuestions = activeExam?.questions?.length || 0;
+  const totalQuestions = effectiveExam?.questions?.length || 0;
+
+  // Trường hợp ĐÃ NỘP BÀI hoặc PHÒNG THI ĐÃ KẾT THÚC
+  if (submittedSubmission || room.status === "ended") {
+    const finalScore = submittedSubmission
+      ? submittedSubmission.score
+      : ((room.students || []).find((s) => s.id === myStudentId)?.currentScore || 0);
+
+    return (
+      <div className="min-h-screen bg-slate-900 text-white p-4 flex flex-col items-center justify-center font-sans">
+        <div className="w-full max-w-lg bg-slate-800 rounded-3xl p-6 sm:p-8 border border-slate-700 shadow-2xl space-y-6 text-center">
+          <div className="w-16 h-16 rounded-3xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center text-3xl mx-auto shadow-lg">
+            🏆
+          </div>
+
+          <div>
+            <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-xs uppercase">
+              {room.status === "ended" ? "Phòng thi đã kết thúc" : "Hoàn thành bài thi"}
+            </span>
+            <h2 className="text-2xl font-black mt-2 text-white">{effectiveExam?.title || room.examTitle}</h2>
+            <p className="text-xs text-slate-400 mt-1 flex items-center justify-center gap-2 flex-wrap">
+              <span>Thí sinh: <b className="text-slate-200">{effectiveUser?.name || studentName}</b></span>
+              <span>•</span>
+              <span>SBD: <b className="text-amber-400 font-mono">{effectiveUser?.candidateNumber || `SBD-${(effectiveUser?.id || "10001").slice(-5)}`}</b></span>
+              <span>•</span>
+              <span>Mã phòng: <b className="text-indigo-400">#{room.pin}</b></span>
+            </p>
+          </div>
+
+          <div className="p-6 bg-slate-850 rounded-2xl border border-slate-700/80 space-y-2">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Điểm số đạt được</span>
+            <div className="text-4xl sm:text-5xl font-black text-emerald-400 tracking-tight">
+              {Number(finalScore).toFixed(2)} <span className="text-lg text-slate-400">/ 10</span>
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+              Kết quả làm bài đã được tự động lưu vào hồ sơ học tập và đồng bộ lên hệ thống giáo viên.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onExit}
+            className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Quay lại Cổng luyện thi</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-900 text-white p-4 flex flex-col items-center justify-center font-sans">
@@ -992,20 +1244,41 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
               <span className="px-3 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-xs">
                 MÃ PHÒNG #{room.pin}
               </span>
-              <span className="text-xs text-slate-400 font-semibold">{activeExam?.grade}</span>
+              <span className="text-xs text-slate-400 font-semibold">{effectiveExam?.grade || "Toán"}</span>
+              <span className="text-xs px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold">
+                {room.mode === "student_paced" ? "Tự do làm bài" : "Theo hiệu lệnh GV"}
+              </span>
             </div>
-            <h2 className="font-black text-lg text-slate-100 mt-1">{activeExam?.title || room.examTitle}</h2>
-            <p className="text-xs text-indigo-300 font-medium">Thí sinh: {studentName}</p>
+            <h2 className="font-black text-lg text-slate-100 mt-1">{effectiveExam?.title || room.examTitle}</h2>
+            <div className="text-xs text-indigo-300 font-medium flex items-center gap-2 mt-0.5">
+              <span>Thí sinh: <b>{effectiveUser?.name || studentName}</b></span>
+              <span>•</span>
+              <span className="font-mono text-amber-300 font-bold">
+                SBD: {effectiveUser?.candidateNumber || `SBD-${(effectiveUser?.id || "10001").slice(-5)}`}
+              </span>
+            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onExit}
-            className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-xs font-bold transition flex items-center gap-1"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Rời phòng</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {room.status === "in_progress" && (
+              <button
+                type="button"
+                onClick={handleFinishAndSubmit}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-md"
+              >
+                <SquareCheck className="w-3.5 h-3.5" />
+                <span>Nộp bài</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onExit}
+              className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Rời phòng</span>
+            </button>
+          </div>
         </div>
 
         {/* Trạng thái chờ GV bắt đầu */}
@@ -1020,15 +1293,41 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
             </p>
           </div>
         ) : (
-          /* Trạng thái làm bài theo điều phối của GV */
+          /* Trạng thái làm bài */
           currentQ && (
             <div className="space-y-4">
               <div className="flex justify-between items-center text-xs font-bold text-slate-400">
                 <span className="text-indigo-400">
-                  Câu {room.currentQuestionIndex + 1}/{totalQuestions} • {currentQ.partName || "Bài thi"}
+                  Câu {activeQuestionIndex + 1}/{totalQuestions} • {currentQ.partName || "Bài thi"}
                 </span>
                 <span className="text-amber-400">Điểm: {currentQ.score}đ</span>
               </div>
+
+              {/* Điều hướng câu hỏi tự do trong chế độ student_paced */}
+              {room.mode === "student_paced" && (
+                <div className="flex flex-wrap items-center gap-1.5 p-2 bg-slate-850 rounded-2xl border border-slate-700/60 max-h-24 overflow-y-auto">
+                  {(effectiveExam?.questions || []).map((q, idx) => {
+                    const isAnswered = myAnswers[q.id] !== undefined;
+                    const isCurrent = idx === activeQuestionIndex;
+                    return (
+                      <button
+                        key={q.id}
+                        type="button"
+                        onClick={() => setStudentQuestionIndex(idx)}
+                        className={`w-7 h-7 rounded-lg text-xs font-bold transition flex items-center justify-center cursor-pointer ${
+                          isCurrent
+                            ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
+                            : isAnswered
+                            ? "bg-emerald-600 text-white"
+                            : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+                        }`}
+                      >
+                        {idx + 1}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               <div className="text-sm sm:text-base font-semibold leading-relaxed bg-slate-850 p-4 rounded-2xl border border-slate-700/60">
                 <span className="font-black text-amber-400 mr-2">{currentQ.title}:</span>
@@ -1045,7 +1344,7 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
                         key={opt.label}
                         type="button"
                         onClick={() => handleStudentAnswer(opt.label)}
-                        className={`p-3.5 rounded-2xl border-2 text-left font-bold flex items-center gap-3 transition ${
+                        className={`p-3.5 rounded-2xl border-2 text-left font-bold flex items-center gap-3 transition cursor-pointer ${
                           isSelected
                             ? "bg-blue-600 border-blue-500 text-white shadow-lg"
                             : "bg-slate-700/60 border-slate-600 hover:bg-slate-700 text-slate-200"
@@ -1090,7 +1389,7 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
                               const nextTf = { ...currentTfAns, [item.label]: true };
                               handleStudentAnswer(nextTf);
                             }}
-                            className={`px-3 py-1.5 rounded-xl font-bold transition text-xs ${
+                            className={`px-3 py-1.5 rounded-xl font-bold transition text-xs cursor-pointer ${
                               selectedVal === true
                                 ? "bg-emerald-600 text-white shadow-sm"
                                 : "bg-slate-800 text-slate-400 hover:bg-slate-700"
@@ -1104,7 +1403,7 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
                               const nextTf = { ...currentTfAns, [item.label]: false };
                               handleStudentAnswer(nextTf);
                             }}
-                            className={`px-3 py-1.5 rounded-xl font-bold transition text-xs ${
+                            className={`px-3 py-1.5 rounded-xl font-bold transition text-xs cursor-pointer ${
                               selectedVal === false
                                 ? "bg-rose-600 text-white shadow-sm"
                                 : "bg-slate-800 text-slate-400 hover:bg-slate-700"
@@ -1137,7 +1436,7 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
                           handleStudentAnswer(shortAnswerInput.trim());
                         }
                       }}
-                      className="px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md"
+                      className="px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
                     >
                       <Send className="w-3.5 h-3.5" />
                       <span>Nộp</span>
@@ -1148,6 +1447,36 @@ export const RealtimeLiveRoomView: React.FC<RealtimeLiveRoomViewProps> = ({
                       ✓ Đã lưu câu trả lời: "{myAnswers[currentQ.id]}"
                     </p>
                   )}
+                </div>
+              )}
+
+              {/* Điều hướng trước/sau ở chế độ tự do */}
+              {room.mode === "student_paced" && (
+                <div className="flex justify-between items-center pt-4 border-t border-slate-700">
+                  <button
+                    type="button"
+                    disabled={activeQuestionIndex === 0}
+                    onClick={() => setStudentQuestionIndex((prev) => Math.max(0, prev - 1))}
+                    className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    ❮ Câu trước
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleFinishAndSubmit}
+                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md"
+                  >
+                    <SquareCheck className="w-4 h-4" />
+                    <span>NỘP BÀI THI</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={activeQuestionIndex >= totalQuestions - 1}
+                    onClick={() => setStudentQuestionIndex((prev) => Math.min(totalQuestions - 1, prev + 1))}
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-30 text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    Câu sau ❯
+                  </button>
                 </div>
               )}
             </div>

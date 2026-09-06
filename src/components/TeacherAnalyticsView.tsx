@@ -793,7 +793,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     // 1. Lọc từ khóa tìm kiếm (không dấu)
     if (searchKeyword.trim()) {
       list = list.filter((s) =>
-        matchSearchQuery(searchKeyword, s.studentName, s.studentId, s.studentClass, s.studentEmail)
+        matchSearchQuery(searchKeyword, s.studentName, s.candidateNumber, s.studentId, s.studentClass, s.studentEmail)
       );
     }
 
@@ -821,7 +821,9 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
         return a.studentName.localeCompare(b.studentName, "vi");
       }
       if (studentSortBy === "sbd") {
-        return a.studentId.localeCompare(b.studentId);
+        const sbdA = a.candidateNumber || a.studentId || "";
+        const sbdB = b.candidateNumber || b.studentId || "";
+        return sbdA.localeCompare(sbdB, undefined, { numeric: true });
       }
       if (studentSortBy === "time_desc") {
         return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
@@ -844,7 +846,8 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
       const maxScore = s.maxScore || 10;
       const pct = Number(Math.min(100, Math.max(0, (s.score / maxScore) * 100)).toFixed(1));
       const stdScore = Number(((s.score / maxScore) * 10).toFixed(2));
-      csv += `"${s.studentId}","${s.studentName}","${s.studentClass || ""}",${s.score},${maxScore},"${pct}%",${stdScore},${s.partScores.part_1.earned},${s.partScores.part_2.earned},${s.partScores.part_3.earned},${s.partScores.part_4.earned},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
+      const sbd = s.candidateNumber || s.studentId || "";
+      csv += `"${sbd}","${s.studentName}","${s.studentClass || ""}",${s.score},${maxScore},"${pct}%",${stdScore},${s.partScores.part_1.earned},${s.partScores.part_2.earned},${s.partScores.part_3.earned},${s.partScores.part_4.earned},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -1749,7 +1752,11 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                   <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
                     {filteredStudents.map((sub) => (
                       <tr key={sub.id} className="hover:bg-slate-50">
-                        <td className="p-3 font-extrabold text-slate-500">{sub.studentId}</td>
+                        <td className="p-3 font-bold font-mono">
+                          <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200 text-xs">
+                            {sub.candidateNumber || sub.studentId}
+                          </span>
+                        </td>
                         <td className="p-3 font-black text-slate-900">
                           <button
                             type="button"

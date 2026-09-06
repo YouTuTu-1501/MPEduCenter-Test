@@ -257,6 +257,10 @@ export const StudentResultHistoryModal: React.FC<StudentResultHistoryModalProps>
               <p className="text-xs text-slate-300 flex items-center gap-2 flex-wrap">
                 <span className="font-extrabold text-amber-300">{user.name}</span>
                 <span>•</span>
+                <span className="font-bold text-amber-200 bg-amber-400/20 px-2 py-0.5 rounded border border-amber-300/30">
+                  SBD: {user.candidateNumber || `SBD-${user.id.slice(-5)}`}
+                </span>
+                <span>•</span>
                 <span className="text-slate-300 font-semibold">
                   {user.role === "student" ? (user.schoolClass ? `Lớp ${user.schoolClass}` : "Học sinh") : user.email}
                 </span>
@@ -543,6 +547,10 @@ export const StudentResultHistoryModal: React.FC<StudentResultHistoryModalProps>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                        <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md text-[11px] font-bold border border-amber-200">
+                          SBD: {sub.candidateNumber || user.candidateNumber || sub.studentId || `SBD-${user.id.slice(-5)}`}
+                        </span>
+
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5 text-slate-400" />
                           <span>
@@ -634,8 +642,11 @@ export const StudentResultHistoryModal: React.FC<StudentResultHistoryModalProps>
                   Chi tiết bài làm: {selectedSubmission.examTitle}
                 </h4>
                 <p className="text-xs text-slate-400">
-                  Học sinh: <strong className="text-white">{selectedSubmission.studentName}</strong> • Điểm:{" "}
-                  <strong className="text-emerald-400 font-black">{selectedSubmission.score}đ</strong>
+                  Học sinh: <strong className="text-white">{selectedSubmission.studentName}</strong> • SBD:{" "}
+                  <strong className="text-amber-300 font-mono font-bold">
+                    {selectedSubmission.candidateNumber || selectedSubmission.studentId || "Chưa cấp"}
+                  </strong>{" "}
+                  • Điểm: <strong className="text-emerald-400 font-black">{selectedSubmission.score}đ</strong>
                 </p>
               </div>
               <button

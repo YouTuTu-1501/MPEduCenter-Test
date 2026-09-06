@@ -507,10 +507,14 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
               className="w-16 h-16 rounded-2xl object-cover border-2 border-emerald-400/50 shadow-md shrink-0"
             />
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-3 py-0.5 bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-bold rounded-full flex items-center gap-1.5">
                   <GraduationCap className="w-3.5 h-3.5" />
                   <span>Học sinh {currentUser.schoolClass ? `Lớp ${currentUser.schoolClass}` : "THPT"}</span>
+                </span>
+                <span className="px-3 py-0.5 bg-amber-400/20 border border-amber-400/40 text-amber-300 text-xs font-mono font-black rounded-full flex items-center gap-1">
+                  <span>SBD:</span>
+                  <span>{currentUser.candidateNumber || `SBD-${(currentUser.id || "10001").slice(-5)}`}</span>
                 </span>
                 <span className="text-xs text-slate-400">MPEduCenter Student Space</span>
               </div>

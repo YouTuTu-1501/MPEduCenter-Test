@@ -107,6 +107,7 @@ export function evaluateExamSubmission(
   studentId: string = "TS01",
   timeSpentSeconds: number = 0,
   extraMeta?: {
+    candidateNumber?: string;
     studentEmail?: string;
     studentClass?: string;
     studentAvatar?: string;
@@ -219,6 +220,7 @@ export function evaluateExamSubmission(
     examTitle: exam.title,
     studentName,
     studentId,
+    candidateNumber: extraMeta?.candidateNumber,
     studentEmail: extraMeta?.studentEmail,
     studentClass: extraMeta?.studentClass,
     studentAvatar: extraMeta?.studentAvatar,

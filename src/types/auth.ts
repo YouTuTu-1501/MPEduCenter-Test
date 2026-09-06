@@ -7,6 +7,7 @@ export interface User {
   password?: string;
   role: UserRole;
   avatar: string;
+  candidateNumber?: string; // Số báo danh (SBD) cố định gắn liền với tài khoản (VD: SBD-10001)
   schoolClass?: string; // Ví dụ: "12A1", "12A2", "11B1" dành cho Học sinh
   subject?: string;     // Ví dụ: "Toán THPT", "Hình học không gian" dành cho Giáo viên
   phone?: string;
@@ -173,6 +174,32 @@ export const ROLE_LABELS: Record<UserRole, { title: string; badge: string; color
   },
 };
 
+/**
+ * Tự động cấp Số Báo Danh (SBD) cố định, duy nhất gắn liền với tài khoản người dùng
+ * Định dạng chuẩn: SBD-10001, SBD-10002, ...
+ */
+export function generateCandidateNumber(
+  existingUsers: Array<{ candidateNumber?: string; id?: string }>,
+  offset: number = 0
+): string {
+  let maxNum = 10000;
+  if (Array.isArray(existingUsers)) {
+    for (const u of existingUsers) {
+      if (u && u.candidateNumber) {
+        const match = u.candidateNumber.match(/\d+/);
+        if (match) {
+          const val = parseInt(match[0], 10);
+          if (!isNaN(val) && val > maxNum) {
+            maxNum = val;
+          }
+        }
+      }
+    }
+  }
+  const nextNum = maxNum + 1 + offset;
+  return `SBD-${nextNum.toString().padStart(5, "0")}`;
+}
+
 export const INITIAL_USERS: User[] = [
   {
     id: "usr_admin_01",
@@ -180,6 +207,7 @@ export const INITIAL_USERS: User[] = [
     email: "youtu1501@gmail.com",
     password: "password" in { password: "" } ? "061091" : "061091",
     role: "admin",
+    candidateNumber: "SBD-00001",
     avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
     phone: "0901 234 567",
     status: "active",
@@ -193,6 +221,7 @@ export const INITIAL_USERS: User[] = [
     email: "toan.tran@edulink.vn",
     password: "password" in { password: "" } ? "123456" : "123456",
     role: "teacher",
+    candidateNumber: "SBD-00002",
     avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
     subject: "Toán học THPT (Lớp 12 & 11)",
     phone: "0912 345 678",
@@ -207,6 +236,7 @@ export const INITIAL_USERS: User[] = [
     email: "mai.le@edulink.vn",
     password: "password" in { password: "" } ? "123456" : "123456",
     role: "teacher",
+    candidateNumber: "SBD-00003",
     avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
     subject: "Toán học (Lớp 10 & 11)",
     phone: "0934 567 890",

@@ -275,6 +275,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                   }`}
                 ></span>
                 <span>{ROLE_LABELS[currentUser.role].title}</span>
+                {currentUser.candidateNumber && (
+                  <span className="font-mono text-amber-600 font-bold ml-0.5">({currentUser.candidateNumber})</span>
+                )}
               </div>
             </div>
             <ChevronDown
@@ -301,11 +304,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <History className="w-3.5 h-3.5 text-indigo-600" />
                 </div>
                 <div className="text-[11px] text-slate-500 truncate">{currentUser.email}</div>
-                <div className="mt-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-white border border-slate-200 text-slate-700">
-                  <span>Vai trò:</span>
-                  <span className={`font-black ${ROLE_LABELS[currentUser.role].textDark}`}>
-                    {ROLE_LABELS[currentUser.role].title}
-                  </span>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-white border border-slate-200 text-slate-700">
+                    <span>Vai trò:</span>
+                    <span className={`font-black ${ROLE_LABELS[currentUser.role].textDark}`}>
+                      {ROLE_LABELS[currentUser.role].title}
+                    </span>
+                  </div>
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-amber-50 border border-amber-200 text-amber-800">
+                    <span>SBD:</span>
+                    <span>{currentUser.candidateNumber || `SBD-${(currentUser.id || "10001").slice(-5)}`}</span>
+                  </div>
                 </div>
               </div>
 

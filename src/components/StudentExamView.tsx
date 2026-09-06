@@ -70,16 +70,10 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
 }) => {
   const { toast, isFocusMode, setIsFocusMode } = useToast();
   const { currentUser } = useAuth();
-  const [studentName, setStudentName] = useState<string>(
-    currentUser.role === "student" && currentUser.schoolClass
-      ? `${currentUser.name} - ${currentUser.schoolClass}`
-      : currentUser.name || "Học sinh"
-  );
-  const [studentId, setStudentId] = useState<string>(
-    currentUser.role === "student" && currentUser.schoolClass
-      ? `${currentUser.schoolClass}_${currentUser.id.slice(-4)}`
-      : `HS_${currentUser.id.slice(-4)}`
-  );
+  const candidateNumber =
+    currentUser.candidateNumber || `SBD-${(currentUser.id || "10001").slice(-5)}`;
+  const [studentName, setStudentName] = useState<string>(currentUser.name || "Học sinh");
+  const [studentId, setStudentId] = useState<string>(candidateNumber);
   const [hasStarted, setHasStarted] = useState<boolean>(false);
   const [submission, setSubmission] = useState<StudentSubmission | null>(null);
   const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
@@ -502,10 +496,11 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
     const result = evaluateExamSubmission(
       exam,
       userAnswers,
-      studentName,
+      currentUser.name || studentName,
       currentUser.id || studentId,
       timeSpent,
       {
+        candidateNumber,
         studentEmail: currentUser.email,
         studentClass: currentUser.schoolClass || (studentName.includes("-") ? studentName.split("-")[1]?.trim() : "") || "",
         studentAvatar: currentUser.avatar,
@@ -713,32 +708,41 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
           </div>
 
           <div className="space-y-4 mb-6">
-            <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
-                Họ và tên thí sinh:
-              </label>
-              <input
-                id="input-student-name"
-                type="text"
-                value={studentName}
-                onChange={(e) => setStudentName(e.target.value)}
-                placeholder="Nhập họ tên của bạn..."
-                className="w-full py-2.5 px-4 rounded-xl border border-slate-300 focus:border-indigo-500 font-bold text-sm outline-none bg-white"
-              />
+            {/* Thẻ định danh thí sinh tự động từ tài khoản */}
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <img
+                  src={
+                    currentUser.avatar ||
+                    `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(currentUser.name || "student")}`
+                  }
+                  alt="avatar"
+                  className="w-12 h-12 rounded-xl bg-slate-200 object-cover border border-slate-200 shrink-0"
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-black text-slate-900 text-sm truncate">{currentUser.name || "Học sinh"}</span>
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-extrabold text-[10px]">
+                      {currentUser.role === "student" ? "Học sinh" : "Thí sinh"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                    {currentUser.schoolClass ? `Lớp ${currentUser.schoolClass}` : currentUser.email || "Tài khoản học sinh"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-right shrink-0">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block">Số báo danh (SBD)</span>
+                <span className="text-xs font-mono font-black text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 block mt-0.5 shadow-2xs">
+                  {candidateNumber}
+                </span>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
-                Số báo danh (SBD):
-              </label>
-              <input
-                id="input-student-sbd"
-                type="text"
-                value={studentId}
-                onChange={(e) => setStudentId(e.target.value)}
-                placeholder="Nhập số báo danh..."
-                className="w-full py-2.5 px-4 rounded-xl border border-slate-300 focus:border-indigo-500 font-bold text-sm outline-none bg-white"
-              />
+            <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200/80 flex items-center gap-2 text-xs text-emerald-800">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Tài khoản và Số báo danh của bạn đã được gắn cố định, không cần nhập lại.</span>
             </div>
 
             {/* Ô nhập mật khẩu nếu đề thi yêu cầu */}

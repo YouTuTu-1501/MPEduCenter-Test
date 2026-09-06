@@ -402,6 +402,7 @@ export interface StudentSubmission {
   examTitle: string;
   studentName: string;
   studentId: string;
+  candidateNumber?: string; // Số báo danh (SBD) cố định gắn liền với tài khoản thí sinh
   studentEmail?: string;
   studentClass?: string;
   studentAvatar?: string;
@@ -446,6 +447,7 @@ export interface StudentSubmission {
 export interface LiveStudent {
   id: string;
   name: string;
+  candidateNumber?: string; // Số báo danh (SBD) cố định gắn liền với tài khoản
   avatar: string;
   currentScore: number;
   answers: Record<string, any>;

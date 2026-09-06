@@ -187,10 +187,13 @@ export const UserProfileModal: React.FC = () => {
               <h3 className="font-bold text-base sm:text-lg flex items-center gap-2">
                 <span>Hồ sơ & Thay đổi Hình đại diện</span>
               </h3>
-              <p className="text-xs text-slate-300 flex items-center gap-1.5">
+              <p className="text-xs text-slate-300 flex items-center gap-1.5 flex-wrap">
                 <span className="truncate max-w-[200px]">{currentUser.name}</span>
                 <span>•</span>
                 <span className="text-amber-400 font-bold">{ROLE_LABELS[currentUser.role].title}</span>
+                <span className="px-2 py-0.5 bg-amber-400/20 text-amber-300 font-mono font-bold rounded-md border border-amber-400/30 text-[11px]">
+                  SBD: {currentUser.candidateNumber || `SBD-${currentUser.id.slice(-5)}`}
+                </span>
               </p>
             </div>
           </div>
@@ -489,6 +492,23 @@ export const UserProfileModal: React.FC = () => {
           {/* Tab 5: Cập nhật Thông tin cá nhân */}
           {activeTab === "info" && (
             <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Số báo danh (SBD) cố định
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    disabled
+                    value={currentUser.candidateNumber || `SBD-${currentUser.id.slice(-5)}`}
+                    className="flex-1 px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-amber-200 bg-amber-50/70 font-mono font-bold text-amber-900 cursor-not-allowed"
+                  />
+                  <span className="text-[11px] text-slate-500 font-medium whitespace-nowrap bg-slate-100 px-2.5 py-2 rounded-xl border border-slate-200">
+                    Cố định theo tài khoản
+                  </span>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Họ và tên hiển thị

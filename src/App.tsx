@@ -563,6 +563,7 @@ function MainApp({ currentUser }: { currentUser: User }) {
           currentUser={currentUser}
           onSelectExam={(ex) => handleSelectExam(ex, "live")}
           onExit={() => setActiveView(isStudent ? "student_portal" : "bank")}
+          onSubmissionComplete={handleSubmissionComplete}
         />
       )}
 

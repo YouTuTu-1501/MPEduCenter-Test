@@ -148,6 +148,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   const [formSubject, setFormSubject] = useState<string>("Toán học THPT");
   const [formPhone, setFormPhone] = useState<string>("");
   const [formAvatar, setFormAvatar] = useState<string>("");
+  const [formCandidateNumber, setFormCandidateNumber] = useState<string>("");
 
   // Modal Cấp tài khoản hàng loạt (Batch Provisioning)
   const [showBatchModal, setShowBatchModal] = useState<boolean>(false);
@@ -300,6 +301,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
         searchQuery === "" ||
         u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (u.candidateNumber && u.candidateNumber.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (u.schoolClass && u.schoolClass.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (u.subject && u.subject.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (u.phone && u.phone.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -422,6 +424,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     setFormSubject("Toán học THPT");
     setFormPhone("");
     setFormAvatar("");
+    setFormCandidateNumber("");
     setShowUserModal(true);
   };
 
@@ -456,6 +459,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     setFormSubject(user.subject || "Toán học THPT");
     setFormPhone(user.phone || "");
     setFormAvatar(user.avatar || "");
+    setFormCandidateNumber(user.candidateNumber || `SBD-${user.id.slice(-5)}`);
     setShowUserModal(true);
   };
 
@@ -759,6 +763,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
   const handleExportExcel = (userList: User[]) => {
     const exportData = userList.map((u, i) => ({
       "STT": i + 1,
+      "Số báo danh (SBD)": u.candidateNumber || `SBD-${u.id.slice(-5)}`,
       "Họ và tên": u.name,
       "Email / Tên đăng nhập": u.email,
       "Mật khẩu": u.password || "123456",
@@ -771,6 +776,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     const ws = XLSX.utils.json_to_sheet(exportData);
     ws["!cols"] = [
       { wch: 6 },
+      { wch: 18 },
       { wch: 26 },
       { wch: 28 },
       { wch: 14 },
@@ -788,14 +794,15 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
 
   // Xuất file CSV danh sách tài khoản
   const handleExportCSV = (userList: User[]) => {
-    const headers = "STT,Họ và tên,Email / Tên đăng nhập,Mật khẩu,Vai trò,Lớp / Bộ môn,Số điện thoại,Trạng thái\n";
+    const headers = "STT,Số báo danh (SBD),Họ và tên,Email / Tên đăng nhập,Mật khẩu,Vai trò,Lớp / Bộ môn,Số điện thoại,Trạng thái\n";
     const rows = userList
       .map((u, i) => {
+        const sbd = u.candidateNumber || `SBD-${u.id.slice(-5)}`;
         const roleLabel = ROLE_LABELS[u.role].title;
         const cls = u.schoolClass || u.subject || "";
         const phone = u.phone || "";
         const status = u.status === "active" ? "Hoạt động" : "Đã khóa";
-        return `${i + 1},"${u.name}","${u.email}","${u.password || "123456"}","${roleLabel}","${cls}","${phone}","${status}"`;
+        return `${i + 1},"${sbd}","${u.name}","${u.email}","${u.password || "123456"}","${roleLabel}","${cls}","${phone}","${status}"`;
       })
       .join("\n");
 
@@ -1508,6 +1515,11 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                                 >
                                   <Copy className="w-3 h-3" />
                                 </button>
+                                {user.candidateNumber && (
+                                  <span className="text-[10px] font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                                    SBD: {user.candidateNumber}
+                                  </span>
+                                )}
                               </div>
                               {user.phone && (
                                 <div className="text-slate-400 text-[10px] font-mono mt-0.5">
@@ -2305,6 +2317,23 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                 </div>
               </div>
 
+              {editingUserId && (
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Số báo danh (SBD) cố định</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      disabled
+                      value={formCandidateNumber}
+                      className="flex-1 px-3.5 py-2 text-xs rounded-xl border border-amber-200 bg-amber-50/70 font-mono font-bold text-amber-900 cursor-not-allowed"
+                    />
+                    <span className="text-[11px] text-slate-500 font-medium whitespace-nowrap bg-slate-100 px-2.5 py-2 rounded-xl border border-slate-200">
+                      Gắn liền với tài khoản
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Họ và Tên (*)</label>
                 <div className="flex items-center gap-2">
@@ -2931,7 +2960,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                     const fullText = list
                       .map(
                         (u, i) =>
-                          `${i + 1}. Họ tên: ${u.name} | Email: ${u.email} | Mật khẩu: ${u.password || "123456"} | Vai trò: ${ROLE_LABELS[u.role].title}${u.schoolClass ? ` | Lớp: ${u.schoolClass}` : ""}`
+                          `${i + 1}. SBD: ${u.candidateNumber || `SBD-${u.id.slice(-5)}`} | Họ tên: ${u.name} | Email: ${u.email} | Mật khẩu: ${u.password || "123456"} | Vai trò: ${ROLE_LABELS[u.role].title}${u.schoolClass ? ` | Lớp: ${u.schoolClass}` : ""}`
                       )
                       .join("\n");
                     navigator.clipboard.writeText(fullText);
@@ -3024,6 +3053,12 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                       </div>
 
                       <div className="space-y-1.5 text-[11px] bg-slate-50 p-2.5 rounded-xl border border-slate-100 font-mono">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 font-sans">Số báo danh (SBD):</span>
+                          <span className="font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                            {u.candidateNumber || `SBD-${u.id.slice(-5)}`}
+                          </span>
+                        </div>
                         <div className="flex items-center justify-between">
                           <span className="text-slate-500 font-sans">Tài khoản:</span>
                           <span className="font-bold text-slate-800">{u.email}</span>

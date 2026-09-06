@@ -1,0 +1,173 @@
+[
+  {
+    "id": "sub_1788619100123_tueminh6",
+    "examId": "exam_1788282481474",
+    "examTitle": "ĐỀ KIỂM TRA CHỦ ĐỀ TẬP HỢP SỐ TỰ NHIÊN",
+    "studentId": "usr_1788281798571_11_jip1",
+    "studentName": "Trần Hữu Tuệ Minh",
+    "studentClass": "6",
+    "studentEmail": "minh.tht@student.vn",
+    "studentAvatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Trần%20Hữu%20Tuệ%20Minh",
+    "score": 4.5,
+    "maxScore": 5,
+    "timeSpentSeconds": 1450,
+    "submittedAt": "2026-09-05T14:40:00.000Z",
+    "details": {
+      "q_part_1_1": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "D",
+        "correctAnswer": "D",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_2": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "B",
+        "correctAnswer": "B",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_3": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "B",
+        "correctAnswer": "B",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_4": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "A",
+        "correctAnswer": "A",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_5": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "B",
+        "correctAnswer": "B",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_6": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "A",
+        "correctAnswer": "A",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_7": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "D",
+        "correctAnswer": "D",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_8": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "A",
+        "correctAnswer": "A",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_9": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "B",
+        "correctAnswer": "B",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_10": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "D",
+        "correctAnswer": "D",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_11": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "A",
+        "correctAnswer": "A",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_12": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "C",
+        "correctAnswer": "C",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_13": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "A",
+        "correctAnswer": "A",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_14": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "B",
+        "correctAnswer": "B",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_15": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "C",
+        "correctAnswer": "C",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_16": {
+        "isCorrect": true,
+        "earnedScore": 0.25,
+        "maxScore": 0.25,
+        "userAnswer": "A",
+        "correctAnswer": "A",
+        "feedback": "Chính xác"
+      },
+      "q_part_1_17": {
+        "isCorrect": false,
+        "earnedScore": 0,
+        "maxScore": 0.25,
+        "userAnswer": "C",
+        "correctAnswer": "B",
+        "feedback": "Đáp án đúng là B"
+      },
+      "q_part_1_18": {
+        "isCorrect": false,
+        "earnedScore": 0,
+        "maxScore": 0.25,
+        "userAnswer": "C",
+        "correctAnswer": "B",
+        "feedback": "Đáp án đúng là B"
+      },
+      "q_part_1_19": {
+        "isCorrect": false,
+        "earnedScore": 0,
+        "maxScore": 0.25,
+        "userAnswer": "C",
+        "correctAnswer": "C",
+        "feedback": "Đáp án đúng là C"
+      }
+    },
+    "tabSwitchCount": 0,
+    "tabSwitchLogs": [],
+    "hasCheatingWarning": false
+  }
+]

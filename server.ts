@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -13,6 +14,71 @@ function getGeminiClient(): GoogleGenAI | null {
     aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   }
   return aiClient;
+}
+
+// Thư mục lưu trữ dữ liệu bền vững trên ổ đĩa
+const DATA_DIR = path.join(process.cwd(), "data");
+const SUBMISSIONS_FILE = path.join(DATA_DIR, "submissions.json");
+const ROOMS_FILE = path.join(DATA_DIR, "rooms.json");
+
+if (!fs.existsSync(DATA_DIR)) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (err) {
+    console.warn("Lỗi tạo thư mục data:", err);
+  }
+}
+
+// Tải dữ liệu bài nộp từ đĩa lên bộ nhớ
+function loadSubmissionsFromDisk(): any[] {
+  try {
+    if (fs.existsSync(SUBMISSIONS_FILE)) {
+      const raw = fs.readFileSync(SUBMISSIONS_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn("Lỗi tải submissions từ file:", e);
+  }
+  return [];
+}
+
+// Lưu dữ liệu bài nộp xuống đĩa bền vững
+function saveSubmissionsToDisk(subs: any[]) {
+  try {
+    fs.writeFileSync(SUBMISSIONS_FILE, JSON.stringify(subs, null, 2), "utf-8");
+  } catch (e) {
+    console.warn("Lỗi ghi submissions vào file:", e);
+  }
+}
+
+// Tải dữ liệu phòng thi từ đĩa
+function loadRoomsFromDisk(): Map<string, any> {
+  const map = new Map<string, any>();
+  try {
+    if (fs.existsSync(ROOMS_FILE)) {
+      const raw = fs.readFileSync(ROOMS_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((r: any) => {
+          if (r && r.pin) map.set(r.pin, r);
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("Lỗi tải rooms từ file:", e);
+  }
+  return map;
+}
+
+// Lưu dữ liệu phòng thi xuống đĩa
+function saveRoomsToDisk(roomsMap: Map<string, any>) {
+  try {
+    const list = Array.from(roomsMap.values());
+    fs.writeFileSync(ROOMS_FILE, JSON.stringify(list, null, 2), "utf-8");
+  } catch (e) {
+    console.warn("Lỗi ghi rooms vào file:", e);
+  }
 }
 
 // Bộ lưu trữ in-memory cho realtime & database
@@ -43,8 +109,8 @@ interface LiveRoomData {
   createdAt: string;
 }
 
-const liveRooms: Map<string, LiveRoomData> = new Map();
-const userSubmissions: any[] = [];
+const liveRooms: Map<string, LiveRoomData> = loadRoomsFromDisk();
+const userSubmissions: any[] = loadSubmissionsFromDisk();
 const customExams: any[] = [];
 
 async function startServer() {
@@ -191,11 +257,40 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
     } else {
       userSubmissions.push(submission);
     }
+    saveSubmissionsToDisk(userSubmissions);
     res.json({ success: true, submission });
+  });
+
+  // Đồng bộ lô bài nộp (batch sync backup)
+  app.post("/api/submissions/batch", (req, res) => {
+    const incoming = req.body;
+    if (Array.isArray(incoming)) {
+      incoming.forEach((sub: any) => {
+        if (sub && sub.id) {
+          const idx = userSubmissions.findIndex((s) => s.id === sub.id);
+          if (idx >= 0) {
+            userSubmissions[idx] = sub;
+          } else {
+            userSubmissions.push(sub);
+          }
+        }
+      });
+      saveSubmissionsToDisk(userSubmissions);
+      return res.json({ success: true, count: userSubmissions.length });
+    }
+    res.status(400).json({ error: "Invalid payload, array expected" });
   });
 
   app.get("/api/submissions", (req, res) => {
     const { examId } = req.query;
+    const fromDisk = loadSubmissionsFromDisk();
+    if (fromDisk.length > 0) {
+      const map = new Map<string, any>();
+      userSubmissions.forEach((s) => map.set(s.id, s));
+      fromDisk.forEach((s) => map.set(s.id, s));
+      userSubmissions.length = 0;
+      userSubmissions.push(...map.values());
+    }
     if (examId) {
       const filtered = userSubmissions.filter((s) => s.examId === examId);
       return res.json(filtered);
@@ -263,12 +358,20 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
       createdAt: new Date().toISOString(),
     };
     liveRooms.set(pin, room);
+    saveRoomsToDisk(liveRooms);
     res.json({ success: true, room });
   });
 
   app.get("/api/rooms/:pin", (req, res) => {
     const { pin } = req.params;
-    const room = liveRooms.get(pin);
+    let room = liveRooms.get(pin);
+    if (!room) {
+      const diskRooms = loadRoomsFromDisk();
+      if (diskRooms.has(pin)) {
+        room = diskRooms.get(pin);
+        liveRooms.set(pin, room);
+      }
+    }
     if (!room) {
       return res.status(404).json({ error: "Phòng thi không tồn tại hoặc đã kết thúc" });
     }
@@ -278,7 +381,14 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
   app.post("/api/rooms/:pin/join", (req, res) => {
     const { pin } = req.params;
     const { studentName, studentId } = req.body;
-    const room = liveRooms.get(pin);
+    let room = liveRooms.get(pin);
+    if (!room) {
+      const diskRooms = loadRoomsFromDisk();
+      if (diskRooms.has(pin)) {
+        room = diskRooms.get(pin);
+        liveRooms.set(pin, room);
+      }
+    }
     if (!room) {
       return res.status(404).json({ error: "Mã phòng không chính xác" });
     }
@@ -292,13 +402,14 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
       submitted: false,
       lastActive: new Date().toISOString(),
     };
-    const existingIndex = room.students.findIndex((s) => s.id === studentObj.id || (studentName && s.name === studentName));
+    const existingIndex = room.students.findIndex((s: any) => s.id === studentObj.id || (studentName && s.name === studentName));
     if (existingIndex >= 0) {
       room.students[existingIndex].isOnline = true;
       room.students[existingIndex].lastActive = new Date().toISOString();
     } else {
       room.students.push(studentObj);
     }
+    saveRoomsToDisk(liveRooms);
     res.json({ success: true, room, student: studentObj });
   });
 
@@ -314,6 +425,7 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
     if (currentQuestionIndex !== undefined) room.currentQuestionIndex = currentQuestionIndex;
     if (timerRemaining !== undefined) room.timerRemaining = timerRemaining;
     if (timerDuration !== undefined) room.timerDuration = timerDuration;
+    saveRoomsToDisk(liveRooms);
     res.json({ success: true, room });
   });
 
@@ -324,7 +436,7 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
     if (!room) {
       return res.status(404).json({ error: "Phòng thi không tồn tại" });
     }
-    const student = room.students.find((s) => s.id === studentId);
+    const student = room.students.find((s: any) => s.id === studentId);
     if (student) {
       if (questionId) {
         student.answers[questionId] = answer;
@@ -337,6 +449,7 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
       }
       student.lastActive = new Date().toISOString();
     }
+    saveRoomsToDisk(liveRooms);
     res.json({ success: true, room });
   });
 
