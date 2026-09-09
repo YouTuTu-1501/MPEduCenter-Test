@@ -14,7 +14,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --no-audit
+          cache: 'npm'
+      - run: npm ci --no-audit || npm install --no-audit --legacy-peer-deps
       - run: npm run lint
       - run: npm run build
       - uses: FirebaseExtended/action-hosting-deploy@v0
