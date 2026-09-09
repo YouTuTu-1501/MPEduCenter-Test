@@ -577,8 +577,8 @@ export const StudentResultHistoryModal: React.FC<StudentResultHistoryModalProps>
 
                         {sub.partScores && (
                           <span className="text-slate-600 font-medium bg-slate-100 px-2 py-0.5 rounded-md text-[11px]">
-                            P.I: {sub.partScores.part_1.earned}đ • P.II: {sub.partScores.part_2.earned}đ • P.III:{" "}
-                            {sub.partScores.part_3.earned}đ • P.IV: {sub.partScores.part_4.earned}đ
+                            P.I: {sub.partScores.part_1?.earned ?? 0}đ • P.II: {sub.partScores.part_2?.earned ?? 0}đ • P.III:{" "}
+                            {sub.partScores.part_3?.earned ?? 0}đ • P.IV: {sub.partScores.part_4?.earned ?? 0}đ
                           </span>
                         )}
 

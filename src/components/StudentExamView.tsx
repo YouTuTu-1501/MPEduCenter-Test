@@ -605,10 +605,15 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
             ...prev,
             score: newScore,
             partScores: {
-              ...prev.partScores,
+              ...(prev.partScores || {
+                part_1: { earned: 0, max: 0 },
+                part_2: { earned: 0, max: 0 },
+                part_3: { earned: 0, max: 0 },
+                part_4: { earned: 0, max: 0 },
+              }),
               part_4: {
-                ...prev.partScores.part_4,
-                earned: Number((prev.partScores.part_4.earned + earnedDiff).toFixed(2)),
+                earned: Number(((prev.partScores?.part_4?.earned || 0) + earnedDiff).toFixed(2)),
+                max: prev.partScores?.part_4?.max || q.score || 2.0,
               },
             },
             details: {
@@ -853,28 +858,28 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center">
               <span className="text-xs font-bold text-slate-600">Phần I: Trắc nghiệm</span>
               <p className="text-xl font-bold text-indigo-600 mt-1">
-                {submission.partScores.part_1.earned} / {submission.partScores.part_1.max}đ
+                {submission.partScores?.part_1?.earned ?? 0} / {submission.partScores?.part_1?.max ?? 0}đ
               </p>
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center">
               <span className="text-xs font-bold text-slate-600">Phần II: Đúng / Sai</span>
               <p className="text-xl font-bold text-indigo-600 mt-1">
-                {submission.partScores.part_2.earned} / {submission.partScores.part_2.max}đ
+                {submission.partScores?.part_2?.earned ?? 0} / {submission.partScores?.part_2?.max ?? 0}đ
               </p>
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center">
               <span className="text-xs font-bold text-slate-600">Phần III: Trả lời ngắn</span>
               <p className="text-xl font-bold text-indigo-600 mt-1">
-                {submission.partScores.part_3.earned} / {submission.partScores.part_3.max}đ
+                {submission.partScores?.part_3?.earned ?? 0} / {submission.partScores?.part_3?.max ?? 0}đ
               </p>
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center">
               <span className="text-xs font-bold text-slate-600">Phần IV: Tự luận</span>
               <p className="text-xl font-bold text-indigo-600 mt-1">
-                {submission.partScores.part_4.earned} / {submission.partScores.part_4.max}đ
+                {submission.partScores?.part_4?.earned ?? 0} / {submission.partScores?.part_4?.max ?? 0}đ
               </p>
             </div>
           </div>

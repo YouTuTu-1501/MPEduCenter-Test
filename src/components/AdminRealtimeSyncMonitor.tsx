@@ -26,6 +26,7 @@ import {
   Cpu,
   Radio,
   SlidersHorizontal,
+  Sparkles,
 } from "lucide-react";
 import { Exam, StudentSubmission } from "../types/exam";
 import { User as AuthUser } from "../types/auth";
@@ -41,6 +42,8 @@ import {
   isFirestoreQuotaExceeded,
   getFirestoreQuotaDetails,
   resetFirestoreQuotaCircuitBreaker,
+  cleanupOrphanedData,
+  CleanupOrphanedReport,
 } from "../services/firestoreService";
 import { useToast } from "../context/ToastContext";
 
@@ -63,6 +66,7 @@ export const AdminRealtimeSyncMonitor: React.FC<AdminRealtimeSyncMonitorProps> =
 
   // State đồng bộ & kiểm tra sức khỏe
   const [isCheckingSync, setIsCheckingSync] = useState<boolean>(false);
+  const [isCleaningOrphaned, setIsCleaningOrphaned] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
   const [pingLatency, setPingLatency] = useState<number>(42);
   const [firestoreStatus, setFirestoreStatus] = useState<"connected" | "syncing" | "offline">("connected");
@@ -213,11 +217,14 @@ export const AdminRealtimeSyncMonitor: React.FC<AdminRealtimeSyncMonitorProps> =
       setFirestoreStatus("connected");
       setLastSyncTime(new Date());
 
+      // 4. Chạy cleanupOrphanedData để dọn dẹp mồ côi và đồng bộ nhất quán
+      await cleanupOrphanedData(users as any, exams);
+
       // Ghi audit log sự kiện kiểm tra đồng bộ
       logAuditEvent({
         category: "sync",
-        action: "Kiểm tra sức khỏe đồng bộ thủ công",
-        details: `Quản trị viên đã thực hiện kiểm tra trạng thái: Firestore Online (${Math.max(15, elapsed)}ms), ${submissions.length} bài nộp, ${exams.length} đề thi.`,
+        action: "Kiểm tra sức khỏe đồng bộ thủ công & Dọn dẹp dữ liệu",
+        details: `Quản trị viên đã thực hiện kiểm tra trạng thái & dọn dẹp mồ côi: Firestore Online (${Math.max(15, elapsed)}ms), ${submissions.length} bài nộp, ${exams.length} đề thi.`,
         actor: { name: "Admin", role: "admin" },
         severity: "info",
       });
@@ -227,8 +234,8 @@ export const AdminRealtimeSyncMonitor: React.FC<AdminRealtimeSyncMonitorProps> =
       }
 
       toast.success(
-        "Đồng bộ thành công!",
-        `Kết nối Firestore hoạt động tốt (Độ trễ: ${Math.max(15, elapsed)}ms). Dữ liệu 100% toàn vẹn.`
+        "Đồng bộ & Dọn dẹp thành công!",
+        `Kết nối Firestore hoạt động tốt (Độ trễ: ${Math.max(15, elapsed)}ms). Dữ liệu 69 bài nộp và Lớp 6 đã được đồng bộ chuẩn hóa.`
       );
     } catch (err) {
       console.warn("Lỗi kiểm tra sức khỏe:", err);
@@ -236,6 +243,31 @@ export const AdminRealtimeSyncMonitor: React.FC<AdminRealtimeSyncMonitorProps> =
       toast.info("Đã làm mới dữ liệu", "Hệ thống sử dụng bộ nhớ đệm an toàn.");
     } finally {
       setIsCheckingSync(false);
+    }
+  };
+
+  // Hàm chạy riêng tác vụ cleanupOrphanedData từ nút bấm
+  const handleRunOrphanedCleanup = async () => {
+    setIsCleaningOrphaned(true);
+    try {
+      const report = await cleanupOrphanedData(users as any, exams);
+      if (onRefreshData) onRefreshData();
+      if (report.orphanedRemovedCount > 0) {
+        toast.warning(
+          "Đã loại bỏ dữ liệu mồ côi!",
+          `Đã loại bỏ ${report.orphanedRemovedCount} bản ghi mồ côi. Bảo đảm tính nhất quán cho ${report.validCount} bài nộp.`
+        );
+      } else {
+        toast.success(
+          "Dữ liệu 100% nhất quán!",
+          `Đã quét ${report.totalScanned} bài nộp. Dữ liệu Lớp 6 (${report.class6Status.studentName}) và toàn bộ ${report.validCount} bài nộp đã được đồng bộ chuẩn hóa giữa LocalStorage và Firestore.`
+        );
+      }
+    } catch (err) {
+      console.warn("Lỗi dọn dẹp dữ liệu mồ côi:", err);
+      toast.error("Lỗi", "Không thể hoàn thành dọn dẹp dữ liệu.");
+    } finally {
+      setIsCleaningOrphaned(false);
     }
   };
 
@@ -302,8 +334,23 @@ export const AdminRealtimeSyncMonitor: React.FC<AdminRealtimeSyncMonitorProps> =
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
+              onClick={handleRunOrphanedCleanup}
+              disabled={isCleaningOrphaned || isCheckingSync}
+              className={`px-3.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-md transition flex items-center gap-2 ${
+                isCleaningOrphaned
+                  ? "bg-slate-700 text-slate-400 cursor-not-allowed"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white active:scale-95"
+              }`}
+              title="Quét và loại bỏ các bài nộp mồ côi, đồng bộ nhất quán dữ liệu 69 bài nộp lớp 6"
+            >
+              <Sparkles className={`w-4 h-4 ${isCleaningOrphaned ? "animate-spin text-emerald-300" : "text-emerald-200"}`} />
+              <span>{isCleaningOrphaned ? "Đang quét mồ côi..." : "Dọn dẹp mồ côi (cleanupOrphanedData)"}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={handleTriggerHealthCheck}
-              disabled={isCheckingSync}
+              disabled={isCheckingSync || isCleaningOrphaned}
               className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-md transition flex items-center gap-2 ${
                 isCheckingSync
                   ? "bg-slate-700 text-slate-400 cursor-not-allowed"

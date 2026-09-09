@@ -119,10 +119,10 @@ const CustomProgressTooltip = ({
 
           {data.studentSub && (
             <div className="bg-slate-800/90 rounded-xl p-2 text-[11px] grid grid-cols-2 gap-1 font-semibold text-slate-300 border border-slate-700/50">
-              <div>Phần I: <strong className="text-white">{data.studentSub.partScores.part_1.earned}đ</strong></div>
-              <div>Phần II: <strong className="text-white">{data.studentSub.partScores.part_2.earned}đ</strong></div>
-              <div>Phần III: <strong className="text-white">{data.studentSub.partScores.part_3.earned}đ</strong></div>
-              <div>Phần IV: <strong className="text-white">{data.studentSub.partScores.part_4.earned}đ</strong></div>
+              <div>Phần I: <strong className="text-white">{data.studentSub.partScores?.part_1?.earned ?? 0}đ</strong></div>
+              <div>Phần II: <strong className="text-white">{data.studentSub.partScores?.part_2?.earned ?? 0}đ</strong></div>
+              <div>Phần III: <strong className="text-white">{data.studentSub.partScores?.part_3?.earned ?? 0}đ</strong></div>
+              <div>Phần IV: <strong className="text-white">{data.studentSub.partScores?.part_4?.earned ?? 0}đ</strong></div>
             </div>
           )}
 
@@ -521,6 +521,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
 
     return {
       total: count,
+      rawTotal: filteredSubmissionsByClass.length,
       totalStudents: count,
       avgScore: avg,
       avgPercentage,
@@ -529,7 +530,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
       passRate,
       distribution,
     };
-  }, [uniqueSubmissionsByStudent]);
+  }, [uniqueSubmissionsByStudent, filteredSubmissionsByClass]);
 
   // ===================== PHÂN TÍCH TIẾN BỘ ĐIỂM SỐ QUA CÁC ĐỀ THI (RECHARTS LINE CHART) =====================
   const [progressChartMode, setProgressChartMode] = useState<
@@ -823,7 +824,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
         return a.score - b.score;
       }
       if (studentSortBy === "name") {
-        return a.studentName.localeCompare(b.studentName, "vi");
+        return (a.studentName || "").localeCompare(b.studentName || "", "vi");
       }
       if (studentSortBy === "sbd") {
         const sbdA = a.candidateNumber || a.studentId || "";
@@ -852,7 +853,11 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
       const pct = Number(Math.min(100, Math.max(0, (s.score / maxScore) * 100)).toFixed(1));
       const stdScore = Number(((s.score / maxScore) * 10).toFixed(2));
       const sbd = s.candidateNumber || s.studentId || "";
-      csv += `"${sbd}","${s.studentName}","${s.studentClass || ""}",${s.score},${maxScore},"${pct}%",${stdScore},${s.partScores.part_1.earned},${s.partScores.part_2.earned},${s.partScores.part_3.earned},${s.partScores.part_4.earned},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
+      const p1 = s.partScores?.part_1?.earned ?? 0;
+      const p2 = s.partScores?.part_2?.earned ?? 0;
+      const p3 = s.partScores?.part_3?.earned ?? 0;
+      const p4 = s.partScores?.part_4?.earned ?? 0;
+      csv += `"${sbd}","${s.studentName}","${s.studentClass || ""}",${s.score},${maxScore},"${pct}%",${stdScore},${p1},${p2},${p3},${p4},"${new Date(s.submittedAt).toLocaleString("vi-VN")}"\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -1036,8 +1041,8 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
               </span>
 
               {activeFilterBadges.length === 0 ? (
-                <span className="text-[11px] text-slate-400 italic bg-slate-50 px-2 py-0.5 rounded-lg border border-slate-200">
-                  Đang hiển thị toàn bộ ({uniqueSubmissionsByStudent.length} học sinh)
+                <span className="text-[11px] text-slate-500 font-semibold bg-slate-50 px-2.5 py-0.5 rounded-lg border border-slate-200">
+                  Đang hiển thị toàn bộ ({uniqueSubmissionsByStudent.length} học sinh{filteredSubmissionsByClass.length > uniqueSubmissionsByStudent.length ? ` / ${filteredSubmissionsByClass.length} lượt nộp` : ""})
                 </span>
               ) : (
                 activeFilterBadges.map((b) => (
@@ -1072,7 +1077,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
             </div>
 
             <div className="text-[11px] font-bold text-slate-500 shrink-0">
-              Đang phân tích: <strong className="text-indigo-600 font-black">{uniqueSubmissionsByStudent.length}</strong> học sinh
+              Đang phân tích: <strong className="text-indigo-600 font-black">{uniqueSubmissionsByStudent.length}</strong> học sinh{filteredSubmissionsByClass.length > uniqueSubmissionsByStudent.length ? ` (${filteredSubmissionsByClass.length} lượt thi)` : ""}
             </div>
           </div>
         </div>
@@ -1084,8 +1089,15 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
               <Users className="w-6 h-6" />
             </div>
             <div>
-              <span className="text-xs font-bold text-slate-500">Số bài nộp</span>
-              <p className="text-2xl font-bold text-slate-900">{stats.total} bài</p>
+              <span className="text-xs font-bold text-slate-500">Học sinh / Lượt thi</span>
+              <p className="text-2xl font-bold text-slate-900">
+                {stats.total} <span className="text-xs font-medium text-slate-500">học sinh</span>
+                {stats.rawTotal > stats.total && (
+                  <span className="text-xs font-semibold text-indigo-600 block sm:inline sm:ml-1.5" title="Bao gồm cả các bài làm lại của cùng học sinh">
+                    ({stats.rawTotal} lượt thi)
+                  </span>
+                )}
+              </p>
             </div>
           </div>
 
@@ -1783,10 +1795,10 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                             {sub.studentClass || "Chưa phân lớp"}
                           </span>
                         </td>
-                        <td className="p-3 text-center">{sub.partScores.part_1.earned}đ</td>
-                        <td className="p-3 text-center">{sub.partScores.part_2.earned}đ</td>
-                        <td className="p-3 text-center">{sub.partScores.part_3.earned}đ</td>
-                        <td className="p-3 text-center">{sub.partScores.part_4.earned}đ</td>
+                        <td className="p-3 text-center">{sub.partScores?.part_1?.earned ?? 0}đ</td>
+                        <td className="p-3 text-center">{sub.partScores?.part_2?.earned ?? 0}đ</td>
+                        <td className="p-3 text-center">{sub.partScores?.part_3?.earned ?? 0}đ</td>
+                        <td className="p-3 text-center">{sub.partScores?.part_4?.earned ?? 0}đ</td>
                         <td className="p-3 text-center">
                           {(() => {
                             const mScore = sub.maxScore || 10;
@@ -1988,9 +2000,10 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                   activeExam ||
                   exam;
 
-                const hasEssayQuestions = subExam.questions.some(
-                  (q) => q.type === "essay" || q.part === "part_4"
-                );
+                const hasEssayQuestions =
+                  subExam?.questions?.some(
+                    (q) => q.type === "essay" || q.part === "part_4"
+                  ) ?? false;
 
                 return (
                   <div className="space-y-4">

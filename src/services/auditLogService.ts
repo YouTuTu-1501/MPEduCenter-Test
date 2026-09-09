@@ -41,6 +41,7 @@ const AUDIT_STORAGE_KEY = "edutest_audit_logs";
 const MAX_LOGS = 200;
 
 export const getAuditLogs = (): AuditLogItem[] => {
+  if (typeof localStorage === "undefined") return [];
   try {
     const raw = localStorage.getItem(AUDIT_STORAGE_KEY);
     if (raw) {
@@ -67,8 +68,12 @@ export const logAuditEvent = (
   try {
     const current = getAuditLogs();
     const updated = [newLog, ...current].slice(0, MAX_LOGS);
-    localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(updated));
-    window.dispatchEvent(new CustomEvent("edutest:audit_log_updated", { detail: newLog }));
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(updated));
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("edutest:audit_log_updated", { detail: newLog }));
+    }
   } catch (err) {
     console.warn("Lỗi ghi audit log:", err);
   }
