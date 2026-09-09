@@ -289,11 +289,18 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
       if (!matchClass && u.schoolClass) {
         if (u.schoolClass === adminClassFilter) {
           matchClass = true;
-        } else if (adminClassFilter.startsWith("Lớp")) {
+        } else {
           const admMatch = adminClassFilter.match(/\d+/);
           const userMatch = u.schoolClass.match(/\d+/);
           if (admMatch && userMatch && admMatch[0] === userMatch[0]) {
-            matchClass = true;
+            const isFilterGrade = adminClassFilter.startsWith("Lớp") || adminClassFilter.startsWith("Khối") || /^\d+$/.test(adminClassFilter);
+            if (isFilterGrade) {
+              matchClass = true;
+            } else {
+              const uClean = u.schoolClass.toLowerCase().replace(/^(lớp|khối)\s*/, "");
+              const aClean = adminClassFilter.toLowerCase().replace(/^(lớp|khối)\s*/, "");
+              if (uClean === aClean) matchClass = true;
+            }
           }
         }
       }
@@ -373,13 +380,11 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     return exams.filter((e) => {
       if (e.targetClass && e.targetClass === adminClassFilter) return true;
       if (e.grade === adminClassFilter) return true;
-      if (adminClassFilter.startsWith("Lớp")) {
-        const admMatch = adminClassFilter.match(/\d+/);
-        const gradeMatch = e.grade?.match(/\d+/);
-        const targetMatch = e.targetClass?.match(/\d+/);
-        if (admMatch && gradeMatch && admMatch[0] === gradeMatch[0]) return true;
-        if (admMatch && targetMatch && admMatch[0] === targetMatch[0]) return true;
-      }
+      const admMatch = adminClassFilter.match(/\d+/);
+      const gradeMatch = e.grade?.match(/\d+/);
+      const targetMatch = e.targetClass?.match(/\d+/);
+      if (admMatch && gradeMatch && admMatch[0] === gradeMatch[0]) return true;
+      if (admMatch && targetMatch && admMatch[0] === targetMatch[0]) return true;
       return false;
     });
   }, [exams, adminClassFilter]);

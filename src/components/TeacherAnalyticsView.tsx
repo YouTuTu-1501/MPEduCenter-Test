@@ -398,17 +398,29 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     });
   }, [syncedSubmissions, isAllExamsMode, activeExam, exam]);
 
-  // 2. Lọc theo Lớp được Admin/Giáo viên chọn
+  // 2. Lọc theo Lớp được Admin/Giáo viên chọn (hỗ trợ linh hoạt "6", "Lớp 6", "Khối 6", "6A", v.v.)
+  const isClassMatchingFilter = (subClass: string | undefined, filterClass: string): boolean => {
+    if (!filterClass || filterClass === "all") return true;
+    if (!subClass) return true;
+    const s = subClass.trim().toLowerCase();
+    const f = filterClass.trim().toLowerCase();
+    if (s === f) return true;
+
+    const actMatch = f.match(/\d+/);
+    const subMatch = s.match(/\d+/);
+    if (actMatch && subMatch && actMatch[0] === subMatch[0]) {
+      const isFilterEntireGrade = f.startsWith("lớp") || f.startsWith("khối") || /^\d+$/.test(f);
+      if (isFilterEntireGrade) return true;
+      const sClean = s.replace(/^(lớp|khối)\s*/, "");
+      const fClean = f.replace(/^(lớp|khối)\s*/, "");
+      if (sClean === fClean) return true;
+    }
+    return false;
+  };
+
   const filteredSubmissionsByClass = useMemo(() => {
     if (activeClass === "all") return filteredSubmissionsByExam;
-    return filteredSubmissionsByExam.filter((sub) => {
-      if (!sub.studentClass) return true;
-      if (sub.studentClass === activeClass) return true;
-      const actMatch = activeClass.match(/\d+/);
-      const subMatch = sub.studentClass.match(/\d+/);
-      if (actMatch && subMatch && actMatch[0] === subMatch[0] && activeClass.startsWith("Lớp")) return true;
-      return false;
-    });
+    return filteredSubmissionsByExam.filter((sub) => isClassMatchingFilter(sub.studentClass, activeClass));
   }, [filteredSubmissionsByExam, activeClass]);
 
   // 3. Gom nhóm theo từng học sinh: Mỗi học sinh chỉ hiển thị duy nhất 1 lần với điểm cập nhật mới nhất (sau khi chấm tự luận)
@@ -537,14 +549,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
   // 1. Toàn bộ bài làm của các học sinh thuộc lớp đang chọn (không giới hạn ở 1 đề thi)
   const crossExamSubmissions = useMemo(() => {
     if (activeClass === "all") return syncedSubmissions;
-    return syncedSubmissions.filter((sub) => {
-      if (!sub.studentClass) return true;
-      if (sub.studentClass === activeClass) return true;
-      const actMatch = activeClass.match(/\d+/);
-      const subMatch = sub.studentClass.match(/\d+/);
-      if (actMatch && subMatch && actMatch[0] === subMatch[0] && activeClass.startsWith("Lớp")) return true;
-      return false;
-    });
+    return syncedSubmissions.filter((sub) => isClassMatchingFilter(sub.studentClass, activeClass));
   }, [syncedSubmissions, activeClass]);
 
   // 2. Danh sách tất cả các đề thi theo trình tự thời gian
