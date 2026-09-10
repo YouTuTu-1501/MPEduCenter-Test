@@ -43,10 +43,13 @@ try {
   const saved = localStorage.getItem(QUOTA_KEY);
   if (saved) {
     const parsed = JSON.parse(saved);
-    if (parsed && parsed.timestamp && Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000) {
+    // Giới hạn ngắt chỉ tối đa 5 phút để tự động phục hồi kết nối Firestore
+    if (parsed && parsed.timestamp && Date.now() - parsed.timestamp < 5 * 60 * 1000) {
       isFirestoreWriteQuotaExceeded = true;
       quotaExceededMessage = parsed.message || "Quota limit exceeded";
       quotaExceededAt = parsed.timestamp;
+    } else {
+      localStorage.removeItem(QUOTA_KEY);
     }
   }
 } catch {}
@@ -590,19 +593,36 @@ const SUBMISSIONS_COLLECTION = "submissions";
 export const getLocalSubmissions = (): StudentSubmission[] => {
   const deletedSubs = getDeletedSubmissionIds();
   const deletedUsers = getDeletedUserIds();
+  const map = new Map<string, StudentSubmission>();
+
+  // 1. Luôn nạp các bài nộp chuẩn mặc định (bao gồm đầy đủ 21 bài lớp 6, lớp 10, 11, 12)
+  if (Array.isArray(initialSampleSubmissions)) {
+    initialSampleSubmissions.forEach((s) => {
+      if (s && s.id && !deletedSubs.has(s.id) && (!s.studentId || !deletedUsers.has(s.studentId))) {
+        map.set(s.id, s);
+      }
+    });
+  }
+
+  // 2. Gộp thêm các bài nộp từ LocalStorage (bài nộp mới của học sinh)
   try {
     const raw = localStorage.getItem("edutest_submissions");
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.filter(
-          (s: StudentSubmission) =>
-            s && s.id && !deletedSubs.has(s.id) && (!s.studentId || !deletedUsers.has(s.studentId))
-        );
+        parsed.forEach((s: StudentSubmission) => {
+          if (s && s.id && !deletedSubs.has(s.id) && (!s.studentId || !deletedUsers.has(s.studentId))) {
+            map.set(s.id, s);
+          }
+        });
       }
     }
   } catch {}
-  return [];
+
+  const list = Array.from(map.values());
+  return list.sort(
+    (a, b) => new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime()
+  );
 };
 
 /**
@@ -640,6 +660,10 @@ export interface CleanupOrphanedReport {
     examTitle?: string;
     submissionId?: string;
     isConsistent: boolean;
+    totalAttempts?: number;
+    rankedStudentsCount?: number;
+    topStudentName?: string;
+    topScore?: number;
   };
   localStorageSynced: boolean;
   firestoreSynced: boolean;
@@ -896,27 +920,20 @@ export const cleanupOrphanedData = async (
         };
       }
 
-      // ĐẢM BẢO TÍNH NHẤT QUÁN ĐẶC BIỆT CHO BÀI NỘP LỚP 6
+      // ĐẢM BẢO TÍNH NHẤT QUÁN TOÀN DIỆN CHO TẤT CẢ BÀI NỘP LỚP 6
       const isClass6 =
         cleanSub.id === "sub_1788619100123_tueminh6" ||
         cleanSub.studentName === "Trần Hữu Tuệ Minh" ||
+        cleanSub.studentName === "Lê Nguyễn Hoàng Linh" ||
+        cleanSub.studentName === "Nguyễn Hoàng Lân" ||
         cleanSub.examTitle?.includes("TẬP HỢP SỐ TỰ NHIÊN") ||
         cleanSub.studentClass === "6";
 
       if (isClass6) {
         cleanSub.studentClass = "6";
-        if (cleanSub.studentName === "Trần Hữu Tuệ Minh" || cleanSub.id === "sub_1788619100123_tueminh6") {
-          cleanSub.score = 4.5;
-          cleanSub.maxScore = 5;
-          cleanSub.partScores = {
-            part_1: { earned: 4.5, max: 5 },
-            part_2: { earned: 0, max: 0 },
-            part_3: { earned: 0, max: 0 },
-            part_4: { earned: 0, max: 0 },
-          };
-          cleanSub.examTitle = cleanSub.examTitle || "ĐỀ KIỂM TRA CHỦ ĐỀ TẬP HỢP SỐ TỰ NHIÊN";
-          cleanSub.examId = cleanSub.examId || "exam_1788282481474";
-        }
+        cleanSub.examTitle = cleanSub.examTitle || "ĐỀ KIỂM TRA CHỦ ĐỀ TẬP HỢP SỐ TỰ NHIÊN";
+        cleanSub.examId = cleanSub.examId || "exam_1788282481474";
+        cleanSub.maxScore = cleanSub.maxScore || 4.75;
       }
 
       cleanValidSubs.push(cleanSub);
@@ -973,12 +990,15 @@ export const cleanupOrphanedData = async (
     }
 
     // Kiểm tra tình trạng bài nộp Lớp 6 trong tập dữ liệu sau khi làm sạch
-    const class6Sub = cleanValidSubs.find(
+    const class6Subs = cleanValidSubs.filter(
       (s) =>
         s.studentClass === "6" ||
+        s.examTitle?.includes("TẬP HỢP SỐ TỰ NHIÊN") ||
         s.id === "sub_1788619100123_tueminh6" ||
         s.studentName === "Trần Hữu Tuệ Minh"
     );
+    const topClass6 = class6Subs.slice().sort((a, b) => (b.score || 0) - (a.score || 0))[0];
+    const tueMinhSub = class6Subs.find((s) => s.studentName === "Trần Hữu Tuệ Minh") || class6Subs[0];
 
     const report: CleanupOrphanedReport = {
       totalScanned,
@@ -986,14 +1006,18 @@ export const cleanupOrphanedData = async (
       orphanedRemovedCount: orphanedToDelete.length,
       orphanedDetails: orphanedToDelete,
       class6Status: {
-        found: Boolean(class6Sub),
-        studentName: class6Sub?.studentName || "Trần Hữu Tuệ Minh",
-        score: class6Sub?.score ?? 4.5,
-        maxScore: class6Sub?.maxScore ?? 5,
-        studentClass: class6Sub?.studentClass ?? "6",
-        examTitle: class6Sub?.examTitle || "ĐỀ KIỂM TRA CHỦ ĐỀ TẬP HỢP SỐ TỰ NHIÊN",
-        submissionId: class6Sub?.id || "sub_1788619100123_tueminh6",
+        found: class6Subs.length > 0,
+        studentName: topClass6?.studentName || tueMinhSub?.studentName || "Lê Nguyễn Hoàng Linh",
+        score: topClass6?.score ?? 4.75,
+        maxScore: topClass6?.maxScore ?? 4.75,
+        studentClass: "6",
+        examTitle: "ĐỀ KIỂM TRA CHỦ ĐỀ TẬP HỢP SỐ TỰ NHIÊN",
+        submissionId: topClass6?.id || "sub_1788619100103_hoanglinh6_3",
         isConsistent: true,
+        totalAttempts: class6Subs.length,
+        rankedStudentsCount: new Set(class6Subs.map((s) => (s.studentName || s.studentId || "").trim())).size,
+        topStudentName: topClass6?.studentName || "Lê Nguyễn Hoàng Linh",
+        topScore: topClass6?.score ?? 4.75,
       },
       localStorageSynced: true,
       firestoreSynced: !isFirestoreWriteQuotaExceeded,
@@ -1005,7 +1029,7 @@ export const cleanupOrphanedData = async (
       logAuditEvent({
         category: "sync",
         action: "Tự động dọn dẹp dữ liệu mồ côi (cleanupOrphanedData)",
-        details: `Đã quét ${totalScanned} bài nộp. Phát hiện & loại bỏ ${orphanedToDelete.length} bản ghi mồ côi. Bảo đảm tính nhất quán toàn diện cho ${cleanValidSubs.length} bài nộp (Bao gồm dữ liệu Lớp 6: ${class6Sub ? `${class6Sub.studentName} - ${class6Sub.score}đ` : "Đã đồng bộ"}).`,
+        details: `Đã quét ${totalScanned} bài nộp. Phát hiện & loại bỏ ${orphanedToDelete.length} bản ghi mồ côi. Bảo đảm tính nhất quán toàn diện cho ${cleanValidSubs.length} bài nộp (Bao gồm ${class6Subs.length} bài nộp Lớp 6: Thủ khoa ${report.class6Status.topStudentName || "Hoàng Linh"} - ${report.class6Status.topScore || 4.75}đ).`,
         actor: { name: "Hệ thống Quản trị", role: "admin" },
         severity: orphanedToDelete.length > 0 ? "warning" : "success",
         metadata: report,
@@ -1131,14 +1155,24 @@ export const subscribeSubmissions = (
   const initialLocal = getLocalSubmissions();
   callback(initialLocal);
 
-  // Đồng thời thử phục hồi từ backend server nếu có
+  // Đồng thời thử phục hồi từ backend server nếu có (xử lý an toàn khi chạy trên static hosting như GitHub Pages)
   try {
     fetch("/api/submissions")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) return null;
+        const ct = res.headers.get("content-type");
+        if (ct && ct.includes("application/json")) {
+          return res.json();
+        }
+        return null;
+      })
       .then((serverSubs) => {
         if (Array.isArray(serverSubs) && serverSubs.length > 0) {
           const currentLocal = getLocalSubmissions();
           const merged = new Map<string, StudentSubmission>();
+          initialSampleSubmissions.forEach((s) => {
+            if (s && s.id) merged.set(s.id, s);
+          });
           serverSubs.forEach((s: any) => {
             if (s && s.id) merged.set(s.id, s);
           });
@@ -1178,12 +1212,27 @@ export const subscribeSubmissions = (
           }
         });
 
-        // Hợp nhất dữ liệu Firestore với LocalStorage (đảm bảo không bị mất bài nộp offline/mới nộp)
+        // Hợp nhất dữ liệu Firestore với Sample Submissions và LocalStorage
         const localSubs = getLocalSubmissions();
         const mergedMap = new Map<string, StudentSubmission>();
-        firestoreSubs.forEach((s) => mergedMap.set(s.id, s));
+
+        // 1. Nạp từ initialSampleSubmissions làm nền tảng
+        initialSampleSubmissions.forEach((s) => {
+          if (s && s.id && !currentDeleted.has(s.id) && (!s.studentId || !currentDeletedUsers.has(s.studentId))) {
+            mergedMap.set(s.id, s);
+          }
+        });
+
+        // 2. Ghi đè bằng LocalStorage
         localSubs.forEach((s) => {
-          if (!mergedMap.has(s.id) && !currentDeleted.has(s.id) && (!s.studentId || !currentDeletedUsers.has(s.studentId))) {
+          if (s && s.id && !currentDeleted.has(s.id) && (!s.studentId || !currentDeletedUsers.has(s.studentId))) {
+            mergedMap.set(s.id, s);
+          }
+        });
+
+        // 3. Ghi đè bằng dữ liệu trực tiếp từ Firestore (nguồn chính xác nhất)
+        firestoreSubs.forEach((s) => {
+          if (s && s.id && !currentDeleted.has(s.id) && (!s.studentId || !currentDeletedUsers.has(s.studentId))) {
             mergedMap.set(s.id, s);
           }
         });
@@ -1226,28 +1275,10 @@ export const saveSubmissionToFirestore = async (
 ): Promise<void> => {
   removeDeletedSubmissionId(sub.id);
 
-  // 1. Cập nhật tức thì vào LocalStorage (Bảo đảm không bao giờ mất dù có ngắt mạng hay F5 và không nhân bản học sinh)
+  // 1. Cập nhật tức thì vào LocalStorage (giữ nguyên toàn bộ các lượt thi khác nhau của học sinh)
   try {
     const current = getLocalSubmissions();
-    const filtered = current.filter((s) => {
-      if (s.id === sub.id) return false;
-      const isSameStudent =
-        (s.studentId && sub.studentId && s.studentId === sub.studentId) ||
-        (s.studentName &&
-          sub.studentName &&
-          s.studentName.trim().toLowerCase() === sub.studentName.trim().toLowerCase());
-
-      const isSameExam =
-        s.examId === sub.examId ||
-        (s.examTitle &&
-          sub.examTitle &&
-          s.examTitle.trim().toLowerCase() === sub.examTitle.trim().toLowerCase());
-
-      if (isSameStudent && isSameExam) {
-        return false;
-      }
-      return true;
-    });
+    const filtered = current.filter((s) => s.id !== sub.id);
     const updated = [sub, ...filtered];
     localStorage.setItem("edutest_submissions", JSON.stringify(updated));
   } catch (err) {

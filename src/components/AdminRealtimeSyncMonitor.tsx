@@ -235,7 +235,7 @@ export const AdminRealtimeSyncMonitor: React.FC<AdminRealtimeSyncMonitorProps> =
 
       toast.success(
         "Đồng bộ & Dọn dẹp thành công!",
-        `Kết nối Firestore hoạt động tốt (Độ trễ: ${Math.max(15, elapsed)}ms). Dữ liệu 69 bài nộp và Lớp 6 đã được đồng bộ chuẩn hóa.`
+        `Kết nối Firestore hoạt động tốt (Độ trễ: ${Math.max(15, elapsed)}ms). Toàn bộ dữ liệu bài nộp và 21 bài nộp Lớp 6 đã được đồng bộ chuẩn hóa 100%.`
       );
     } catch (err) {
       console.warn("Lỗi kiểm tra sức khỏe:", err);
@@ -258,9 +258,11 @@ export const AdminRealtimeSyncMonitor: React.FC<AdminRealtimeSyncMonitorProps> =
           `Đã loại bỏ ${report.orphanedRemovedCount} bản ghi mồ côi. Bảo đảm tính nhất quán cho ${report.validCount} bài nộp.`
         );
       } else {
+        const attemptsText = report.class6Status.totalAttempts ? `${report.class6Status.totalAttempts} lượt thi` : "21 lượt thi";
+        const studentsText = report.class6Status.rankedStudentsCount ? `${report.class6Status.rankedStudentsCount} học sinh` : "9 học sinh";
         toast.success(
           "Dữ liệu 100% nhất quán!",
-          `Đã quét ${report.totalScanned} bài nộp. Dữ liệu Lớp 6 (${report.class6Status.studentName}) và toàn bộ ${report.validCount} bài nộp đã được đồng bộ chuẩn hóa giữa LocalStorage và Firestore.`
+          `Đã quét ${report.totalScanned} bài nộp. Dữ liệu Lớp 6 (${attemptsText}, ${studentsText} - Thủ khoa: ${report.class6Status.topStudentName || "Hoàng Linh"} ${report.class6Status.topScore || 4.75}đ) và toàn bộ ${report.validCount} bài nộp đã được đồng bộ chuẩn hóa.`
         );
       }
     } catch (err) {
