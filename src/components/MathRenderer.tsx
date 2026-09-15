@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import katex from "katex";
-import { renderTikzWithPackages, DEFAULT_TIKZ_PACKAGES } from "../utils/tikzParser";
+import { renderTikzWithPackages, DEFAULT_TIKZ_PACKAGES, extractLatexMacros } from "../utils/tikzParser";
 import {
   preprocessTikzCode,
   preprocessTikzInLatex,
@@ -273,28 +273,8 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
     text = text.replace(/\\begin\{document\}|\\end\{document\}/gi, "");
 
     // Thu thập các macro định nghĩa ngoài như \newcommand, \def, \pgfmathsetmacro (ví dụ \trucLG, \pointLG)
-    const detectedMacros: string[] = [];
-    text = text.replace(
-      /\\(?:re)?newcommand\*?\s*(?:\{?\\?[a-zA-Z0-9_]+\}?)(?:\s*\[[0-9]+\])?\s*\{[\s\S]*?\}(?:\s*\{[\s\S]*?\})?/g,
-      (macroDef) => {
-        detectedMacros.push(macroDef);
-        return "";
-      }
-    );
-    text = text.replace(
-      /\\e?def\s*\\[a-zA-Z0-9_]+(?:#[0-9])*\s*\{[\s\S]*?\}/g,
-      (macroDef) => {
-        detectedMacros.push(macroDef);
-        return "";
-      }
-    );
-    text = text.replace(
-      /\\pgfmathsetmacro\s*(?:\{?\\?[a-zA-Z0-9_]+\}?)\s*\{[\s\S]*?\}/g,
-      (macroDef) => {
-        detectedMacros.push(macroDef);
-        return "";
-      }
-    );
+    const { cleaned: cleanedTextAfterMacros, macros: detectedMacros } = extractLatexMacros(text);
+    text = cleanedTextAfterMacros;
     const macroHeader = detectedMacros.join("\n");
 
     // Hợp nhất toàn bộ gói thư viện TikZ/pgfplots/tkz-euclide/3d vào danh mục nạp

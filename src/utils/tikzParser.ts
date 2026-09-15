@@ -1,3 +1,4 @@
+import { flattenTikzScopes, stripTikzEnvironments } from "./tikzScopeHelper";
 import katex from "katex";
 import { parseTkzTab } from "./tableParser";
 
@@ -622,14 +623,74 @@ export function extractBalancedBrackets(str: string, startIndex: number): { cont
 }
 
 /**
- * Mở rộng và thay thế các định nghĩa biến, macro trong TikZ/LaTeX theo đúng thứ tự xuất hiện
- * Hỗ trợ:
- * - \def\a{2.5} hoặc \def\a {2.5}
- * - \pgfmathsetmacro\a{2.5} hoặc \pgfmathsetmacro{\a}{2.5}
- * - \pgfmathparse{2.5} -> \pgfmathresult
- * - \newcommand{\a}{2.5} hoặc \newcommand\a{2.5}
- * - \edef, \renewcommand, \let
+ * Trích xuất an toàn và chính xác các khối macro LaTeX (\newcommand, \def, \pgfmathsetmacro...)
+ * Xử lý ngoặc nhọn lồng nhau đệ quy/cân bằng để không bị cắt cụt hay gây lỗi cú pháp.
  */
+export function extractLatexMacros(source: string): { cleaned: string; macros: string[] } {
+  const macros: string[] = [];
+  let result = "";
+  let cursor = 0;
+
+  const macroRegex =
+    /\\(?:re)?newcommand\*?\s*(?:\{?\\?[a-zA-Z0-9_]+\}?)(?:\s*\[[0-9]+\])?|\\e?def\s*\\[a-zA-Z0-9_]+(?:#[0-9])*|\\pgfmathsetmacro\s*(?:\{?\\?[a-zA-Z0-9_]+\}?)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = macroRegex.exec(source)) !== null) {
+    const startIndex = match.index;
+    let bCursor = startIndex + match[0].length;
+    while (bCursor < source.length && /\s/.test(source[bCursor])) bCursor++;
+
+    if (bCursor < source.length && source[bCursor] === "{") {
+      let depth = 0;
+      let firstEnd = -1;
+      for (let i = bCursor; i < source.length; i++) {
+        if (source[i] === "{" && (i === 0 || source[i - 1] !== "\\")) {
+          depth++;
+        } else if (source[i] === "}" && (i === 0 || source[i - 1] !== "\\")) {
+          depth--;
+          if (depth === 0) {
+            firstEnd = i;
+            break;
+          }
+        }
+      }
+
+      if (firstEnd !== -1) {
+        let finalEnd = firstEnd;
+        let nextCursor = firstEnd + 1;
+        while (nextCursor < source.length && /\s/.test(source[nextCursor])) nextCursor++;
+        if (nextCursor < source.length && source[nextCursor] === "{") {
+          let depth2 = 0;
+          let secondEnd = -1;
+          for (let i = nextCursor; i < source.length; i++) {
+            if (source[i] === "{" && (i === 0 || source[i - 1] !== "\\")) {
+              depth2++;
+            } else if (source[i] === "}" && (i === 0 || source[i - 1] !== "\\")) {
+              depth2--;
+              if (depth2 === 0) {
+                secondEnd = i;
+                break;
+              }
+            }
+          }
+          if (secondEnd !== -1) {
+            finalEnd = secondEnd;
+          }
+        }
+
+        const fullMacro = source.substring(startIndex, finalEnd + 1);
+        macros.push(fullMacro);
+        result += source.substring(cursor, startIndex);
+        cursor = finalEnd + 1;
+        macroRegex.lastIndex = cursor;
+      }
+    }
+  }
+
+  result += source.substring(cursor);
+  return { cleaned: result, macros };
+}
+
 /**
  * Mở rộng và thay thế các định nghĩa biến, macro trong TikZ/LaTeX theo đúng thứ tự xuất hiện
  * Hỗ trợ:
@@ -701,23 +762,32 @@ export function expandTikzMacros(code: string): string {
 
     const candidates: MacroCandidate[] = [];
 
+    const findBraceContentAfter = (
+      str: string,
+      fromIndex: number
+    ): { content: string; endIndex: number } | null => {
+      let cursor = fromIndex;
+      while (cursor < str.length && /\s/.test(str[cursor])) cursor++;
+      if (cursor < str.length && str[cursor] === "{") {
+        return extractBalancedBraces(str, cursor);
+      }
+      return null;
+    };
+
     // 1. \pgfmathsetmacro\var{val} hoặc \pgfmathsetmacro{\var}{val}
     const pgfMathRegex = /\\pgfmathsetmacro\s*(?:\{?\\?([a-zA-Z0-9_]+)\}?)\s*/gi;
     let pmMatch: RegExpExecArray | null;
     while ((pmMatch = pgfMathRegex.exec(result)) !== null) {
-      const braceIdx = result.indexOf("{", pmMatch.index + pmMatch[0].length - 1);
-      if (braceIdx !== -1 && braceIdx === pmMatch.index + pmMatch[0].length - 1) {
-        const bal = extractBalancedBraces(result, braceIdx);
-        if (bal) {
-          candidates.push({
-            startIndex: pmMatch.index,
-            endIndex: bal.endIndex + 1,
-            varName: pmMatch[1],
-            rawVal: bal.content.trim(),
-            numArgs: 0,
-            isMath: true,
-          });
-        }
+      const bal = findBraceContentAfter(result, pmMatch.index + pmMatch[0].length);
+      if (bal) {
+        candidates.push({
+          startIndex: pmMatch.index,
+          endIndex: bal.endIndex + 1,
+          varName: pmMatch[1],
+          rawVal: bal.content.trim(),
+          numArgs: 0,
+          isMath: true,
+        });
       }
     }
 
@@ -725,20 +795,17 @@ export function expandTikzMacros(code: string): string {
     const pgfParseRegex = /\\pgfmathparse\s*/gi;
     let ppMatch: RegExpExecArray | null;
     while ((ppMatch = pgfParseRegex.exec(result)) !== null) {
-      const braceIdx = result.indexOf("{", ppMatch.index + ppMatch[0].length - 1);
-      if (braceIdx !== -1 && braceIdx === ppMatch.index + ppMatch[0].length - 1) {
-        const bal = extractBalancedBraces(result, braceIdx);
-        if (bal) {
-          candidates.push({
-            startIndex: ppMatch.index,
-            endIndex: bal.endIndex + 1,
-            varName: "pgfmathresult",
-            rawVal: bal.content.trim(),
-            numArgs: 0,
-            isMath: true,
-            isPgfResult: true,
-          });
-        }
+      const bal = findBraceContentAfter(result, ppMatch.index + ppMatch[0].length);
+      if (bal) {
+        candidates.push({
+          startIndex: ppMatch.index,
+          endIndex: bal.endIndex + 1,
+          varName: "pgfmathresult",
+          rawVal: bal.content.trim(),
+          numArgs: 0,
+          isMath: true,
+          isPgfResult: true,
+        });
       }
     }
 
@@ -746,22 +813,19 @@ export function expandTikzMacros(code: string): string {
     const defRegex = /\\e?def\s*\\([a-zA-Z0-9_]+)((?:\s*#[0-9])*)\s*/gi;
     let defMatch: RegExpExecArray | null;
     while ((defMatch = defRegex.exec(result)) !== null) {
-      const braceIdx = result.indexOf("{", defMatch.index + defMatch[0].length - 1);
-      if (braceIdx !== -1 && braceIdx === defMatch.index + defMatch[0].length - 1) {
-        const bal = extractBalancedBraces(result, braceIdx);
-        if (bal) {
-          const rawParams = defMatch[2] || "";
-          const pMatches = rawParams.match(/#[0-9]/g);
-          const numArgs = pMatches ? pMatches.length : 0;
-          candidates.push({
-            startIndex: defMatch.index,
-            endIndex: bal.endIndex + 1,
-            varName: defMatch[1],
-            rawVal: bal.content,
-            numArgs,
-            isMath: false,
-          });
-        }
+      const bal = findBraceContentAfter(result, defMatch.index + defMatch[0].length);
+      if (bal) {
+        const rawParams = defMatch[2] || "";
+        const pMatches = rawParams.match(/#[0-9]/g);
+        const numArgs = pMatches ? pMatches.length : 0;
+        candidates.push({
+          startIndex: defMatch.index,
+          endIndex: bal.endIndex + 1,
+          varName: defMatch[1],
+          rawVal: bal.content,
+          numArgs,
+          isMath: false,
+        });
       }
     }
 
@@ -769,20 +833,17 @@ export function expandTikzMacros(code: string): string {
     const newcmdRegex = /\\(?:re)?newcommand\*?\s*(?:\{?\\?([a-zA-Z0-9_]+)\}?)(?:\s*\[([0-9]+)\])?\s*/gi;
     let ncMatch: RegExpExecArray | null;
     while ((ncMatch = newcmdRegex.exec(result)) !== null) {
-      const braceIdx = result.indexOf("{", ncMatch.index + ncMatch[0].length - 1);
-      if (braceIdx !== -1 && braceIdx === ncMatch.index + ncMatch[0].length - 1) {
-        const bal = extractBalancedBraces(result, braceIdx);
-        if (bal) {
-          const numArgs = ncMatch[2] ? parseInt(ncMatch[2], 10) : 0;
-          candidates.push({
-            startIndex: ncMatch.index,
-            endIndex: bal.endIndex + 1,
-            varName: ncMatch[1],
-            rawVal: bal.content,
-            numArgs,
-            isMath: false,
-          });
-        }
+      const bal = findBraceContentAfter(result, ncMatch.index + ncMatch[0].length);
+      if (bal) {
+        const numArgs = ncMatch[2] ? parseInt(ncMatch[2], 10) : 0;
+        candidates.push({
+          startIndex: ncMatch.index,
+          endIndex: bal.endIndex + 1,
+          varName: ncMatch[1],
+          rawVal: bal.content,
+          numArgs,
+          isMath: false,
+        });
       }
     }
 
@@ -797,16 +858,21 @@ export function expandTikzMacros(code: string): string {
     let afterDef = result.substring(earliest.endIndex);
 
     if (earliest.numArgs === 0) {
-      // Macro không có tham số: tính toán giá trị nếu là toán
+      // Macro không có tham số: chỉ tính toán giá trị số nếu là lệnh toán pgfmath hoặc số thuần túy
       let valStr = earliest.rawVal;
-      const numVal = evaluateExpr(earliest.rawVal);
-      if (
-        !isNaN(numVal) &&
-        (earliest.isMath ||
-          /^[+-]?[0-9.]+(?:\/[0-9.]+)?$/.test(earliest.rawVal.trim()) ||
-          /asin|acos|atan|sin|cos|tan|sqrt|\+|\-|\*|\//.test(earliest.rawVal.trim()))
+      if (earliest.isMath) {
+        const numVal = evaluateExpr(earliest.rawVal);
+        if (!isNaN(numVal)) {
+          valStr = numVal.toString();
+        }
+      } else if (
+        !earliest.rawVal.includes("\\") &&
+        /^[+-]?[0-9.]+(?:\/[0-9.]+)?$/.test(earliest.rawVal.trim())
       ) {
-        valStr = numVal.toString();
+        const numVal = evaluateExpr(earliest.rawVal);
+        if (!isNaN(numVal)) {
+          valStr = numVal.toString();
+        }
       }
 
       const replaceRegex = new RegExp(`\\\\${earliest.varName}(?![a-zA-Z0-9_])`, "g");
@@ -1983,57 +2049,7 @@ export function stripNodesAndPics(cmd: string): string {
   return result;
 }
 
-/**
- * Phẳng hóa các khối \begin{scope}[...] ... \end{scope} trong TikZ
- * Kế thừa toàn bộ options của scope vào từng lệnh con bên trong
- */
-export function flattenTikzScopes(code: string): string {
-  let result = "";
-  let cursor = 0;
-  const scopeStack: string[] = [];
-
-  while (cursor < code.length) {
-    const rest = code.substring(cursor);
-    const beginScopeMatch = rest.match(/^\\begin\{scope\}(?:\s*\[([^\]]*)\])?/i);
-    if (beginScopeMatch) {
-      const scopeOpts = (beginScopeMatch[1] || "").trim();
-      scopeStack.push(scopeOpts);
-      cursor += beginScopeMatch[0].length;
-      continue;
-    }
-
-    const endScopeMatch = rest.match(/^\\end\{scope\}/i);
-    if (endScopeMatch) {
-      scopeStack.pop();
-      cursor += endScopeMatch[0].length;
-      continue;
-    }
-
-    const semiIdx = rest.indexOf(";");
-    if (semiIdx !== -1) {
-      let cmd = rest.substring(0, semiIdx + 1);
-      if (scopeStack.length > 0) {
-        const combinedScopeOpts = scopeStack.filter(Boolean).join(", ");
-        if (combinedScopeOpts) {
-          const cmdMatch = cmd.match(/^(\\(?:draw|fill|filldraw|path|node|coordinate|pic|clip|addplot3?|shade))(?:\s*\[([^\]]*)\])?/i);
-          if (cmdMatch) {
-            const verb = cmdMatch[1];
-            const existingOpts = cmdMatch[2] ? cmdMatch[2].trim() : "";
-            const mergedOpts = existingOpts ? `${combinedScopeOpts}, ${existingOpts}` : combinedScopeOpts;
-            cmd = `${verb}[${mergedOpts}]` + cmd.substring(cmdMatch[0].length);
-          }
-        }
-      }
-      result += cmd;
-      cursor += semiIdx + 1;
-    } else {
-      result += rest;
-      break;
-    }
-  }
-
-  return result;
-}
+export { flattenTikzScopes, stripTikzEnvironments } from "./tikzScopeHelper";
 
 /**
  * Trích xuất nhãn LaTeX và render qua KaTeX một cách an toàn
@@ -2099,6 +2115,15 @@ export function formatLatexToSvgText(
   // 1. Loại bỏ các lệnh kích thước font chữ LaTeX
   label = label.replace(/\\(?:footnotesize|scriptsize|tiny|small|normalsize|large|Large|LARGE|huge|Huge)\b/g, "").trim();
 
+  // Trích xuất màu từ \color{...} hoặc {\color{...}...}
+  const colorMatch = label.match(/\\color\{([^}]+)\}/i);
+  if (colorMatch) {
+    if (!color) {
+      color = colorMatch[1].trim();
+    }
+    label = label.replace(/\\color\{[^}]*\}/gi, "").trim();
+  }
+
   // 2. Chuẩn hóa góc và độ
   label = label.replace(/\\ang\{([^}]+)\}/g, "$1°");
   label = label.replace(/(\d+)\s*độ/gi, "$1°");
@@ -2137,6 +2162,9 @@ export function formatLatexToSvgText(
     label = label.split(tex).join(sym);
   }
 
+  // Chuẩn hóa tên các hàm lượng giác & toán học: gắn tag roman để hiển thị font thẳng (upright/normal)
+  label = label.replace(/\\(sin|cos|tan|cot|arcsin|arccos|arctan|ln|log|exp|lim|max|min|det|deg|dim|ker|hom)\b/gi, "@$1@");
+
   // 5. Thay thế các ký hiệu toán học phổ biến sang Unicode chuẩn
   label = label.replace(/\\sqrt\[([^\]]+)\]\{([^}]+)\}/g, "$1√$2");
   label = label.replace(/\\sqrt\{([^}]+)\}/g, "√$1");
@@ -2165,7 +2193,10 @@ export function formatLatexToSvgText(
   label = label.replace(/\\pmb\{([^}]+)\}/g, "$1");
   label = label.replace(/\\boldsymbol\{([^}]+)\}/g, "$1");
 
-  // Dấu phẩy trên (Prime)
+  // Dấu phẩy trên (Prime): bao gồm cả \prime, ^\prime, '
+  label = label.replace(/\^?\{\\prime\}/g, "′");
+  label = label.replace(/\^\\prime\b/g, "′");
+  label = label.replace(/\\prime\b/g, "′");
   label = label.replace(/'{3}/g, "‴");
   label = label.replace(/'{2}/g, "″");
   label = label.replace(/'/g, "′");
@@ -2209,13 +2240,15 @@ export function formatLatexToSvgText(
 
   // 7. Tạo danh sách các tspans cho các phần còn lại
   const tokens: Array<{ text: string; italic: boolean; isSub?: boolean; isSup?: boolean }> = [];
-  const parts = label.split(/(_[a-zA-Z0-9]+_|\^[a-zA-Z0-9]+\^)/g);
+  const parts = label.split(/(_[a-zA-Z0-9]+_|\^[a-zA-Z0-9]+\^|@[a-zA-Z0-9]+@)/g);
   for (const part of parts) {
     if (!part) continue;
     if (part.startsWith("_") && part.endsWith("_")) {
       tokens.push({ text: part.slice(1, -1), italic: false, isSub: true });
     } else if (part.startsWith("^") && part.endsWith("^")) {
       tokens.push({ text: part.slice(1, -1), italic: false, isSup: true });
+    } else if (part.startsWith("@") && part.endsWith("@")) {
+      tokens.push({ text: part.slice(1, -1), italic: false });
     } else {
       let curr = "";
       let currItalic = false;
@@ -2347,11 +2380,53 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       .join(" ")
   );
 
-  // 3. Lấy scale từ [scale=0.8]
+  // 3. Lấy scale và các options toàn cục từ \begin{tikzpicture}[...]
   let globalScale = 1.0;
+  let globalLineWidth = 1.5;
+  let globalLineCap = "round";
+  let globalLineJoin = "round";
+  let stealthScale = 1.0;
+
+  let globalOptsStr = "";
+  const tikzBeginIdx = cleanCode.search(/\\begin\{tikzpicture\}/i);
+  if (tikzBeginIdx !== -1) {
+    let optIdx = tikzBeginIdx + "\\begin{tikzpicture}".length;
+    while (optIdx < cleanCode.length && /\s/.test(cleanCode[optIdx])) optIdx++;
+    if (optIdx < cleanCode.length && cleanCode[optIdx] === "[") {
+      const bal = extractBalancedBrackets(cleanCode, optIdx);
+      if (bal) {
+        globalOptsStr = bal.content;
+      }
+    }
+  }
+
   const scaleMatch = cleanCode.match(/scale\s*=\s*([0-9.]+)/);
   if (scaleMatch) {
     globalScale = parseFloat(scaleMatch[1]) || 1.0;
+  }
+
+  const lwMatch = globalOptsStr.match(/line\s+width\s*=\s*([0-9.]+)(?:pt)?/i);
+  if (lwMatch) {
+    globalLineWidth = parseFloat(lwMatch[1]) * 1.5; // Chuẩn hóa 1pt ~ 1.5px
+  } else if (globalOptsStr.includes("semithick")) {
+    globalLineWidth = 1.8;
+  } else if (globalOptsStr.includes("thick")) {
+    globalLineWidth = 2.0;
+  } else if (globalOptsStr.includes("very thick")) {
+    globalLineWidth = 2.5;
+  } else if (globalOptsStr.includes("thin")) {
+    globalLineWidth = 1.2;
+  }
+
+  if (/line\s+cap\s*=\s*rect/i.test(globalOptsStr)) globalLineCap = "square";
+  else if (/line\s+cap\s*=\s*butt/i.test(globalOptsStr)) globalLineCap = "butt";
+
+  if (/line\s+join\s*=\s*miter/i.test(globalOptsStr)) globalLineJoin = "miter";
+  else if (/line\s+join\s*=\s*bevel/i.test(globalOptsStr)) globalLineJoin = "bevel";
+
+  const stealthMatch = globalOptsStr.match(/Stealth\[\s*scale\s*=\s*([0-9.]+)\s*\]/i);
+  if (stealthMatch) {
+    stealthScale = parseFloat(stealthMatch[1]) || 1.0;
   }
 
   const coordsMap = new Map<string, Point2D>();
@@ -3040,20 +3115,14 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
   const flattenedCode = flattenTikzScopes(cleanCode);
 
-  const commands = flattenedCode
+  const strippedCode = stripTikzEnvironments(flattenedCode)
     .replace(/\\usetikzlibrary\{[^}]*\}/gi, "")
     .replace(/\\usepgfplotslibrary\{[^}]*\}/gi, "")
     .replace(/\\usepackage(?:\s*\[[^\]]*\])?\{[^}]*\}/gi, "")
     .replace(/\\pgfplotsset\{[^}]*\}/gi, "")
-    .replace(/\\tikzset\{[^}]*\}/gi, "")
-    .replace(/\\begin\{tikzpicture\}(?:\[[^\]]*\])?/gi, "")
-    .replace(/\\end\{tikzpicture\}/gi, "")
-    .replace(/\\begin\{axis\}(?:\[[^\]]*\])?/gi, "")
-    .replace(/\\end\{axis\}/gi, "")
-    .replace(/\\begin\{scope\}(?:\[[^\]]*\])?/gi, "")
-    .replace(/\\end\{scope\}/gi, "")
-    .replace(/\\begin\{[a-zA-Z*]+\}(?:\[[^\]]*\])?/gi, "")
-    .replace(/\\end\{[a-zA-Z*]+\}/gi, "")
+    .replace(/\\tikzset\{[^}]*\}/gi, "");
+
+  const commands = strippedCode
     .split(";")
     .map((cmd) => cmd.trim())
     .filter((cmd) => cmd.length > 0);
@@ -3976,14 +4045,22 @@ export function parseTikzToSvg(rawTikzCode: string): string {
             if (drawOpt.includes("fill=white") || drawOpt.includes("fill = white") || drawOpt.includes("fill=none")) {
               fill = "#ffffff";
               stroke = "#1e293b";
+            } else if (drawOpt.includes("fill=")) {
+              const fMatch = drawOpt.match(/fill\s*=\s*([a-zA-Z0-9!_]+)/i);
+              if (fMatch) fill = parseTikzColor(fMatch[1], "#1e293b");
+            } else if (drawOpt.includes("red")) {
+              fill = "#ef4444";
+            } else if (drawOpt.includes("blue")) {
+              fill = "#3b82f6";
             }
+            const dotR = Math.max(2.2, Math.min(6, (radStr.includes("pt") ? rad * 2.2 : rad * 40)));
             explicitDots.set(ptName, {
               name: ptName,
               x: pt.x,
               y: pt.y,
               fill,
               stroke,
-              radius: 2.8,
+              radius: dotR,
             });
           }
         }
@@ -4161,7 +4238,10 @@ export function parseTikzToSvg(rawTikzCode: string): string {
     }
 
     // 8. Standard \draw, \fill, \filldraw (Không vẽ đường nối cho \fill vẽ điểm nút hoặc \path thuần túy)
-    const isPointDotCmd = (cmd.startsWith("\\fill") || cmd.startsWith("\\draw")) && cmd.includes("circle");
+    const isPointDotCmd =
+      (cmd.startsWith("\\fill") || cmd.startsWith("\\draw")) &&
+      cmd.includes("circle") &&
+      /(?:0\.[0-9]+|[1-3](?:\.[0-9]+)?)\s*pt\b/i.test(cmd);
     const isExplicitDraw = (cmd.startsWith("\\draw") || cmd.startsWith("\\filldraw")) && (!isPointDotCmd || cmd.includes("--"));
     const isExplicitFill = cmd.startsWith("\\fill") && (!isPointDotCmd || cmd.includes("--"));
     const isDrawnPath = cmd.startsWith("\\path") && (cmd.includes("[draw") || cmd.includes(",draw"));
@@ -4182,9 +4262,19 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       else if (optStr.includes("amber") || optStr.includes("orange")) strokeColor = "#f59e0b";
       else if (optStr.includes("gray")) strokeColor = "#64748b";
 
-      let strokeWidth = 1.5;
-      if (optStr.includes("thick")) strokeWidth = 2.0;
-      else if (optStr.includes("thin")) strokeWidth = 1.2;
+      let strokeWidth = globalLineWidth;
+      const cmdLwMatch = optStr.match(/line\s+width\s*=\s*([0-9.]+)(?:pt)?/i);
+      if (cmdLwMatch) {
+        strokeWidth = parseFloat(cmdLwMatch[1]) * 1.5;
+      } else if (optStr.includes("very thick")) {
+        strokeWidth = 2.5;
+      } else if (optStr.includes("thick")) {
+        strokeWidth = 2.0;
+      } else if (optStr.includes("semithick")) {
+        strokeWidth = 1.8;
+      } else if (optStr.includes("thin")) {
+        strokeWidth = 1.2;
+      }
 
       const drawBody = cmd.replace(/^\\(?:draw|fill|filldraw|path)\s*(\[[^\]]*\])?/, "").trim();
 
@@ -4438,8 +4528,8 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           fill="${path.fillColor || "none"}" 
           stroke="${path.strokeColor}" 
           stroke-width="${path.strokeWidth}" 
-          stroke-linecap="round" 
-          stroke-linejoin="round"
+          stroke-linecap="${globalLineCap}" 
+          stroke-linejoin="${globalLineJoin}" 
           ${strokeDash}
           ${markerEnd}
           ${markerStart}
@@ -4728,10 +4818,10 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           </pattern>
 
           <!-- Mũi tên 2 đầu & 1 đầu stealth -->
-          <marker id="tikz-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <marker id="tikz-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="${(6 * stealthScale).toFixed(1)}" markerHeight="${(6 * stealthScale).toFixed(1)}" orient="auto-start-reverse">
             <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#1e293b" />
           </marker>
-          <marker id="tikz-arrow-start" viewBox="0 0 10 10" refX="3" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <marker id="tikz-arrow-start" viewBox="0 0 10 10" refX="3" refY="5" markerWidth="${(6 * stealthScale).toFixed(1)}" markerHeight="${(6 * stealthScale).toFixed(1)}" orient="auto">
             <path d="M 8 1.5 L 0 5 L 8 8.5 z" fill="#1e293b" />
           </marker>
         </defs>

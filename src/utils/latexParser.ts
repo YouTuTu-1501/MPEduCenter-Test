@@ -1,5 +1,6 @@
 import { Exam, Question, QuestionType, PartType, ChoiceOption, TrueFalseItem } from "../types/exam";
 import { generateStandardExamCode, parseStandardExamCode } from "./examCodeHelper";
+import { extractLatexMacros } from "./tikzParser";
 
 /**
  * Parser phân tích mã LaTeX hỗ trợ 4 dạng thức câu hỏi chuẩn:
@@ -9,7 +10,6 @@ import { generateStandardExamCode, parseStandardExamCode } from "./examCodeHelpe
  * 4. Trắc nghiệm nhiều lựa chọn (\choice[...]{\True ...}{...})
  */
 export function parseLatexExam(latexContent: string, defaultTitle: string = "Đề kiểm tra nhập từ LaTeX"): Exam {
-  const lines = latexContent.split("\n");
   const questions: Question[] = [];
 
   let currentPart: PartType = "part_1";
@@ -180,14 +180,9 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
   }
 
   // Trích xuất các định nghĩa macro \newcommand, \def, \pgfmathsetmacro ở preamble trước hoặc ngoài các câu hỏi
-  const preambleMacroMatches: string[] = [];
-  const globalMacroRegex =
-    /\\(?:re)?newcommand\*?\s*(?:\{?\\?[a-zA-Z0-9_]+\}?)(?:\s*\[[0-9]+\])?\s*\{[\s\S]*?\}(?:\s*\{[\s\S]*?\})?|\\e?def\s*\\[a-zA-Z0-9_]+(?:#[0-9])*\s*\{[\s\S]*?\}|\\pgfmathsetmacro\s*(?:\{?\\?[a-zA-Z0-9_]+\}?)\s*\{[\s\S]*?\}/g;
-  let gMatch: RegExpExecArray | null;
-  while ((gMatch = globalMacroRegex.exec(latexContent)) !== null) {
-    preambleMacroMatches.push(gMatch[0]);
-  }
+  const { cleaned: cleanedLatexContent, macros: preambleMacroMatches } = extractLatexMacros(latexContent);
   const globalPreambleMacros = preambleMacroMatches.join("\n");
+  const lines = cleanedLatexContent.split("\n");
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
