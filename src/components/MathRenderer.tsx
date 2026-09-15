@@ -272,6 +272,31 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
     text = text.replace(/\\thispagestyle\{[^}]+\}/gi, "");
     text = text.replace(/\\begin\{document\}|\\end\{document\}/gi, "");
 
+    // Thu thập các macro định nghĩa ngoài như \newcommand, \def, \pgfmathsetmacro (ví dụ \trucLG, \pointLG)
+    const detectedMacros: string[] = [];
+    text = text.replace(
+      /\\(?:re)?newcommand\*?\s*(?:\{?\\?[a-zA-Z0-9_]+\}?)(?:\s*\[[0-9]+\])?\s*\{[\s\S]*?\}(?:\s*\{[\s\S]*?\})?/g,
+      (macroDef) => {
+        detectedMacros.push(macroDef);
+        return "";
+      }
+    );
+    text = text.replace(
+      /\\e?def\s*\\[a-zA-Z0-9_]+(?:#[0-9])*\s*\{[\s\S]*?\}/g,
+      (macroDef) => {
+        detectedMacros.push(macroDef);
+        return "";
+      }
+    );
+    text = text.replace(
+      /\\pgfmathsetmacro\s*(?:\{?\\?[a-zA-Z0-9_]+\}?)\s*\{[\s\S]*?\}/g,
+      (macroDef) => {
+        detectedMacros.push(macroDef);
+        return "";
+      }
+    );
+    const macroHeader = detectedMacros.join("\n");
+
     // Hợp nhất toàn bộ gói thư viện TikZ/pgfplots/tkz-euclide/3d vào danh mục nạp
     const allGlobalPackages = Array.from(
       new Set([
@@ -289,6 +314,7 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
         "patterns",
         "positioning",
         "shapes.geometric",
+        "plotmarks",
         ...detectedLibs,
       ])
     );
@@ -297,7 +323,8 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
       /\\begin\{center\}\s*(\\begin\{tikzpicture\*?\}[\s\S]*?\\end\{tikzpicture\*?\})\s*\\end\{center\}/gi,
       (_, tikz) => {
         const idx = tikzList.length;
-        const preprocessed = preprocessTikzCode(tikz, { extraLibraries: allGlobalPackages });
+        const codeWithMacros = macroHeader ? `${macroHeader}\n${tikz}` : tikz;
+        const preprocessed = preprocessTikzCode(codeWithMacros, { extraLibraries: allGlobalPackages });
         const svg = renderTikzWithPackages(preprocessed, allGlobalPackages);
         tikzList.push(svg);
         return `%%%TIKZ_PLACEHOLDER_${idx}%%%`;
@@ -306,7 +333,8 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
 
     text = text.replace(/\\begin\{tikzpicture\*?\}[\s\S]*?\\end\{tikzpicture\*?\}/gi, (tikz) => {
       const idx = tikzList.length;
-      const preprocessed = preprocessTikzCode(tikz, { extraLibraries: allGlobalPackages });
+      const codeWithMacros = macroHeader ? `${macroHeader}\n${tikz}` : tikz;
+      const preprocessed = preprocessTikzCode(codeWithMacros, { extraLibraries: allGlobalPackages });
       const svg = renderTikzWithPackages(preprocessed, allGlobalPackages);
       tikzList.push(svg);
       return `%%%TIKZ_PLACEHOLDER_${idx}%%%`;

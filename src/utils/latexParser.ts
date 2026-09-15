@@ -179,6 +179,16 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     });
   }
 
+  // Trích xuất các định nghĩa macro \newcommand, \def, \pgfmathsetmacro ở preamble trước hoặc ngoài các câu hỏi
+  const preambleMacroMatches: string[] = [];
+  const globalMacroRegex =
+    /\\(?:re)?newcommand\*?\s*(?:\{?\\?[a-zA-Z0-9_]+\}?)(?:\s*\[[0-9]+\])?\s*\{[\s\S]*?\}(?:\s*\{[\s\S]*?\})?|\\e?def\s*\\[a-zA-Z0-9_]+(?:#[0-9])*\s*\{[\s\S]*?\}|\\pgfmathsetmacro\s*(?:\{?\\?[a-zA-Z0-9_]+\}?)\s*\{[\s\S]*?\}/g;
+  let gMatch: RegExpExecArray | null;
+  while ((gMatch = globalMacroRegex.exec(latexContent)) !== null) {
+    preambleMacroMatches.push(gMatch[0]);
+  }
+  const globalPreambleMacros = preambleMacroMatches.join("\n");
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
@@ -214,7 +224,8 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     // Kết thúc câu hỏi \end{ex}
     if (line.includes("\\end{ex}") && inEx) {
       inEx = false;
-      const fullExText = exContentLines.join("\n");
+      const rawExText = exContentLines.join("\n");
+      const fullExText = globalPreambleMacros ? `${globalPreambleMacros}\n${rawExText}` : rawExText;
       const parsedQ = parseSingleExBlock(fullExText, currentPart, currentPartName, questionCounter, currentExId);
       if (parsedQ) {
         questions.push(parsedQ);

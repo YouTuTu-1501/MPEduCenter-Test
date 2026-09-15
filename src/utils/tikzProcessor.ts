@@ -42,6 +42,7 @@ export const STANDARD_TIKZ_3D_LIBRARIES: readonly string[] = [
   "backgrounds",
   "fit",
   "tkz-euclide",
+  "plotmarks",
 ] as const;
 
 /**

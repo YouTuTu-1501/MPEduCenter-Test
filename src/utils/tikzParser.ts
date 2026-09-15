@@ -101,6 +101,7 @@ export const SUPPORTED_TIKZ_LIBRARIES = [
   "tkz-euclide",
   "tkz-tab",
   "tkz-fct",
+  "plotmarks",
   "shadings",
   "shadows",
   "fadings",
@@ -133,6 +134,7 @@ export const DEFAULT_TIKZ_PACKAGES: readonly string[] = [
   "backgrounds",
   "fit",
   "tkz-euclide",
+  "plotmarks",
 ] as const;
 
 /**
@@ -238,6 +240,11 @@ export function detectRequiredTikzPackages(tikzCode: string): string[] {
   if (/cylinder|trapezium|ellipse|regular polygon|star\b|cloud|callout|decorate\b|decoration=/i.test(tikzCode)) {
     detected.add("shapes.geometric");
     detected.add("decorations.pathmorphing");
+  }
+
+  // 11. Gói plotmarks cho đánh dấu điểm trên đồ thị và đường tròn lượng giác
+  if (/plotmarks|plot\s*\[[^\]]*mark|\\pointLG/i.test(tikzCode)) {
+    detected.add("plotmarks");
   }
 
   return Array.from(detected);
@@ -623,101 +630,233 @@ export function extractBalancedBrackets(str: string, startIndex: number): { cont
  * - \newcommand{\a}{2.5} hoặc \newcommand\a{2.5}
  * - \edef, \renewcommand, \let
  */
+/**
+ * Mở rộng và thay thế các định nghĩa biến, macro trong TikZ/LaTeX theo đúng thứ tự xuất hiện
+ * Hỗ trợ:
+ * - Macro hệ trục lượng giác chuẩn (\trucLG, \pointLG, \cungLG, \trucLuongGiac...)
+ * - Macro có tham số: \newcommand{\name}[N]{body}, \def\name#1#2{body}
+ * - \def\a{2.5}, \pgfmathsetmacro\a{2.5}, \pgfmathparse{2.5}, \newcommand{\a}{2.5}
+ * - \edef, \renewcommand, \let
+ */
 export function expandTikzMacros(code: string): string {
+  if (!code) return "";
   let result = code;
+
+  // 0. Chuẩn hóa alias và nạp định nghĩa mặc định (Built-in Fallback Macros) cho đường tròn lượng giác
+  result = result.replace(/\\(?:trucLuongGiac|duongTronLuongGiac)\b/g, "\\trucLG");
+
+  // Chuẩn hóa trường hợp gọi \pointLG thiếu đối số (thường gặp khi người dùng chỉ ghi góc)
+  // Ví dụ: \pointLG{120} -> \pointLG{120}{1}{*}{red}
+  result = result.replace(
+    /\\pointLG\s*\{([^{}]+)\}(?!\s*\{)/g,
+    "\\pointLG{$1}{1}{*}{red}"
+  );
+  // Ví dụ: \pointLG{120}{red} -> \pointLG{120}{1}{*}{red}
+  result = result.replace(
+    /\\pointLG\s*\{([^{}]+)\}\s*\{([a-zA-Z]+)\}(?!\s*\{)/g,
+    "\\pointLG{$1}{1}{*}{$2}"
+  );
+  // Ví dụ: \pointLG{120}{1}{*} -> \pointLG{120}{1}{*}{red}
+  result = result.replace(
+    /\\pointLG\s*\{([^{}]+)\}\s*\{([^{}]+)\}\s*\{([^{}]+)\}(?!\s*\{)/g,
+    "\\pointLG{$1}{$2}{$3}{red}"
+  );
+
+  // Nếu trong mã có \trucLG mà chưa có định nghĩa, tự động bổ sung định nghĩa chuẩn
+  if (/\\trucLG\b/.test(result) && !/\\(?:re)?newcommand\*?\s*\{?\\?trucLG\b|\\e?def\s*\\trucLG\b/.test(result)) {
+    result =
+      "\\newcommand{\\trucLG}{\n" +
+      "\\draw[->] (0,-1.3) -- (0,1.3) node[left] {$\\sin$};\n" +
+      "\\draw[->] (-1.3,0) -- (1.3,0) node[below] {$\\cos$};\n" +
+      "\\draw (0,0) circle (1cm);\n" +
+      "}\n" +
+      result;
+  }
+
+  // Nếu trong mã có \pointLG mà chưa có định nghĩa, tự động bổ sung định nghĩa chuẩn
+  if (/\\pointLG\b/.test(result) && !/\\(?:re)?newcommand\*?\s*\{?\\?pointLG\b|\\e?def\s*\\pointLG\b/.test(result)) {
+    result =
+      "\\newcommand{\\pointLG}[4]{\n" +
+      "\\foreach \\i in {0,...,#2} {\n" +
+      "  \\draw[color=#4] plot[mark=#3] coordinates {({#1+\\i*360/#2}:1)};\n" +
+      "}\n" +
+      "}\n" +
+      result;
+  }
+
   let iterations = 0;
 
-  while (iterations < 40) {
+  while (iterations < 50) {
     iterations++;
 
-    interface MacroMatchCandidate {
-      index: number;
-      length: number;
-      fullText: string;
+    interface MacroCandidate {
+      startIndex: number;
+      endIndex: number;
       varName: string;
       rawVal: string;
+      numArgs: number;
       isMath: boolean;
       isPgfResult?: boolean;
     }
 
-    const candidates: MacroMatchCandidate[] = [];
+    const candidates: MacroCandidate[] = [];
 
     // 1. \pgfmathsetmacro\var{val} hoặc \pgfmathsetmacro{\var}{val}
-    const pgfMathRegex = /\\pgfmathsetmacro\s*(?:\{?\\?([a-zA-Z0-9_]+)\}?)\s*\{([^}]+)\}/gi;
+    const pgfMathRegex = /\\pgfmathsetmacro\s*(?:\{?\\?([a-zA-Z0-9_]+)\}?)\s*/gi;
     let pmMatch: RegExpExecArray | null;
     while ((pmMatch = pgfMathRegex.exec(result)) !== null) {
-      candidates.push({
-        index: pmMatch.index,
-        length: pmMatch[0].length,
-        fullText: pmMatch[0],
-        varName: pmMatch[1],
-        rawVal: pmMatch[2].trim(),
-        isMath: true,
-      });
+      const braceIdx = result.indexOf("{", pmMatch.index + pmMatch[0].length - 1);
+      if (braceIdx !== -1 && braceIdx === pmMatch.index + pmMatch[0].length - 1) {
+        const bal = extractBalancedBraces(result, braceIdx);
+        if (bal) {
+          candidates.push({
+            startIndex: pmMatch.index,
+            endIndex: bal.endIndex + 1,
+            varName: pmMatch[1],
+            rawVal: bal.content.trim(),
+            numArgs: 0,
+            isMath: true,
+          });
+        }
+      }
     }
 
     // 2. \pgfmathparse{val}
-    const pgfParseRegex = /\\pgfmathparse\s*\{([^}]+)\}/gi;
+    const pgfParseRegex = /\\pgfmathparse\s*/gi;
     let ppMatch: RegExpExecArray | null;
     while ((ppMatch = pgfParseRegex.exec(result)) !== null) {
-      candidates.push({
-        index: ppMatch.index,
-        length: ppMatch[0].length,
-        fullText: ppMatch[0],
-        varName: "pgfmathresult",
-        rawVal: ppMatch[1].trim(),
-        isMath: true,
-        isPgfResult: true,
-      });
+      const braceIdx = result.indexOf("{", ppMatch.index + ppMatch[0].length - 1);
+      if (braceIdx !== -1 && braceIdx === ppMatch.index + ppMatch[0].length - 1) {
+        const bal = extractBalancedBraces(result, braceIdx);
+        if (bal) {
+          candidates.push({
+            startIndex: ppMatch.index,
+            endIndex: bal.endIndex + 1,
+            varName: "pgfmathresult",
+            rawVal: bal.content.trim(),
+            numArgs: 0,
+            isMath: true,
+            isPgfResult: true,
+          });
+        }
+      }
     }
 
-    // 3. \def\var{val} hoặc \edef\var{val}
-    const defRegex = /\\e?def\s*\\([a-zA-Z0-9_]+)\s*\{([^}]+)\}/gi;
+    // 3. \def\var{val} hoặc \edef\var{val} hoặc \def\var#1#2{val}
+    const defRegex = /\\e?def\s*\\([a-zA-Z0-9_]+)((?:\s*#[0-9])*)\s*/gi;
     let defMatch: RegExpExecArray | null;
     while ((defMatch = defRegex.exec(result)) !== null) {
-      candidates.push({
-        index: defMatch.index,
-        length: defMatch[0].length,
-        fullText: defMatch[0],
-        varName: defMatch[1],
-        rawVal: defMatch[2].trim(),
-        isMath: false,
-      });
+      const braceIdx = result.indexOf("{", defMatch.index + defMatch[0].length - 1);
+      if (braceIdx !== -1 && braceIdx === defMatch.index + defMatch[0].length - 1) {
+        const bal = extractBalancedBraces(result, braceIdx);
+        if (bal) {
+          const rawParams = defMatch[2] || "";
+          const pMatches = rawParams.match(/#[0-9]/g);
+          const numArgs = pMatches ? pMatches.length : 0;
+          candidates.push({
+            startIndex: defMatch.index,
+            endIndex: bal.endIndex + 1,
+            varName: defMatch[1],
+            rawVal: bal.content,
+            numArgs,
+            isMath: false,
+          });
+        }
+      }
     }
 
-    // 4. \newcommand{\var}{val} hoặc \renewcommand{\var}{val}
-    const newcmdRegex = /\\(?:re)?newcommand\*?\s*(?:\{?\\?([a-zA-Z0-9_]+)\}?)\s*\{([^}]+)\}/gi;
+    // 4. \newcommand{\var}[N]{val} hoặc \renewcommand{\var}[N]{val} hoặc \newcommand\var{val}
+    const newcmdRegex = /\\(?:re)?newcommand\*?\s*(?:\{?\\?([a-zA-Z0-9_]+)\}?)(?:\s*\[([0-9]+)\])?\s*/gi;
     let ncMatch: RegExpExecArray | null;
     while ((ncMatch = newcmdRegex.exec(result)) !== null) {
-      candidates.push({
-        index: ncMatch.index,
-        length: ncMatch[0].length,
-        fullText: ncMatch[0],
-        varName: ncMatch[1],
-        rawVal: ncMatch[2].trim(),
-        isMath: false,
-      });
+      const braceIdx = result.indexOf("{", ncMatch.index + ncMatch[0].length - 1);
+      if (braceIdx !== -1 && braceIdx === ncMatch.index + ncMatch[0].length - 1) {
+        const bal = extractBalancedBraces(result, braceIdx);
+        if (bal) {
+          const numArgs = ncMatch[2] ? parseInt(ncMatch[2], 10) : 0;
+          candidates.push({
+            startIndex: ncMatch.index,
+            endIndex: bal.endIndex + 1,
+            varName: ncMatch[1],
+            rawVal: bal.content,
+            numArgs,
+            isMath: false,
+          });
+        }
+      }
     }
 
     if (candidates.length === 0) break;
 
-    // Chọn macro xuất hiện sớm nhất trong mã nguồn (theo thứ tự thực thi của LaTeX)
-    candidates.sort((a, b) => a.index - b.index);
+    // Chọn định nghĩa macro xuất hiện sớm nhất
+    candidates.sort((a, b) => a.startIndex - b.startIndex);
     const earliest = candidates[0];
 
-    // Đánh giá giá trị biểu thức
-    let valStr = earliest.rawVal;
-    const numVal = evaluateExpr(earliest.rawVal);
-    if (!isNaN(numVal) && (earliest.isMath || /^[+-]?[0-9.]+(?:\/[0-9.]+)?$/.test(earliest.rawVal) || /asin|acos|atan|sin|cos|tan|sqrt|\+|\-|\*|\//.test(earliest.rawVal))) {
-      valStr = numVal.toString();
+    // Xóa định nghĩa macro khỏi chuỗi
+    const beforeDef = result.substring(0, earliest.startIndex);
+    let afterDef = result.substring(earliest.endIndex);
+
+    if (earliest.numArgs === 0) {
+      // Macro không có tham số: tính toán giá trị nếu là toán
+      let valStr = earliest.rawVal;
+      const numVal = evaluateExpr(earliest.rawVal);
+      if (
+        !isNaN(numVal) &&
+        (earliest.isMath ||
+          /^[+-]?[0-9.]+(?:\/[0-9.]+)?$/.test(earliest.rawVal.trim()) ||
+          /asin|acos|atan|sin|cos|tan|sqrt|\+|\-|\*|\//.test(earliest.rawVal.trim()))
+      ) {
+        valStr = numVal.toString();
+      }
+
+      const replaceRegex = new RegExp(`\\\\${earliest.varName}(?![a-zA-Z0-9_])`, "g");
+      afterDef = afterDef.replace(replaceRegex, valStr);
+    } else {
+      // Macro có tham số (\name[N]): tìm tất cả lời gọi \name trong afterDef
+      const macroCallRegex = new RegExp(`\\\\${earliest.varName}(?![a-zA-Z0-9_])`, "g");
+      let mCall: RegExpExecArray | null;
+      let newAfterDef = "";
+      let lastIndex = 0;
+
+      while ((mCall = macroCallRegex.exec(afterDef)) !== null) {
+        const callStart = mCall.index;
+        let cursor = callStart + mCall[0].length;
+        const extractedArgs: string[] = [];
+        let validCall = true;
+
+        for (let argIdx = 0; argIdx < earliest.numArgs; argIdx++) {
+          while (cursor < afterDef.length && /\s/.test(afterDef[cursor])) cursor++;
+          if (cursor >= afterDef.length || afterDef[cursor] !== "{") {
+            validCall = false;
+            break;
+          }
+          const bal = extractBalancedBraces(afterDef, cursor);
+          if (!bal) {
+            validCall = false;
+            break;
+          }
+          extractedArgs.push(bal.content);
+          cursor = bal.endIndex + 1;
+        }
+
+        if (validCall && extractedArgs.length === earliest.numArgs) {
+          newAfterDef += afterDef.substring(lastIndex, callStart);
+          let expandedBody = earliest.rawVal;
+          for (let pIdx = 0; pIdx < extractedArgs.length; pIdx++) {
+            const paramPlaceholder = new RegExp(`#${pIdx + 1}`, "g");
+            expandedBody = expandedBody.replace(paramPlaceholder, extractedArgs[pIdx]);
+          }
+          newAfterDef += expandedBody;
+          lastIndex = cursor;
+          macroCallRegex.lastIndex = cursor;
+        }
+      }
+
+      newAfterDef += afterDef.substring(lastIndex);
+      afterDef = newAfterDef;
     }
 
-    // Xóa định nghĩa macro khỏi chuỗi
-    result = result.substring(0, earliest.index) + result.substring(earliest.index + earliest.length);
-
-    // Thay thế biến trong phần mã còn lại
-    const replaceRegex = new RegExp(`\\\\${earliest.varName}(?![a-zA-Z0-9_])`, "g");
-    result = result.replace(replaceRegex, valStr);
+    result = beforeDef + afterDef;
   }
 
   return result;
@@ -1622,6 +1761,91 @@ export function parseDrawSubpaths(
         });
         currentSubpathPts = [];
         currentPt = p2;
+      }
+      continue;
+    }
+
+    // 3.2. Kiểm tra circle / ellipse: circle (R) hoặc circle [radius=R] hoặc circle (Rx and Ry) hoặc circle {R}
+    const circleMatch = rest.match(/^circle\b/i);
+    if (circleMatch) {
+      cursor += circleMatch[0].length;
+      while (cursor < cleaned.length && /\s/.test(cleaned[cursor])) cursor++;
+
+      let radX = 1.0;
+      let radY = 1.0;
+      let foundRadius = false;
+
+      if (cleaned[cursor] === "(") {
+        const bal = extractBalancedParens(cleaned, cursor);
+        if (bal) {
+          cursor = bal.endIndex + 1;
+          const inner = bal.content.trim();
+          if (inner.includes("and")) {
+            const parts = inner.split("and").map((s) => evaluateExpr(s));
+            if (!isNaN(parts[0]) && !isNaN(parts[1])) {
+              radX = parts[0];
+              radY = parts[1];
+              foundRadius = true;
+            }
+          } else {
+            const r = evaluateExpr(inner);
+            if (!isNaN(r) && r > 0) {
+              radX = r;
+              radY = r;
+              foundRadius = true;
+            }
+          }
+        }
+      } else if (cleaned[cursor] === "{") {
+        const bal = extractBalancedBraces(cleaned, cursor);
+        if (bal) {
+          cursor = bal.endIndex + 1;
+          const r = evaluateExpr(bal.content);
+          if (!isNaN(r) && r > 0) {
+            radX = r;
+            radY = r;
+            foundRadius = true;
+          }
+        }
+      } else if (cleaned[cursor] === "[") {
+        const bal = extractBalancedBrackets(cleaned, cursor);
+        if (bal) {
+          cursor = bal.endIndex + 1;
+          const optStr = bal.content;
+          const rMatch = optStr.match(/\bradius\s*=\s*([^,\]]+)/i);
+          const rxMatch = optStr.match(/\bx\s*radius\s*=\s*([^,\]]+)/i);
+          const ryMatch = optStr.match(/\by\s*radius\s*=\s*([^,\]]+)/i);
+          if (rxMatch || ryMatch) {
+            if (rxMatch) radX = evaluateExpr(rxMatch[1]) || 1.0;
+            if (ryMatch) radY = evaluateExpr(ryMatch[1]) || radX;
+            foundRadius = true;
+          } else if (rMatch) {
+            const r = evaluateExpr(rMatch[1]);
+            if (!isNaN(r) && r > 0) {
+              radX = r;
+              radY = r;
+              foundRadius = true;
+            }
+          }
+        }
+      }
+
+      if (foundRadius && currentPt) {
+        const center = currentPt;
+        const circlePts: Point2D[] = [];
+        const numSegments = 64;
+        for (let s = 0; s < numSegments; s++) {
+          const theta = (s * 2 * Math.PI) / numSegments;
+          circlePts.push({
+            x: center.x + radX * Math.cos(theta),
+            y: center.y + radY * Math.sin(theta),
+          });
+        }
+        result.push({
+          points: circlePts,
+          isCycle: true,
+        });
+        currentSubpathPts = [];
       }
       continue;
     }
@@ -3126,26 +3350,69 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       const isDashed = combinedOpts.includes("dashed");
       const isDotted = combinedOpts.includes("dotted");
 
-      // Case A: plot coordinates { (0,0) (1,2) (2,1) }
-      const coordBlockM = cmd.match(/plot\s*(?:\[[^\]]*\])?\s*coordinates\s*\{([^}]+)\}/i);
-      if (coordBlockM) {
-        const rawPairs = Array.from(coordBlockM[1].matchAll(/\(([^)]+)\)/g));
-        const coordPts: Point2D[] = [];
-        for (const rp of rawPairs) {
-          const pt = parseCoordinateValue(`(${rp[1]})`, coordsMap);
-          if (pt) coordPts.push(pt);
+      // Case A: plot coordinates { (0,0) (1,2) (2,1) } hoặc plot[mark=*] coordinates {({120}:1)}
+      const coordsIdx = cmd.toLowerCase().indexOf("coordinates");
+      if (coordsIdx !== -1) {
+        const braceOpenIdx = cmd.indexOf("{", coordsIdx);
+        if (braceOpenIdx !== -1) {
+          const bal = extractBalancedBraces(cmd, braceOpenIdx);
+          if (bal) {
+            const rawCoordsText = bal.content;
+            const coordPts: Point2D[] = [];
+            let pCursor = 0;
+            while (pCursor < rawCoordsText.length) {
+              const parenIdx = rawCoordsText.indexOf("(", pCursor);
+              if (parenIdx === -1) break;
+              const pBal = extractBalancedParens(rawCoordsText, parenIdx);
+              if (!pBal) {
+                pCursor = parenIdx + 1;
+                continue;
+              }
+              const coordStr = pBal.content;
+              const pt = parseCoordinateValue(coordStr, coordsMap);
+              if (pt) coordPts.push(pt);
+              pCursor = pBal.endIndex + 1;
+            }
+
+            // Kiểm tra tùy chọn mark: mark=*, mark=x, mark=ball, mark=o, mark=square, mark=+, ...
+            const markMatch = combinedOpts.match(/mark\s*=\s*([^,\]\s]+)/i);
+            const hasMark = !!markMatch;
+            const markType = markMatch ? markMatch[1].trim() : "";
+
+            if (hasMark || coordPts.length === 1) {
+              coordPts.forEach((pt, ptIdx) => {
+                const dotId = `plot_mark_${nodes.length}_${ptIdx}_${Math.round(pt.x * 100)}_${Math.round(pt.y * 100)}`;
+                let fill = strokeColor;
+                let stroke = strokeColor;
+                let r = 3.8;
+                if (markType === "o") {
+                  fill = "#ffffff";
+                  stroke = strokeColor;
+                }
+                explicitDots.set(dotId, {
+                  name: dotId,
+                  x: pt.x,
+                  y: pt.y,
+                  fill,
+                  stroke,
+                  radius: r,
+                });
+              });
+            }
+
+            if (coordPts.length >= 2) {
+              paths.push({
+                type: "line",
+                points: coordPts,
+                strokeColor,
+                strokeWidth,
+                isDashed,
+                isDotted,
+              });
+            }
+            continue;
+          }
         }
-        if (coordPts.length >= 2) {
-          paths.push({
-            type: "line",
-            points: coordPts,
-            strokeColor,
-            strokeWidth,
-            isDashed,
-            isDotted,
-          });
-        }
-        continue;
       }
 
       // Case B: plot (\x, {expr}) hoặc plot (\x, expr)
