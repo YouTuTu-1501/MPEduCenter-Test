@@ -36,21 +36,27 @@ export const AuthModal: React.FC = () => {
 
   if (!showAuthModal) return null;
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-    if (!email.trim() || !password.trim()) {
+    const cleanUser = email.trim();
+    const cleanPass = password.trim();
+    if (!cleanUser || !cleanPass) {
       setErrorMessage("Vui lòng nhập đầy đủ Email / Tên đăng nhập và Mật khẩu.");
       return;
     }
 
-    const res = login(email.trim(), password.trim(), rememberMe);
-    if (res.success) {
-      setShowAuthModal(false);
-      setEmail("");
-      setPassword("");
-    } else {
-      setErrorMessage(res.message);
+    try {
+      const res = await login(cleanUser, cleanPass, rememberMe);
+      if (res.success) {
+        setShowAuthModal(false);
+        setEmail("");
+        setPassword("");
+      } else {
+        setErrorMessage(res.message);
+      }
+    } catch (err: any) {
+      setErrorMessage("Đã xảy ra sự cố kết nối máy chủ. Vui lòng thử lại.");
     }
   };
 
@@ -139,15 +145,19 @@ export const AuthModal: React.FC = () => {
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <Mail className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Email hoặc Tên đăng nhập</span>
+                  <span>Email hoặc Tên đăng nhập / Số báo danh</span>
                 </label>
                 <input
                   type="text"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Nhập email hoặc tên tài khoản được cấp..."
+                  placeholder="Email, tên đăng nhập, SBD (vd: SBD-10107) hoặc SĐT..."
                   className="w-full px-4 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  autoComplete="username"
                 />
               </div>
 
@@ -162,8 +172,12 @@ export const AuthModal: React.FC = () => {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Nhập mật khẩu của bạn..."
+                    placeholder="Nhập mật khẩu (mặc định: 123456)..."
                     className="w-full px-4 py-2.5 pr-10 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    autoComplete="current-password"
                   />
                   <button
                     type="button"

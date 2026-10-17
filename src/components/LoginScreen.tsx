@@ -33,23 +33,29 @@ export const LoginScreen: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!emailOrUsername.trim() || !password.trim()) {
+    const cleanUser = emailOrUsername.trim();
+    const cleanPass = password.trim();
+
+    if (!cleanUser || !cleanPass) {
       setErrorMessage("Vui lòng nhập đầy đủ Email / Tên đăng nhập và Mật khẩu.");
       return;
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      const res = login(emailOrUsername.trim(), password.trim(), rememberMe);
+    try {
+      const res = await login(cleanUser, cleanPass, rememberMe);
       setIsSubmitting(false);
       if (!res.success) {
         setErrorMessage(res.message);
       }
-    }, 150);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setErrorMessage("Đã xảy ra sự cố kết nối máy chủ. Vui lòng thử lại.");
+    }
   };
 
   const handleCopyFbLink = () => {
@@ -165,9 +171,13 @@ export const LoginScreen: React.FC = () => {
                       required
                       value={emailOrUsername}
                       onChange={(e) => setEmailOrUsername(e.target.value)}
-                      placeholder="Ví dụ: nam.nh@student.vn hoặc admin@edulink.vn..."
+                      placeholder="Email, tên đăng nhập, SBD (vd: SBD-10107) hoặc SĐT..."
                       className="w-full px-4 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition font-medium"
                       autoFocus
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      autoComplete="username"
                     />
                   </div>
                 </div>
@@ -193,8 +203,12 @@ export const LoginScreen: React.FC = () => {
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Nhập mật khẩu của bạn..."
+                      placeholder="Nhập mật khẩu (mặc định: 123456)..."
                       className="w-full px-4 py-2.5 pr-10 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition font-medium"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      autoComplete="current-password"
                     />
                     <button
                       type="button"

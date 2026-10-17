@@ -210,13 +210,39 @@ export const removeDeletedSubmissionId = (subId: string): void => {
 // ----------------------------------------------------
 const USERS_COLLECTION = "users";
 
+export interface SubscribeUsersOptions {
+  role?: string;
+  currentUserId?: string;
+  onError?: (error: Error) => void;
+}
+
 export const subscribeUsers = (
   callback: (users: User[]) => void,
-  onError?: (error: Error) => void
+  optionsOrOnError?: SubscribeUsersOptions | ((error: Error) => void)
 ) => {
+  const options: SubscribeUsersOptions =
+    typeof optionsOrOnError === "function" ? { onError: optionsOrOnError } : (optionsOrOnError || {});
+
   const deletedUserIds = getDeletedUserIds();
 
-  // 1. Nạp tức thì từ bộ nhớ cục bộ nếu có
+  // 1. Phân quyền truy vấn: Học sinh KHÔNG tải toàn bộ danh bạ người dùng của trường
+  if (options.role === "student") {
+    try {
+      const local = localStorage.getItem("mpeducenter_users");
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed)) {
+          const currentId = options.currentUserId;
+          const meOnly = parsed.filter((u: User) => u && (!currentId || u.id === currentId) && !deletedUserIds.has(u.id));
+          callback(meOnly.length > 0 ? meOnly : parsed.slice(0, 1));
+        }
+      }
+    } catch {}
+    // Học sinh không cần giữ listener realtime tới collection users
+    return () => {};
+  }
+
+  // 2. Nạp tức thì từ local cache cho Giáo viên / Quản trị viên
   try {
     const local = localStorage.getItem("mpeducenter_users");
     if (local) {
@@ -226,16 +252,15 @@ export const subscribeUsers = (
         callback(filtered);
       }
     } else {
-      // Chỉ dùng INITIAL_USERS nếu chưa từng có cache
       const initialFiltered = INITIAL_USERS.filter((u) => !deletedUserIds.has(u.id));
       callback(initialFiltered);
     }
   } catch {}
 
-  // Đồng thời thử nạp từ backend server nếu có
+  // 3. Ưu tiên nạp từ Server Cache Proxy (/api/users)
   try {
     fetch("/api/users")
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((serverUsers) => {
         if (Array.isArray(serverUsers) && serverUsers.length > 0) {
           const currentDeleted = getDeletedUserIds();
@@ -251,6 +276,20 @@ export const subscribeUsers = (
       .catch(() => {});
   } catch {}
 
+  // 4. Nếu Quota Firestore đã đầy trong ngày, chuyển hoàn toàn sang Server Proxy Polling (tránh ngốn quota)
+  if (isFirestoreWriteQuotaExceeded) {
+    const pollId = setInterval(() => {
+      fetch("/api/users")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0) callback(data);
+        })
+        .catch(() => {});
+    }, 60000);
+    return () => clearInterval(pollId);
+  }
+
+  // 5. Kết nối Firestore khi Quota còn hạn
   try {
     const q = query(collection(db, USERS_COLLECTION));
     return onSnapshot(
@@ -258,7 +297,6 @@ export const subscribeUsers = (
       (snapshot) => {
         const currentDeleted = getDeletedUserIds();
         if (snapshot.empty) {
-          // Khởi tạo người dùng mẫu nếu Firestore hoàn toàn trống và chưa có dữ liệu
           const local = localStorage.getItem("mpeducenter_users");
           if (!local && currentDeleted.size === 0) {
             seedInitialUsers().then(() => {
@@ -270,7 +308,6 @@ export const subscribeUsers = (
           return;
         }
 
-        // Đọc trực tiếp từ Firestore Snapshot, TUYỆT ĐỐI KHÔNG tự động chèn lại INITIAL_USERS
         const userMap = new Map<string, User>();
         snapshot.forEach((docSnap) => {
           const u = docSnap.data() as User;
@@ -288,10 +325,10 @@ export const subscribeUsers = (
       (err) => {
         handleFirestoreWriteError(err, "subscribeUsers");
         console.warn("Firestore subscribeUsers fallback to localStorage:", err);
-        if (onError) onError(err);
+        if (options.onError) options.onError(err);
       }
     );
-  } catch (error) {
+  } catch (error: any) {
     handleFirestoreWriteError(error, "subscribeUsers init");
     console.warn("Firestore error:", error);
     return () => {};
@@ -415,13 +452,21 @@ export const seedInitialUsers = async (): Promise<void> => {
 // ----------------------------------------------------
 const EXAMS_COLLECTION = "exams";
 
+export interface SubscribeExamsOptions {
+  role?: string;
+  onError?: (error: Error) => void;
+}
+
 export const subscribeExams = (
   callback: (exams: Exam[]) => void,
-  onError?: (error: Error) => void
+  optionsOrOnError?: SubscribeExamsOptions | ((error: Error) => void)
 ) => {
+  const options: SubscribeExamsOptions =
+    typeof optionsOrOnError === "function" ? { onError: optionsOrOnError } : (optionsOrOnError || {});
+
   const deletedExamIds = getDeletedExamIds();
 
-  // Nạp tức thì từ local cache nếu có
+  // 1. Nạp tức thì từ local cache nếu có
   try {
     const local = localStorage.getItem("edutest_exams");
     if (local) {
@@ -429,20 +474,14 @@ export const subscribeExams = (
       if (Array.isArray(parsed)) {
         const filtered = parsed.filter((e: Exam) => e && e.id && !deletedExamIds.has(e.id));
         callback(filtered);
-      } else {
-        callback([]);
       }
-    } else {
-      callback([]);
     }
-  } catch {
-    callback([]);
-  }
+  } catch {}
 
-  // Đồng thời thử nạp từ backend server nếu có
+  // 2. Ưu tiên nạp từ Server Cache Proxy (/api/exams)
   try {
     fetch("/api/exams")
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((serverExams) => {
         if (Array.isArray(serverExams) && serverExams.length > 0) {
           const currentDeleted = getDeletedExamIds();
@@ -458,6 +497,34 @@ export const subscribeExams = (
       .catch(() => {});
   } catch {}
 
+  // 3. Phân quyền truy vấn: Học sinh không cần giữ listener realtime liên tục tới collection exams
+  // Chỉ cần nạp danh sách đề thi (đã nạp từ Server Cache & LocalStorage) và cập nhật qua Server Cache
+  if (options.role === "student") {
+    const pollId = setInterval(() => {
+      fetch("/api/exams")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0) callback(data);
+        })
+        .catch(() => {});
+    }, 120000);
+    return () => clearInterval(pollId);
+  }
+
+  // 4. Nếu Quota Firestore đã đầy trong ngày, chuyển sang Server Proxy Polling (cho Giáo viên / Admin)
+  if (isFirestoreWriteQuotaExceeded) {
+    const pollId = setInterval(() => {
+      fetch("/api/exams")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0) callback(data);
+        })
+        .catch(() => {});
+    }, 30000);
+    return () => clearInterval(pollId);
+  }
+
+  // 5. Kết nối Firestore khi Quota còn hạn
   try {
     const q = query(collection(db, EXAMS_COLLECTION));
     return onSnapshot(
@@ -487,11 +554,11 @@ export const subscribeExams = (
       },
       (err) => {
         handleFirestoreWriteError(err, "subscribeExams");
-        console.warn("Firestore subscribeExams fallback to local:", err);
-        if (onError) onError(err);
+        console.warn("Firestore subscribeExams fallback to Server Proxy / local:", err);
+        if (options.onError) options.onError(err);
       }
     );
-  } catch (error) {
+  } catch (error: any) {
     handleFirestoreWriteError(error, "subscribeExams init");
     console.warn("Firestore subscribeExams error:", error);
     return () => {};
@@ -1147,57 +1214,98 @@ export const syncUserToSubmissions = async (user: User): Promise<void> => {
   }
 };
 
+export interface SubscribeSubmissionsOptions {
+  role?: string;
+  studentId?: string;
+  examId?: string;
+  onError?: (error: Error) => void;
+}
+
 export const subscribeSubmissions = (
   callback: (subs: StudentSubmission[]) => void,
-  onError?: (error: Error) => void
+  optionsOrOnError?: SubscribeSubmissionsOptions | ((error: Error) => void)
 ) => {
-  // 1. Nạp từ LocalStorage trước để giao diện hiển thị ngay lập tức
-  const initialLocal = getLocalSubmissions();
+  const options: SubscribeSubmissionsOptions =
+    typeof optionsOrOnError === "function" ? { onError: optionsOrOnError } : (optionsOrOnError || {});
+
+  const currentDeleted = getDeletedSubmissionIds();
+  const currentDeletedUsers = getDeletedUserIds();
+
+  // 1. Phân quyền truy vấn: Học sinh CHỈ nạp bài nộp của chính mình!
+  const isStudentScope = options.role === "student" || !!options.studentId;
+  const targetStudentId = options.studentId;
+
+  const filterForStudent = (list: StudentSubmission[]) => {
+    if (!isStudentScope || !targetStudentId) return list;
+    return list.filter(
+      (s) =>
+        s &&
+        (s.studentId === targetStudentId ||
+          (s.studentEmail && s.studentEmail.toLowerCase() === targetStudentId.toLowerCase()))
+    );
+  };
+
+  // 2. Nạp từ LocalStorage trước để giao diện hiển thị ngay lập tức (đã lọc nếu là học sinh)
+  const initialLocal = filterForStudent(getLocalSubmissions());
   callback(initialLocal);
 
-  // Đồng thời thử phục hồi từ backend server nếu có (xử lý an toàn khi chạy trên static hosting như GitHub Pages)
-  try {
-    fetch("/api/submissions")
-      .then((res) => {
-        if (!res.ok) return null;
-        const ct = res.headers.get("content-type");
-        if (ct && ct.includes("application/json")) {
-          return res.json();
-        }
-        return null;
-      })
+  // 3. Ưu tiên nạp từ Server Cache Proxy qua API
+  const fetchUrl = targetStudentId
+    ? `/api/submissions?studentId=${encodeURIComponent(targetStudentId)}`
+    : "/api/submissions";
+
+  const fetchFromServer = () => {
+    fetch(fetchUrl)
+      .then((res) => (res.ok ? res.json() : null))
       .then((serverSubs) => {
-        if (Array.isArray(serverSubs) && serverSubs.length > 0) {
+        if (Array.isArray(serverSubs)) {
           const currentLocal = getLocalSubmissions();
           const merged = new Map<string, StudentSubmission>();
-          initialSampleSubmissions.forEach((s) => {
-            if (s && s.id) merged.set(s.id, s);
+
+          currentLocal.forEach((s) => {
+            if (s && s.id && !currentDeleted.has(s.id)) merged.set(s.id, s);
           });
           serverSubs.forEach((s: any) => {
-            if (s && s.id) merged.set(s.id, s);
+            if (s && s.id && !currentDeleted.has(s.id)) merged.set(s.id, s);
           });
-          currentLocal.forEach((s) => {
-            if (s && s.id) merged.set(s.id, s);
-          });
+
           const combined = Array.from(merged.values()).sort(
             (a, b) => new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime()
           );
+
           try {
             localStorage.setItem("edutest_submissions", JSON.stringify(combined));
           } catch {}
-          callback(combined);
+
+          callback(filterForStudent(combined));
         }
       })
       .catch(() => {});
-  } catch {}
+  };
 
+  fetchFromServer();
+
+  // 4. Nếu là học sinh: TUYỆT ĐỐI KHÔNG mở onSnapshot toàn bộ collection submissions của trường!
+  // Đổi sang polling nhẹ mỗi 30s qua Server Proxy để tiết kiệm 100% quota document reads!
+  if (isStudentScope) {
+    const pollId = setInterval(fetchFromServer, 30000);
+    return () => clearInterval(pollId);
+  }
+
+  // 5. Nếu là Giáo viên / Quản trị viên nhưng Quota Firestore đã đầy:
+  if (isFirestoreWriteQuotaExceeded) {
+    const pollId = setInterval(fetchFromServer, 15000);
+    return () => clearInterval(pollId);
+  }
+
+  // 6. Nếu Quota Firestore còn hạn: Giáo viên/Admin mới kết nối Firestore onSnapshot
   try {
     const q = query(collection(db, SUBMISSIONS_COLLECTION));
     return onSnapshot(
       q,
       (snapshot) => {
-        const currentDeleted = getDeletedSubmissionIds();
-        const currentDeletedUsers = getDeletedUserIds();
+        const deletedSubs = getDeletedSubmissionIds();
+        const deletedUsers = getDeletedUserIds();
 
         const firestoreSubs: StudentSubmission[] = [];
         snapshot.forEach((docSnap) => {
@@ -1205,47 +1313,30 @@ export const subscribeSubmissions = (
           if (
             sub &&
             sub.id &&
-            !currentDeleted.has(sub.id) &&
-            (!sub.studentId || !currentDeletedUsers.has(sub.studentId))
+            !deletedSubs.has(sub.id) &&
+            (!sub.studentId || !deletedUsers.has(sub.studentId))
           ) {
             firestoreSubs.push(sub);
           }
         });
 
-        // Hợp nhất dữ liệu Firestore với Sample Submissions và LocalStorage
         const localSubs = getLocalSubmissions();
         const mergedMap = new Map<string, StudentSubmission>();
 
-        // 1. Nạp từ initialSampleSubmissions làm nền tảng
         initialSampleSubmissions.forEach((s) => {
-          if (s && s.id && !currentDeleted.has(s.id) && (!s.studentId || !currentDeletedUsers.has(s.studentId))) {
-            mergedMap.set(s.id, s);
-          }
+          if (s && s.id && !deletedSubs.has(s.id)) mergedMap.set(s.id, s);
         });
-
-        // 2. Ghi đè bằng LocalStorage
         localSubs.forEach((s) => {
-          if (s && s.id && !currentDeleted.has(s.id) && (!s.studentId || !currentDeletedUsers.has(s.studentId))) {
-            mergedMap.set(s.id, s);
-          }
+          if (s && s.id && !deletedSubs.has(s.id)) mergedMap.set(s.id, s);
         });
-
-        // 3. Ghi đè bằng dữ liệu trực tiếp từ Firestore (nguồn chính xác nhất)
         firestoreSubs.forEach((s) => {
-          if (s && s.id && !currentDeleted.has(s.id) && (!s.studentId || !currentDeletedUsers.has(s.studentId))) {
-            mergedMap.set(s.id, s);
-          }
+          if (s && s.id && !deletedSubs.has(s.id)) mergedMap.set(s.id, s);
         });
 
-        const combinedSubs = Array.from(mergedMap.values());
-
-        // Sắp xếp bài nộp mới nhất lên đầu (theo submittedAt)
-        combinedSubs.sort(
-          (a, b) =>
-            new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime()
+        const combinedSubs = Array.from(mergedMap.values()).sort(
+          (a, b) => new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime()
         );
 
-        // Lưu bền vững vào LocalStorage
         try {
           localStorage.setItem("edutest_submissions", JSON.stringify(combinedSubs));
         } catch {}
@@ -1254,13 +1345,13 @@ export const subscribeSubmissions = (
       },
       (err) => {
         handleFirestoreWriteError(err, "subscribeSubmissions");
-        console.warn("Firestore subscribeSubmissions fallback to local:", err);
+        console.warn("Firestore subscribeSubmissions fallback to Server Proxy / local:", err);
         const fallback = getLocalSubmissions();
         callback(fallback);
-        if (onError) onError(err);
+        if (options.onError) options.onError(err);
       }
     );
-  } catch (error) {
+  } catch (error: any) {
     handleFirestoreWriteError(error, "subscribeSubmissions init");
     console.warn("Firestore subscribeSubmissions error:", error);
     const fallback = getLocalSubmissions();

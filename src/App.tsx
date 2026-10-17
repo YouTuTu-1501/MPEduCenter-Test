@@ -185,38 +185,48 @@ function MainApp({ currentUser }: { currentUser: User }) {
     } else if (isTeacher && (activeView === "admin" || activeView === "student_portal")) {
       setActiveView("bank");
     }
-  }, [currentUser.role]);
+  }, [currentUser?.role, isStudent, isTeacher]);
 
-  // Đồng bộ Ngân hàng đề thi và Kết quả thi từ Firestore theo thời gian thực
+  // Đồng bộ Ngân hàng đề thi và Kết quả thi theo vai trò (RBAC Data Scoping) và Server Proxy Cache
   useEffect(() => {
-    // 1. Subscribe Đề thi
-    const unsubExams = subscribeExams((firestoreExams) => {
-      if (firestoreExams) {
-        const deleted = getDeletedExamIds();
-        const filtered = firestoreExams.filter((e) => e && e.id && !deleted.has(e.id));
-        setExams(filtered);
-        setSelectedExam((current) => {
-          if (!current) return filtered[0] || null;
-          const match = filtered.find((e) => e.id === current?.id);
-          return match || filtered[0] || null;
-        });
-      }
-    });
+    // 1. Subscribe Đề thi (Học sinh dùng Server Cache, Giáo viên có thể sync realtime)
+    const unsubExams = subscribeExams(
+      (loadedExams) => {
+        if (loadedExams) {
+          const deleted = getDeletedExamIds();
+          const filtered = loadedExams.filter((e) => e && e.id && !deleted.has(e.id));
+          setExams(filtered);
+          setSelectedExam((current) => {
+            if (!current) return filtered[0] || null;
+            const match = filtered.find((e) => e.id === current?.id);
+            return match || filtered[0] || null;
+          });
+        }
+      },
+      { role: currentUser?.role }
+    );
 
-    // 2. Subscribe Bài nộp
-    const unsubSubs = subscribeSubmissions((firestoreSubs) => {
-      if (firestoreSubs) {
-        const deletedSubs = getDeletedSubmissionIds();
-        const filtered = firestoreSubs.filter((s) => s && s.id && !deletedSubs.has(s.id));
-        setSubmissions(filtered);
+    // 2. Subscribe Bài nộp theo phạm vi vai trò:
+    // Học sinh CHỈ tải bài nộp của chính mình! Giáo viên/Admin tải toàn bộ trường.
+    const unsubSubs = subscribeSubmissions(
+      (loadedSubs) => {
+        if (loadedSubs) {
+          const deletedSubs = getDeletedSubmissionIds();
+          const filtered = loadedSubs.filter((s) => s && s.id && !deletedSubs.has(s.id));
+          setSubmissions(filtered);
+        }
+      },
+      {
+        role: currentUser?.role,
+        studentId: isStudent ? currentUser?.id : undefined,
       }
-    });
+    );
 
     return () => {
       unsubExams();
       unsubSubs();
     };
-  }, []);
+  }, [currentUser?.id, currentUser?.role, isStudent]);
 
   // Lọc danh sách bài nộp hợp lệ: bảo toàn 100% bài nộp của học sinh
   const validSubmissions = React.useMemo(() => {

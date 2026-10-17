@@ -36,6 +36,7 @@ interface RegisterData {
 interface AuthSessionData {
   userId: string;
   email?: string;
+  role?: UserRole;
   remember: boolean;
   loginAt: number;
 }
@@ -54,8 +55,8 @@ interface AuthContextType {
   setUserRole: (userId: string, newRole: UserRole) => void;
   updateUserPermissions: (userId: string, permissions: PermissionKey[]) => void;
   toggleUserPermission: (userId: string, perm: PermissionKey) => void;
-  login: (emailOrUsername: string, password?: string, rememberMe?: boolean) => LoginResult;
-  loginAsDemo: (demoRole: "admin" | "teacher" | "student", rememberMe?: boolean) => LoginResult;
+  login: (emailOrUsername: string, password?: string, rememberMe?: boolean) => Promise<LoginResult>;
+  loginAsDemo: (demoRole: "admin" | "teacher" | "student", rememberMe?: boolean) => Promise<LoginResult>;
   register: (data: RegisterData, rememberMe?: boolean) => LoginResult;
   logout: () => void;
   addUser: (userData: Omit<User, "id" | "createdAt">) => User;
@@ -152,55 +153,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
-  // Đồng bộ Firestore theo thời gian thực
-  useEffect(() => {
-    const unsubscribe = subscribeUsers((firestoreUsers) => {
-      if (firestoreUsers) {
-        const deletedUserIds = getDeletedUserIds();
-        let validUsers = firestoreUsers.filter(
-          (u) => u && u.id && !deletedUserIds.has(u.id)
-        );
-
-        // Đảm bảo tài khoản Quản trị viên youtu1501@gmail.com luôn hiện diện
-        const adminExists = validUsers.some(
-          (u) => u.email.toLowerCase() === "youtu1501@gmail.com" || u.role === "admin"
-        );
-        if (!adminExists) {
-          const rootAdmin = INITIAL_USERS[0];
-          validUsers = [rootAdmin, ...validUsers];
-        }
-
-        // Tự động cấp SBD cố định an toàn cho bất kỳ tài khoản nào chưa có (lưu local, không gọi ghi lặp lên Firestore)
-        const completeUsers = validUsers.map((u, idx) => {
-          if (!u.candidateNumber) {
-            return {
-              ...u,
-              candidateNumber:
-                u.id === "usr_admin_01"
-                  ? "SBD-00001"
-                  : u.id === "usr_teacher_01"
-                  ? "SBD-00002"
-                  : u.id === "usr_teacher_02"
-                  ? "SBD-00003"
-                  : generateCandidateNumber(validUsers, idx),
-            };
-          }
-          return u;
-        });
-
-        setUsers(completeUsers);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Lưu cache users vào LocalStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem("mpeducenter_users", JSON.stringify(users));
-    } catch {}
-  }, [users]);
-
   // Tìm User tương ứng với currentUserId
   const currentUser: User | null = currentUserId
     ? users.find((u) => u.id === currentUserId) || null
@@ -210,6 +162,68 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const isAdmin = currentUser?.role === "admin";
   const isTeacher = currentUser?.role === "teacher";
   const isStudent = currentUser?.role === "student";
+
+  // Đồng bộ Firestore theo thời gian thực (được tối ưu hóa theo vai trò)
+  useEffect(() => {
+    const session = getSavedSession();
+    const activeRole = currentUser?.role || session?.role;
+    const unsubscribe = subscribeUsers(
+      (firestoreUsers) => {
+        if (firestoreUsers) {
+          const deletedUserIds = getDeletedUserIds();
+          let validUsers = firestoreUsers.filter(
+            (u) => u && u.id && !deletedUserIds.has(u.id)
+          );
+
+          // Đảm bảo tài khoản Quản trị viên youtu1501@gmail.com luôn hiện diện
+          const adminExists = validUsers.some(
+            (u) => u.email.toLowerCase() === "youtu1501@gmail.com" || u.role === "admin"
+          );
+          if (!adminExists && activeRole !== "student") {
+            const rootAdmin = INITIAL_USERS[0];
+            validUsers = [rootAdmin, ...validUsers];
+          }
+
+          // Tự động cấp SBD cố định an toàn cho bất kỳ tài khoản nào chưa có (lưu local, không gọi ghi lặp lên Firestore)
+          const completeUsers = validUsers.map((u, idx) => {
+            if (!u.candidateNumber) {
+              return {
+                ...u,
+                candidateNumber:
+                  u.id === "usr_admin_01"
+                    ? "SBD-00001"
+                    : u.id === "usr_teacher_01"
+                    ? "SBD-00002"
+                    : u.id === "usr_teacher_02"
+                    ? "SBD-00003"
+                    : generateCandidateNumber(validUsers, idx),
+              };
+            }
+            return u;
+          });
+
+          setUsers(completeUsers);
+        }
+      },
+      { role: activeRole, currentUserId: currentUserId || session?.userId }
+    );
+    return () => unsubscribe();
+  }, [currentUserId, currentUser?.role]);
+
+  // Lưu cache users vào LocalStorage & Đồng bộ lên backend server (chỉ dành cho giáo viên/quản trị viên)
+  useEffect(() => {
+    try {
+      localStorage.setItem("mpeducenter_users", JSON.stringify(users));
+    } catch {}
+
+    if (users && users.length > 0 && currentUser?.role !== "student") {
+      fetch("/api/users/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(users),
+      }).catch(() => {});
+    }
+  }, [users, currentUser?.role]);
 
   const getUserPermissions = (user: User): PermissionKey[] => {
     const defaultPerms = ROLE_PERMISSIONS[user.role] || [];
@@ -302,12 +316,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // Đăng nhập có kiểm tra xác thực và hỗ trợ "Ghi nhớ đăng nhập" (Remember Me)
-  const login = (
+  const login = async (
     emailOrUsername: string,
     passwordInput: string = "061091",
     rememberMe: boolean = true
-  ): LoginResult => {
-    const cleanInput = emailOrUsername.trim().toLowerCase();
+  ): Promise<LoginResult> => {
+    // Chuẩn hóa input đặc biệt cho iOS / iPhone (loại bỏ non-breaking space \u00A0, zero-width, smart hyphens, smart quotes)
+    const cleanInput = (emailOrUsername || "")
+      .replace(/[\u00A0\u1680\u2000-\u200B\u202F\u205F\u3000\uFEFF]/g, " ")
+      .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")
+      .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+      .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+      .trim()
+      .toLowerCase();
+
+    const cleanNoDash = cleanInput.replace(/[^a-z0-9]/g, "");
+    const cleanNoTone = cleanInput
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/Đ/g, "D");
     
     // Đặc biệt: Nếu đăng nhập tài khoản Quản trị viên chính (youtu1501@gmail.com / youtu1501 / admin)
     const isMasterAdminLogin =
@@ -316,14 +344,45 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       cleanInput === "admin" ||
       cleanInput === "admin@edulink.vn";
 
-    // Tìm theo Email, Username (phần trước @), Tên, hoặc ID
+    // Tìm theo Email, Username (phần trước @), SBD/Mã học sinh, Số điện thoại, Tên, hoặc ID
     let found = users.find((u) => {
-      const emailMatch = u.email.toLowerCase() === cleanInput;
-      const usernamePart = u.email.split("@")[0].toLowerCase();
-      const usernameMatch = usernamePart === cleanInput;
-      const idMatch = u.id.toLowerCase() === cleanInput;
-      const nameMatch = u.name.toLowerCase() === cleanInput;
-      return emailMatch || usernameMatch || idMatch || nameMatch;
+      if (!u) return false;
+      const email = (u.email || "").toLowerCase().trim();
+      if (email === cleanInput) return true;
+      if (email.split("@")[0] === cleanInput) return true;
+      if ((u.id || "").toLowerCase() === cleanInput) return true;
+
+      // Khớp Số báo danh (SBD) / Mã học sinh (e.g. SBD-10107, sbd10107, 10107)
+      if (u.candidateNumber) {
+        const sbd = u.candidateNumber.toLowerCase().trim();
+        if (sbd === cleanInput) return true;
+        const sbdNoDash = sbd.replace(/[^a-z0-9]/g, "");
+        if (sbdNoDash && sbdNoDash === cleanNoDash) return true;
+        const digitsOnlySbd = sbd.replace(/[^0-9]/g, "");
+        const digitsOnlyQuery = cleanInput.replace(/[^0-9]/g, "");
+        if (digitsOnlyQuery.length >= 4 && digitsOnlySbd === digitsOnlyQuery) return true;
+      }
+
+      // Khớp Số điện thoại
+      if (u.phone) {
+        const phoneDigits = u.phone.replace(/[^0-9]/g, "");
+        const queryDigits = cleanInput.replace(/[^0-9]/g, "");
+        if (queryDigits.length >= 9 && phoneDigits === queryDigits) return true;
+      }
+
+      // Khớp Tên học sinh (có dấu hoặc không dấu)
+      if (u.name) {
+        const name = u.name.toLowerCase().trim();
+        if (name === cleanInput) return true;
+        const nameNoTone = name
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/đ/g, "d")
+          .replace(/Đ/g, "D");
+        if (nameNoTone === cleanNoTone) return true;
+      }
+
+      return false;
     });
 
     // Nếu không tìm thấy nhưng là master admin (do chưa đồng bộ kịp), tạo ngay đối tượng admin
@@ -331,10 +390,42 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       found = INITIAL_USERS[0];
     }
 
+    // Nếu vẫn chưa tìm thấy trong bộ nhớ cục bộ (do Firestore quá tải hoặc lần đầu mở trên iPhone), thử tra cứu trực tiếp từ Server Express
+    if (!found) {
+      try {
+        const checkRes = await fetch("/api/users/login-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: emailOrUsername, password: passwordInput }),
+        });
+        if (checkRes.ok) {
+          const data = await checkRes.json();
+          if (data.success && data.user) {
+            found = data.user;
+            setUsers((prev) => {
+              if (prev.some((u) => u.id === data.user.id)) return prev;
+              const next = [data.user, ...prev];
+              try {
+                localStorage.setItem("mpeducenter_users", JSON.stringify(next));
+              } catch {}
+              return next;
+            });
+          } else if (data.reason === "wrong_password" || data.reason === "locked") {
+            return {
+              success: false,
+              message: data.message,
+            };
+          }
+        }
+      } catch (e) {
+        console.warn("Lỗi tra cứu user từ server:", e);
+      }
+    }
+
     if (!found) {
       return {
         success: false,
-        message: `Không tìm thấy tài khoản "${emailOrUsername}". Vui lòng kiểm tra lại Email / Tên đăng nhập hoặc liên hệ Thầy Phương để nhận tài khoản.`,
+        message: `Không tìm thấy tài khoản "${emailOrUsername}". Vui lòng kiểm tra lại Email / Tên đăng nhập / Số báo danh hoặc liên hệ Thầy Phương để nhận tài khoản.`,
       };
     }
 
@@ -345,13 +436,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    // Kiểm tra mật khẩu (hỗ trợ cả 061091 và mật khẩu đã lưu)
+    // Kiểm tra mật khẩu (hỗ trợ cả mật khẩu đã lưu và mặc định)
     const validPassword = found.password || (isMasterAdminLogin ? "061091" : "123456");
-    const inputPass = passwordInput.trim();
+    const cleanPass = passwordInput.replace(/[\u00A0\s]/g, "").trim();
     const isPasswordValid =
-      inputPass === validPassword ||
-      (isMasterAdminLogin && (inputPass === "061091" || inputPass === "123456")) ||
-      inputPass === "123456";
+      cleanPass === validPassword ||
+      passwordInput.trim() === validPassword ||
+      (isMasterAdminLogin && (cleanPass === "061091" || cleanPass === "123456")) ||
+      cleanPass === "123456" ||
+      cleanPass === (found.password || "123456");
 
     if (!isPasswordValid) {
       return {
@@ -412,10 +505,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // Đăng nhập nhanh tài khoản mẫu (Demo Login)
-  const loginAsDemo = (
+  const loginAsDemo = async (
     demoRole: "admin" | "teacher" | "student",
     rememberMe: boolean = true
-  ): LoginResult => {
+  ): Promise<LoginResult> => {
     let targetEmail = "youtu1501@gmail.com";
     let pass = "061091";
     if (demoRole === "admin") {
@@ -426,7 +519,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       pass = "123456";
     }
 
-    return login(targetEmail, pass, rememberMe);
+    return await login(targetEmail, pass, rememberMe);
   };
 
   // Đăng ký tài khoản học sinh mới

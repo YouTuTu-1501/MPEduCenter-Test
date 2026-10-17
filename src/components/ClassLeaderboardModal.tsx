@@ -50,12 +50,44 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
   isOpen,
   onClose,
   exams,
-  submissions,
-  users = [],
+  submissions: initialSubmissions,
+  users: initialUsers = [],
   defaultClassFilter = "all",
   defaultExamId = "all",
   onViewStudentHistory,
 }) => {
+  const [serverSubmissions, setServerSubmissions] = useState<StudentSubmission[]>([]);
+  const [serverUsers, setServerUsers] = useState<User[]>([]);
+  const [isLoadingServerData, setIsLoadingServerData] = useState<boolean>(false);
+
+  // Khi modal Bảng xếp hạng mở ra, nếu dữ liệu truyền vào chỉ có bài nộp của 1 học sinh
+  // (do cơ chế phân quyền bảo mật & tiết kiệm quota của học sinh), tự động nạp từ Server Cache Proxy (0 read Firestore)
+  useEffect(() => {
+    if (isOpen) {
+      if (initialSubmissions.length <= 1 || initialUsers.length <= 1) {
+        setIsLoadingServerData(true);
+        Promise.all([
+          fetch("/api/submissions").then((res) => (res.ok ? res.json() : [])),
+          fetch("/api/users").then((res) => (res.ok ? res.json() : [])),
+        ])
+          .then(([subs, usrs]) => {
+            if (Array.isArray(subs) && subs.length > 0) setServerSubmissions(subs);
+            if (Array.isArray(usrs) && usrs.length > 0) setServerUsers(usrs);
+          })
+          .catch(() => {})
+          .finally(() => setIsLoadingServerData(false));
+      }
+    }
+  }, [isOpen, initialSubmissions.length, initialUsers.length]);
+
+  const submissions = useMemo(() => {
+    return serverSubmissions.length > initialSubmissions.length ? serverSubmissions : initialSubmissions;
+  }, [serverSubmissions, initialSubmissions]);
+
+  const users = useMemo(() => {
+    return serverUsers.length > initialUsers.length ? serverUsers : initialUsers;
+  }, [serverUsers, initialUsers]);
+
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const [selectedClass, setSelectedClass] = useState<string>(defaultClassFilter);
   const [selectedExamId, setSelectedExamId] = useState<string>(defaultExamId);
