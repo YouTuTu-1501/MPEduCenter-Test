@@ -120,3 +120,118 @@ export function extractGradeFromClass(cls?: string): string | null {
   if (c.startsWith("6")) return "Lớp 6";
   return null;
 }
+
+/**
+ * So khớp lớp học chuẩn xác, logic và tự nhiên:
+ * - filterClass = "all" hoặc để trống -> hiển thị tất cả
+ * - filterClass là toàn khối (ví dụ: "Lớp 12", "Khối 12", "12") -> lọc đúng học sinh khối 12 (12A1, 12A2, 12A1-HV...)
+ * - filterClass là một lớp cụ thể (ví dụ: "12A1-HV", "Lớp 12A1-HV") -> CHỈ lọc học sinh lớp đó, không nhận nhầm lớp khác!
+ */
+export function matchClassFilter(
+  studentClass: string | undefined | null,
+  filterClass: string | undefined | null
+): boolean {
+  if (!filterClass || filterClass === "all" || filterClass === "Tất cả các lớp") {
+    return true;
+  }
+  if (!studentClass || !studentClass.trim()) {
+    return false;
+  }
+
+  const s = studentClass.trim().toLowerCase();
+  const f = filterClass.trim().toLowerCase();
+
+  // 1. So khớp tuyệt đối trực tiếp
+  if (s === f) return true;
+
+  // Chuẩn hóa loại bỏ tiền tố "lớp", "khối" và khoảng trắng dư thừa
+  const sNorm = s.replace(/^(?:lớp|khối)\s*/i, "").trim();
+  const fNorm = f.replace(/^(?:lớp|khối)\s*/i, "").trim();
+
+  // 2. So khớp sau khi chuẩn hóa tiền tố (ví dụ "Lớp 12A1-HV" khớp với "12A1-HV")
+  if (sNorm === fNorm) return true;
+
+  // 3. Kiểm tra xem bộ lọc có phải là lọc TOÀN KHỐI (chỉ gồm chữ số: "12", "11", "10", "9", "8", "7", "6") hay không:
+  const isEntireGradeFilter = /^\d+$/.test(fNorm);
+  if (isEntireGradeFilter) {
+    const sGradeMatch = sNorm.match(/^\d+/);
+    if (sGradeMatch && sGradeMatch[0] === fNorm) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * So khớp đề thi với bộ lọc Lớp / Khối một cách logic, chuẩn xác và đơn giản:
+ * - filterClass = "all" hoặc "Tất cả các lớp" -> Khớp tất cả
+ * - filterClass là toàn khối ("12", "Lớp 12", "Khối 12"):
+ *   -> Khớp mọi đề thuộc khối 12 (kể cả đề chung toàn khối và đề chỉ định riêng cho 12A1, 12A2...)
+ * - filterClass là một lớp cụ thể ("12A1", "12A1-HV"):
+ *   -> Khớp các đề chỉ định cụ thể cho lớp đó ("12A1")
+ *   -> Khớp các đề chung của khối đó ("Tất cả các lớp" hoặc không giới hạn lớp, thuộc Lớp 12)
+ *   -> TUYỆT ĐỐI KHÔNG khớp với các đề chỉ định riêng cho lớp khác (ví dụ đề dành cho "12A2" sẽ không hiển thị khi chọn lọc "12A1")
+ */
+export function matchExamClassFilter(
+  exam: { grade?: string; targetClass?: string },
+  filterClass: string | undefined | null
+): boolean {
+  if (!filterClass || filterClass === "all" || filterClass === "Tất cả các lớp") {
+    return true;
+  }
+
+  const fNorm = filterClass.trim().toLowerCase().replace(/^(?:lớp|khối)\s*/i, "");
+  const isEntireGradeFilter = /^\d+$/.test(fNorm);
+
+  const examGradeNum = exam.grade ? exam.grade.match(/\d+/)?.[0] : null;
+  const examTargetClassNorm = exam.targetClass
+    ? exam.targetClass.trim().toLowerCase().replace(/^(?:lớp|khối)\s*/i, "")
+    : null;
+
+  // 1. Khi chọn lọc Toàn Khối (ví dụ: "12", "Lớp 12", "Khối 12"):
+  if (isEntireGradeFilter) {
+    if (examGradeNum === fNorm) return true;
+    if (examTargetClassNorm && examTargetClassNorm.startsWith(fNorm)) return true;
+    return false;
+  }
+
+  // 2. Khi chọn lọc một Lớp cụ thể (ví dụ: "12A1", "12A1-HV"):
+  // Nếu đề thi có chỉ định đích danh một lớp cụ thể (không phải "Tất cả các lớp"):
+  if (
+    examTargetClassNorm &&
+    examTargetClassNorm !== "tat ca cac lop" &&
+    examTargetClassNorm !== "all" &&
+    examTargetClassNorm !== ""
+  ) {
+    return examTargetClassNorm === fNorm;
+  }
+
+  // Nếu đề mở chung cho toàn khối ("Tất cả các lớp"):
+  const filterGradeNum = fNorm.match(/^\d+/)?.[0];
+  if (filterGradeNum && examGradeNum && filterGradeNum === examGradeNum) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Tìm kiếm đề thi thông minh: hỗ trợ tìm theo Tên đề, Mã đề (chuẩn & gạch nối), Chương, Khối lớp, Lớp áp dụng, Môn học, Tác giả
+ * Tự động bỏ dấu tiếng Việt, tìm theo từng từ khóa (token-based search)
+ */
+export function matchExamSearch(exam: any, query: string): boolean {
+  if (!query || !query.trim()) return true;
+  return matchSearchQuery(
+    query,
+    exam.title,
+    exam.code,
+    exam.chapter,
+    exam.grade,
+    exam.targetClass,
+    exam.subject,
+    exam.author,
+    exam.description
+  );
+}
+

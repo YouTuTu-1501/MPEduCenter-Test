@@ -7,6 +7,7 @@ import {
   SCORE_TIERS,
   ScoreTierKey,
   isScoreInTier,
+  matchClassFilter,
 } from "../utils/filterUtils";
 import { useFilter } from "../context/FilterContext";
 import { getDeletedUserIds } from "../services/firestoreService";
@@ -398,29 +399,10 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
     });
   }, [syncedSubmissions, isAllExamsMode, activeExam, exam]);
 
-  // 2. Lọc theo Lớp được Admin/Giáo viên chọn (hỗ trợ linh hoạt "6", "Lớp 6", "Khối 6", "6A", v.v.)
-  const isClassMatchingFilter = (subClass: string | undefined, filterClass: string): boolean => {
-    if (!filterClass || filterClass === "all") return true;
-    if (!subClass) return true;
-    const s = subClass.trim().toLowerCase();
-    const f = filterClass.trim().toLowerCase();
-    if (s === f) return true;
-
-    const actMatch = f.match(/\d+/);
-    const subMatch = s.match(/\d+/);
-    if (actMatch && subMatch && actMatch[0] === subMatch[0]) {
-      const isFilterEntireGrade = f.startsWith("lớp") || f.startsWith("khối") || /^\d+$/.test(f);
-      if (isFilterEntireGrade) return true;
-      const sClean = s.replace(/^(lớp|khối)\s*/, "");
-      const fClean = f.replace(/^(lớp|khối)\s*/, "");
-      if (sClean === fClean) return true;
-    }
-    return false;
-  };
-
+  // 2. Lọc theo Lớp được Admin/Giáo viên chọn chuẩn xác và logic
   const filteredSubmissionsByClass = useMemo(() => {
-    if (activeClass === "all") return filteredSubmissionsByExam;
-    return filteredSubmissionsByExam.filter((sub) => isClassMatchingFilter(sub.studentClass, activeClass));
+    if (!activeClass || activeClass === "all") return filteredSubmissionsByExam;
+    return filteredSubmissionsByExam.filter((sub) => matchClassFilter(sub.studentClass, activeClass));
   }, [filteredSubmissionsByExam, activeClass]);
 
   // 3. Gom nhóm theo từng học sinh: Mỗi học sinh chỉ hiển thị duy nhất 1 lần với điểm cập nhật mới nhất (sau khi chấm tự luận)
@@ -549,8 +531,8 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
 
   // 1. Toàn bộ bài làm của các học sinh thuộc lớp đang chọn (không giới hạn ở 1 đề thi)
   const crossExamSubmissions = useMemo(() => {
-    if (activeClass === "all") return syncedSubmissions;
-    return syncedSubmissions.filter((sub) => isClassMatchingFilter(sub.studentClass, activeClass));
+    if (!activeClass || activeClass === "all") return syncedSubmissions;
+    return syncedSubmissions.filter((sub) => matchClassFilter(sub.studentClass, activeClass));
   }, [syncedSubmissions, activeClass]);
 
   // 2. Danh sách tất cả các đề thi theo trình tự thời gian
@@ -986,45 +968,111 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
 
         {/* ================= FLOATING ACTION & ACTIVE FILTERS BAR ================= */}
         <div className="bg-white rounded-3xl p-4 sm:p-5 shadow-xs border border-slate-200 space-y-3">
-          {/* Top Row: Drawer Trigger + Search */}
-          <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
-            {/* Nút mở Sidebar Bộ lọc Dùng chung (Global Drawer Trigger) */}
-            <button
-              type="button"
-              onClick={openFilterDrawer}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-2xs ${
-                activeFiltersCount > 0
-                  ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200"
-                  : "bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200"
-              }`}
-              title="Mở bảng điều khiển lọc dữ liệu đa chiều (Lớp, Dạng thức, Độ khó, Điểm số)"
-            >
-              <SlidersHorizontal className="w-4 h-4 text-amber-300" />
-              <span>Bảng điều khiển lọc</span>
-              {activeFiltersCount > 0 ? (
-                <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px]">
-                  {activeFiltersCount}
-                </span>
-              ) : (
-                <span className="text-[10px] text-slate-400 font-semibold">(Tất cả)</span>
-              )}
-            </button>
+          {/* Top Controls: Lớp, Mức điểm, Sắp xếp, Tìm kiếm, Bộ lọc mở rộng */}
+          <div className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-2.5">
+            {/* Quick Filter Selectors */}
+            <div className="flex items-center gap-2 flex-wrap flex-1">
+              {/* 1. Chọn Lớp Trực Tiếp */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-2xs hover:border-indigo-300 transition">
+                <GraduationCap className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span className="text-[11px] font-bold text-slate-500 hidden sm:inline">Lớp:</span>
+                <select
+                  value={activeClass}
+                  onChange={(e) => handleClassChange(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer pr-1"
+                  title="Lọc theo Lớp hoặc Khối"
+                >
+                  <option value="all">🏫 Tất cả các lớp {availableClasses.length > 0 ? `(${availableClasses.length} lớp)` : ""}</option>
+                  <optgroup label="Theo Khối">
+                    <option value="Lớp 12">Khối 12</option>
+                    <option value="Lớp 11">Khối 11</option>
+                    <option value="Lớp 10">Khối 10</option>
+                  </optgroup>
+                  {availableClasses.length > 0 && (
+                    <optgroup label="Từng lớp cụ thể">
+                      {availableClasses.map((cls) => (
+                        <option key={cls} value={cls}>
+                          Lớp {cls}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+
+              {/* 2. Chọn Mức Điểm Trực Tiếp */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-2xs hover:border-amber-300 transition">
+                <Award className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="text-[11px] font-bold text-slate-500 hidden sm:inline">Điểm:</span>
+                <select
+                  value={studentScoreTier}
+                  onChange={(e) => setStudentScoreTier(e.target.value as any)}
+                  className="bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer pr-1"
+                  title="Lọc theo thang mức điểm đạt được"
+                >
+                  <option value="all">🎯 Tất cả mức điểm</option>
+                  {SCORE_TIERS.map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.shortLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 3. Chọn Sắp Xếp Trực Tiếp */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-2xs hover:border-slate-300 transition">
+                <ArrowUpDown className="w-4 h-4 text-slate-500 shrink-0" />
+                <span className="text-[11px] font-bold text-slate-500 hidden sm:inline">Xếp:</span>
+                <select
+                  value={studentSortBy}
+                  onChange={(e) => setStudentSortBy(e.target.value as any)}
+                  className="bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer pr-1"
+                  title="Sắp xếp danh sách học sinh"
+                >
+                  <option value="score_desc">Điểm cao nhất ↓</option>
+                  <option value="score_asc">Điểm thấp nhất ↑</option>
+                  <option value="name">Tên học sinh (A-Z)</option>
+                  <option value="sbd">Số báo danh (SBD)</option>
+                  <option value="time_desc">Nộp mới nhất ↓</option>
+                </select>
+              </div>
+
+              {/* 4. Nút Mở Bảng Điều Khiển Lọc Mở Rộng */}
+              <button
+                type="button"
+                onClick={openFilterDrawer}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer ${
+                  activeFiltersCount > 0
+                    ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200"
+                    : "bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200"
+                }`}
+                title="Mở bảng điều khiển lọc dữ liệu toàn hệ thống"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-amber-300" />
+                <span className="hidden sm:inline">Bộ lọc mở rộng</span>
+                {activeFiltersCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-black text-[10px]">
+                    {activeFiltersCount}
+                  </span>
+                )}
+              </button>
+            </div>
 
             {/* Quick Search */}
-            <div className="relative w-full sm:w-72">
+            <div className="relative w-full xl:w-72">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchKeyword}
                 onChange={(e) => setSearchKeyword(e.target.value)}
                 placeholder="Tìm tên, SBD, lớp..."
-                className="w-full pl-8 pr-7 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium shadow-2xs"
+                className="w-full pl-8 pr-7 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium shadow-2xs"
               />
               {searchKeyword && (
                 <button
                   type="button"
                   onClick={() => setSearchKeyword("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -1054,7 +1102,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                     <button
                       type="button"
                       onClick={b.onRemove}
-                      className="w-3.5 h-3.5 rounded-full hover:bg-indigo-200 flex items-center justify-center text-indigo-900 transition"
+                      className="w-3.5 h-3.5 rounded-full hover:bg-indigo-200 flex items-center justify-center text-indigo-900 transition cursor-pointer"
                       title="Xóa bộ lọc này"
                     >
                       <X className="w-2.5 h-2.5" />
@@ -1067,7 +1115,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
                 <button
                   type="button"
                   onClick={resetAllFilters}
-                  className="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold transition flex items-center gap-1"
+                  className="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
                   title="Xóa tất cả các bộ lọc đang kích hoạt"
                 >
                   <RotateCcw className="w-3 h-3" />
@@ -1077,7 +1125,7 @@ export const TeacherAnalyticsView: React.FC<TeacherAnalyticsViewProps> = ({
             </div>
 
             <div className="text-[11px] font-bold text-slate-500 shrink-0">
-              Đang phân tích: <strong className="text-indigo-600 font-black">{uniqueSubmissionsByStudent.length}</strong> học sinh{filteredSubmissionsByClass.length > uniqueSubmissionsByStudent.length ? ` (${filteredSubmissionsByClass.length} lượt thi)` : ""}
+              Đang phân tích: <strong className="text-indigo-600 font-black">{filteredStudents.length}</strong> / {uniqueSubmissionsByStudent.length} học sinh{filteredSubmissionsByClass.length > uniqueSubmissionsByStudent.length ? ` (${filteredSubmissionsByClass.length} lượt thi)` : ""}
             </div>
           </div>
         </div>

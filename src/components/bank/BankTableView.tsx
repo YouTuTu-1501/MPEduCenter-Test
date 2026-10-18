@@ -20,6 +20,7 @@ import {
   MoreVertical,
   Globe,
   Radio,
+  Printer,
 } from "lucide-react";
 
 interface BankTableViewProps {
@@ -29,6 +30,7 @@ interface BankTableViewProps {
   onEditMetadata: (exam: Exam) => void;
   onToggleLock?: (exam: Exam) => void;
   onOpenSchedule?: (exam: Exam) => void;
+  onExportPdf?: (exam: Exam) => void;
   handleDownloadLatex: (exam: Exam) => void;
   handleDownloadPresentationHtml: (exam: Exam) => void;
   getGradeBadgeStyle: (grade: string) => string;
@@ -42,6 +44,7 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
   onEditMetadata,
   onToggleLock,
   onOpenSchedule,
+  onExportPdf,
   handleDownloadLatex,
   handleDownloadPresentationHtml,
   getGradeBadgeStyle,
@@ -234,7 +237,20 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
                         <span className="hidden xl:inline">Thi</span>
                       </button>
 
-                      {/* 3. Nút Thống Kê & Chấm Điểm */}
+                      {/* 3. Nút Xuất PDF / In Ấn */}
+                      {onExportPdf && (
+                        <button
+                          type="button"
+                          onClick={() => onExportPdf(exam)}
+                          className="px-2 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-[11px] flex items-center gap-1 transition shadow-2xs border border-amber-200/80"
+                          title="Xuất đề thi PDF & In ấn chuẩn Bộ GD&ĐT (A4)"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-amber-600" />
+                          <span className="hidden xl:inline">In/PDF</span>
+                        </button>
+                      )}
+
+                      {/* 4. Nút Thống Kê & Chấm Điểm */}
                       <button
                         type="button"
                         onClick={() => onSelectExam(exam, "analytics")}
@@ -244,7 +260,7 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
                         <BarChart2 className="w-3.5 h-3.5" />
                       </button>
 
-                      {/* 4. Menu Thao Tác Mở Rộng Toàn Bộ Chức Năng */}
+                      {/* 5. Menu Thao Tác Mở Rộng Toàn Bộ Chức Năng */}
                       <div className={`relative ${isMenuOpen ? "z-40" : ""}`}>
                         <button
                           type="button"
@@ -273,6 +289,21 @@ export const BankTableView: React.FC<BankTableViewProps> = ({
                             <div className="px-3 py-1.5 border-b border-slate-100 text-[10px] font-black uppercase tracking-wider text-slate-400">
                               Tác Vụ Đề Thi: {exam.code}
                             </div>
+
+                            {/* Xuất PDF & In ấn */}
+                            {onExportPdf && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveMenuExamId(null);
+                                  onExportPdf(exam);
+                                }}
+                                className="w-full px-3 py-2 text-xs font-bold text-amber-900 bg-amber-50/50 hover:bg-amber-100 flex items-center gap-2.5 transition text-left"
+                              >
+                                <Printer className="w-4 h-4 text-amber-600" />
+                                <span>Xuất đề thi PDF & In ấn (A4)</span>
+                              </button>
+                            )}
 
                             {/* Trình chiếu */}
                             <button

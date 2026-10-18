@@ -15,7 +15,9 @@ import {
   Circle,
   Slash,
   Palette,
+  Layers,
 } from "lucide-react";
+import { InequalityDomainModal } from "./InequalityDomainModal";
 
 interface MathScratchpadModalProps {
   isOpen: boolean;
@@ -63,6 +65,7 @@ export const MathScratchpadModal: React.FC<MathScratchpadModalProps> = ({
 
   const [strokes, setStrokes] = useState<FullStroke[]>([]);
   const [redoStack, setRedoStack] = useState<FullStroke[]>([]);
+  const [showInequalityModal, setShowInequalityModal] = useState<boolean>(false);
 
   const isDrawing = useRef<boolean>(false);
   const currentStroke = useRef<FullStroke | null>(null);
@@ -515,6 +518,16 @@ export const MathScratchpadModal: React.FC<MathScratchpadModalProps> = ({
           <div className="flex items-center gap-1.5">
             <button
               type="button"
+              onClick={() => setShowInequalityModal(true)}
+              className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold text-xs flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+              title="Biểu diễn Miền nghiệm Hệ Bất phương trình"
+            >
+              <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span className="hidden sm:inline">Miền Nghiệm</span>
+            </button>
+
+            <button
+              type="button"
               onClick={handleUndo}
               disabled={strokes.length === 0}
               className="p-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shadow-2xs transition"
@@ -608,6 +621,12 @@ export const MathScratchpadModal: React.FC<MathScratchpadModalProps> = ({
           />
         </div>
       </div>
+
+      {/* Modal Biểu diễn Miền nghiệm Hệ Bất phương trình */}
+      <InequalityDomainModal
+        isOpen={showInequalityModal}
+        onClose={() => setShowInequalityModal(false)}
+      />
     </div>
   );
 };

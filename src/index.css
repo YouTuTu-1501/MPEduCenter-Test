@@ -73,3 +73,52 @@
   animation: fadeIn 0.25s ease-out forwards;
 }
 
+/* Định dạng in ấn tiêu chuẩn A4 Bộ GD&ĐT */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 10mm 15mm 10mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 13pt;
+  }
+
+  /* Ẩn tất cả thanh công cụ, nút bấm, modal backdrop khi in */
+  .no-print,
+  nav,
+  header,
+  footer,
+  aside,
+  button,
+  .toast-container {
+    display: none !important;
+  }
+
+  /* Vùng tài liệu in chính */
+  #exam-pdf-printable-document {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: white !important;
+  }
+
+  .avoid-page-break,
+  .pdf-question-card,
+  .answer-key-box {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .page-break-before {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+}
+

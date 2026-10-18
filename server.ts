@@ -12,7 +12,14 @@ dotenv.config();
 let aiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI | null {
   if (!aiClient && process.env.GEMINI_API_KEY) {
-    aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    aiClient = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
   }
   return aiClient;
 }
@@ -348,7 +355,7 @@ Yêu cầu trả về đúng định dạng JSON như sau, không kèm bất k�
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -391,7 +398,7 @@ Dạng câu hỏi: ${questionType}
 Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chuẩn ($...$) để học sinh dễ hiểu nhất.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: prompt,
       });
 
@@ -400,6 +407,131 @@ Hãy trình bày bằng tiếng Việt, dùng ký hiệu LaTeX toán học chu�
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // API Đề xuất câu hỏi tương tự & bài tập bổ trợ dựa trên các câu học sinh làm sai (Google Gemini API)
+  app.post("/api/ai/remedial-questions", async (req, res) => {
+    try {
+      const { examTitle, grade, subject, wrongQuestions, mode } = req.body;
+      const ai = getGeminiClient();
+
+      if (!wrongQuestions || !Array.isArray(wrongQuestions) || wrongQuestions.length === 0) {
+        return res.status(400).json({ error: "Danh sách câu hỏi làm sai không được để trống" });
+      }
+
+      // Nếu không có API Key, trả về bài tập mẫu thông minh fallback
+      if (!ai) {
+        return res.json({
+          diagnostic: `Dựa trên bài thi "${examTitle || "Đề kiểm tra"}", học sinh đã có một số điểm chưa chính xác ở các câu hỏi lý thuyết và bài tập tính toán. Hãy rà soát lại các công thức cơ bản và tập trung giải các bài toán tương tự dưới đây để củng cố kiến thức.`,
+          weakTopics: ["Củng cố kiến thức các dạng toán vừa làm sai", "Kỹ năng tính toán và nhận diện bẫy đề thi"],
+          remedialQuestions: wrongQuestions.slice(0, 3).map((wq: any, idx: number) => ({
+            id: `fallback_rem_${Date.now()}_${idx}`,
+            originalQuestionTitle: wq.title || `Câu ${idx + 1}`,
+            targetConcept: `Luyện tập củng cố dạng bài: ${wq.title || "Câu hỏi tương tự"}`,
+            type: wq.type || "single_choice",
+            content: `Cho bài toán tương tự dựa trên câu gốc: ${wq.content?.slice(0, 150) || ""}... Hãy tính toán cẩn thận và chọn đáp án chính xác.`,
+            options: wq.options ? wq.options.map((opt: any) => ({ ...opt })) : undefined,
+            tfItems: wq.tfItems ? wq.tfItems.map((item: any) => ({ ...item })) : undefined,
+            correctAnswer: wq.correctAnswer || "A",
+            explanation: wq.explanation || "Xem lại phương pháp giải trong sách giáo khoa và lý thuyết trọng tâm.",
+            difficulty: "medium",
+            tips: "Đọc kỹ đề bài, xác định rõ dữ kiện cho và yêu cầu cần tìm.",
+          })),
+        });
+      }
+
+      // Giới hạn tối đa 5 câu hỏi để gửi vào prompt nhằm tối ưu hóa token và tốc độ phản hồi
+      const sampleWrong = wrongQuestions.slice(0, 5);
+
+      const prompt = `Bạn là Chuyên gia Giáo dục & Giáo viên dạy Toán THPT xuất sắc của Bộ GD&ĐT Việt Nam.
+Một học sinh vừa hoàn thành bài kiểm tra "${examTitle || "Đề kiểm tra Toán"}" (${grade || "Lớp 12"}, Môn: ${subject || "Toán học"}).
+Dưới đây là các câu hỏi mà học sinh đã LÀM SAI hoặc chưa đạt điểm tối đa:
+
+${sampleWrong.map((q: any, i: number) => `--- CÂU SAI #${i + 1} (${q.title || `Câu ${i + 1}`}, Dạng: ${q.type}):
+Đề bài: ${q.content}
+${q.options ? `Các phương án: ${q.options.map((o: any) => `${o.label}. ${o.text}`).join(" | ")}` : ""}
+${q.tfItems ? `Các ý Đúng/Sai: ${q.tfItems.map((it: any) => `${it.label}) ${it.text}`).join(" | ")}` : ""}
+Đáp án đúng của đề: ${q.correctAnswer || "N/A"}
+Học sinh đã trả lời: ${typeof q.studentAnswer === "object" ? JSON.stringify(q.studentAnswer) : (q.studentAnswer || "Chưa làm / Bỏ trống")}
+Lời giải chuẩn của câu gốc: ${q.explanation || "Chưa có"}
+`).join("\n")}
+
+NHIỆM VỤ CỦA BẠN:
+1. Phân tích chẩn đoán (diagnostic): Chỉ ra các điểm hổng kiến thức, bẫy tâm lý hoặc lỗi sai điển hình mà học sinh mắc phải (viết bằng tiếng Việt súc tích, động viên học sinh).
+2. Liệt kê các chuyên đề/khái niệm học sinh đang yếu (weakTopics) dạng mảng chuỗi ngắn gọn.
+3. Đề xuất từ 2 đến 4 câu hỏi BỔ TRỢ TƯƠNG TỰ (remedialQuestions) có cấu trúc, độ khó tương đương hoặc nâng dần, áp dụng đúng chuẩn chương trình GDPT 2018 (sử dụng công thức toán bằng ký hiệu LaTeX $...$ chuẩn xác).
+Với mỗi câu hỏi tương tự:
+- id: chuỗi id duy nhất (ví dụ: "rem_1", "rem_2")
+- originalQuestionTitle: tên câu gốc mà câu này bổ trợ (ví dụ: "Câu 1", "Câu 3")
+- targetConcept: chuyên đề / kiến thức trọng tâm cần rèn luyện
+- type: dạng câu hỏi ("single_choice" | "true_false" | "short_answer" | "essay")
+- content: nội dung câu hỏi mới, đề bài rõ ràng, số liệu thay đổi hợp lý, dùng LaTeX $...$
+- options (nếu là single_choice): mảng 4 phương án A, B, C, D (mỗi phương án gồm label, text, isCorrect: boolean)
+- tfItems (nếu là true_false): mảng 4 ý a, b, c, d (mỗi ý gồm label, text, isCorrect: boolean)
+- correctAnswer: đáp án đúng (ví dụ: "A" nếu single_choice, hoặc số/kết quả nếu short_answer)
+- explanation: Lời giải chi tiết từng bước bằng tiếng Việt + công thức LaTeX
+- difficulty: độ khó ("easy" | "medium" | "hard")
+- tips: mẹo giải nhanh hoặc bí quyết tránh bẫy của dạng bài này
+
+BẮT BUỘC TRẢ VỀ DƯỚI ĐỊNH DẠNG JSON HỢP LỆ THEO SCHEMA DƯỚI ĐÂY, TUYỆT ĐỐI KHÔNG KÈM KÝ TỰ BÊN NGOÀI JSON:
+{
+  "diagnostic": "Lời nhận xét và chẩn đoán tổng quan...",
+  "weakTopics": ["Tên chủ đề 1", "Tên chủ đề 2"],
+  "remedialQuestions": [
+    {
+      "id": "rem_1",
+      "originalQuestionTitle": "Câu 1",
+      "targetConcept": "Khái niệm kiến thức cần ôn",
+      "type": "single_choice",
+      "content": "Nội dung câu hỏi...",
+      "options": [
+        { "label": "A", "text": "...", "isCorrect": true },
+        { "label": "B", "text": "...", "isCorrect": false },
+        { "label": "C", "text": "...", "isCorrect": false },
+        { "label": "D", "text": "...", "isCorrect": false }
+      ],
+      "correctAnswer": "A",
+      "explanation": "Lời giải chi tiết...",
+      "difficulty": "medium",
+      "tips": "Mẹo giải nhanh..."
+    }
+  ]
+}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.8-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.7,
+        },
+      });
+
+      let text = (response.text || "{}").trim();
+      if (text.startsWith("```json")) {
+        text = text.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+      } else if (text.startsWith("```")) {
+        text = text.replace(/^```\s*/, "").replace(/\s*```$/, "");
+      }
+      let result: any;
+      try {
+        result = JSON.parse(text);
+      } catch (parseErr) {
+        const match = text.match(/\{[\s\S]*\}/);
+        if (match) {
+          result = JSON.parse(match[0]);
+        } else {
+          throw parseErr;
+        }
+      }
+      res.json(result);
+    } catch (error: any) {
+      console.error("AI Remedial Questions Generation Error:", error);
+      res.status(500).json({
+        error: "Không thể tạo bài tập bổ trợ bằng AI",
+        details: error.message,
+      });
     }
   });
 

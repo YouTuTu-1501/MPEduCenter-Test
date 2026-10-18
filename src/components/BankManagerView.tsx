@@ -13,6 +13,7 @@ import {
 import {
   parseLatexExam,
   exportExamToLatex,
+  cleanQuestionContent,
   generateStandalonePresentationHtml,
   getStandardTemplateLatex,
 } from "../utils/latexParser";
@@ -23,15 +24,19 @@ import {
 } from "../utils/examCodeHelper";
 import { MathRenderer } from "./MathRenderer";
 import { TableBuilderModal } from "./TableBuilderModal";
+import { InequalityDomainModal } from "./InequalityDomainModal";
 import { ExamScheduleModal } from "./ExamScheduleModal";
 import { ExamEditorModal } from "./ExamEditorModal";
+import { ExamPdfExportModal } from "./ExamPdfExportModal";
 import { BankSidebar } from "./bank/BankSidebar";
 import { BankTableView } from "./bank/BankTableView";
+import { matchExamClassFilter, matchExamSearch } from "../utils/filterUtils";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import {
   Upload,
   Download,
+  Printer,
   FileCode,
   Layers,
   BookOpen,
@@ -138,6 +143,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   // ================= MODAL NHẬP ĐỀ THI MỚI (10 TUỲ CHỌN) =================
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [showTableBuilder, setShowTableBuilder] = useState<boolean>(false);
+  const [showInequalityModal, setShowInequalityModal] = useState<boolean>(false);
   const [latexInputText, setLatexInputText] = useState<string>("");
 
   // 1. Khối
@@ -188,6 +194,9 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
   // Modal Chỉnh sửa toàn diện đề thi hiện có
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
 
+  // Modal Xuất đề thi sang PDF & In ấn chuẩn Bộ GD&ĐT
+  const [pdfExportExam, setPdfExportExam] = useState<Exam | null>(null);
+
   // Modal Thiết lập & Hẹn giờ giao đề
   const [scheduleTargetExam, setScheduleTargetExam] = useState<Exam | null>(null);
 
@@ -225,20 +234,6 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
         `Đề "${exam.title}" (Mã: ${exam.code}) đang mở. Học sinh có thể nhập mã để vào làm bài.`
       );
     }
-  };
-
-  // Kiểm tra đề thi có phù hợp với bộ lọc Lớp được chọn không
-  const isExamMatchClassFilter = (exam: Exam, filter: string) => {
-    if (filter === "all") return true;
-    if (filter === exam.grade) return true;
-    if (exam.targetClass && (exam.targetClass === filter || exam.targetClass === "Tất cả các lớp")) return true;
-    
-    // Khớp theo tiền tố số lớp (ví dụ: lớp "12A1", "12" khớp với đề "Lớp 12"; "9A2" khớp "Lớp 9")
-    const filterNumMatch = filter.match(/\d+/);
-    const examGradeNumMatch = exam.grade?.match(/\d+/);
-    if (filterNumMatch && examGradeNumMatch && filterNumMatch[0] === examGradeNumMatch[0]) return true;
-
-    return exam.grade === filter;
   };
 
   // Danh sách các Chương theo Khối hoặc Lớp được chọn
@@ -292,8 +287,8 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
         return false;
       }
 
-      // 2. Lọc theo Lớp Phân Công
-      if (activeClassFilter !== "all" && !isExamMatchClassFilter(exam, activeClassFilter)) {
+      // 2. Lọc theo Lớp Phân Công (logic chuẩn xác: lớp cụ thể, khối hoặc tất cả các lớp)
+      if (activeClassFilter !== "all" && !matchExamClassFilter(exam, activeClassFilter)) {
         return false;
       }
 
@@ -312,15 +307,9 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
         if (statusFilter === "scheduled" && !exam.scheduleEnabled) return false;
       }
 
-      // 5. Lọc theo Từ Khóa Tìm Kiếm
+      // 5. Lọc theo Từ Khóa Tìm Kiếm (hỗ trợ tiếng Việt không dấu, tìm theo Tên đề, Mã đề, Chương, Môn, Tác giả)
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchTitle = exam.title.toLowerCase().includes(q);
-        const matchCode = exam.code.toLowerCase().includes(q) || isExamCodeMatch(q, exam.code);
-        const matchChapter = (exam.chapter || "").toLowerCase().includes(q);
-        const matchGrade = exam.grade.toLowerCase().includes(q);
-        const matchSubject = (exam.subject || "").toLowerCase().includes(q);
-        if (!matchTitle && !matchCode && !matchChapter && !matchGrade && !matchSubject) {
+        if (!matchExamSearch(exam, searchQuery)) {
           return false;
         }
       }
@@ -501,8 +490,14 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
     if (!importPreview) return;
     const finalChapter = isCustomChapter ? customChapterInput : importChapter;
     const finalCode = computedImportCode || importPreview.code;
+    const finalCleanedQuestions = (importPreview.questions || []).map((q) => ({
+      ...q,
+      content: cleanQuestionContent(q.content || ""),
+      explanation: cleanQuestionContent(q.explanation || ""),
+    }));
     const examToSave: Exam = {
       ...importPreview,
+      questions: finalCleanedQuestions,
       id: importPreview.id || `exam_${Date.now()}`,
       code: finalCode,
       title: importTitle.trim() || importPreview.title || `Đề kiểm tra ${importGrade}`,
@@ -611,8 +606,17 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
 
             <button
               type="button"
+              onClick={() => setShowInequalityModal(true)}
+              className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-bold text-xs flex items-center gap-1.5 transition border border-indigo-200 cursor-pointer"
+            >
+              <Layers className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Miền Nghiệm Hệ BPT</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowTableBuilder(true)}
-              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-1.5 transition"
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
             >
               <Table className="w-3.5 h-3.5 text-indigo-600" />
               <span>Vẽ Bảng TeX</span>
@@ -803,6 +807,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                 onEditMetadata={(ex) => setEditingExam(ex)}
                 onToggleLock={handleToggleLock}
                 onOpenSchedule={(ex) => setScheduleTargetExam(ex)}
+                onExportPdf={(ex) => setPdfExportExam(ex)}
                 handleDownloadLatex={handleDownloadLatex}
                 handleDownloadPresentationHtml={handleDownloadPresentationHtml}
                 getGradeBadgeStyle={getGradeBadgeStyle}
@@ -854,6 +859,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                           onEditMetadata={(ex) => setEditingExam(ex)}
                           onToggleLock={handleToggleLock}
                           onOpenSchedule={(ex) => setScheduleTargetExam(ex)}
+                          onExportPdf={(ex) => setPdfExportExam(ex)}
                           handleDownloadLatex={handleDownloadLatex}
                           handleDownloadPresentationHtml={handleDownloadPresentationHtml}
                           getGradeBadgeStyle={getGradeBadgeStyle}
@@ -876,6 +882,7 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
                     onEditMetadata={(ex) => setEditingExam(ex)}
                     onToggleLock={handleToggleLock}
                     onOpenSchedule={(ex) => setScheduleTargetExam(ex)}
+                    onExportPdf={(ex) => setPdfExportExam(ex)}
                     handleDownloadLatex={handleDownloadLatex}
                     handleDownloadPresentationHtml={handleDownloadPresentationHtml}
                     getGradeBadgeStyle={getGradeBadgeStyle}
@@ -902,6 +909,15 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
             onDeleteExam(id);
             setEditingExam(null);
           }}
+        />
+      )}
+
+      {/* ================= MODAL XUẤT ĐỀ THI SANG PDF & IN ẤN ================= */}
+      {pdfExportExam && (
+        <ExamPdfExportModal
+          isOpen={!!pdfExportExam}
+          exam={pdfExportExam}
+          onClose={() => setPdfExportExam(null)}
         />
       )}
 
@@ -1529,6 +1545,20 @@ export const BankManagerView: React.FC<BankManagerViewProps> = ({
         />
       )}
 
+      {/* ================= MODAL BIỂU DIỄN MIỀN NGHIỆM HỆ BPT ================= */}
+      {showInequalityModal && (
+        <InequalityDomainModal
+          isOpen={showInequalityModal}
+          onClose={() => setShowInequalityModal(false)}
+          onInsertLatex={(texSnippet) => {
+            setLatexInputText((prev) => prev + "\n\n" + texSnippet);
+            setShowInequalityModal(false);
+            setShowImportModal(true);
+            toast.success("Đã chèn miền nghiệm", "Mã hệ bất phương trình và hình vẽ TikZ đã được đưa vào đề.");
+          }}
+        />
+      )}
+
       {/* ================= MODAL HẸN GIỜ GIAO ĐỀ ================= */}
       {scheduleTargetExam && (
         <ExamScheduleModal
@@ -1553,6 +1583,7 @@ interface ExamCardItemProps {
   onEditMetadata: (exam: Exam) => void;
   onToggleLock?: (exam: Exam) => void;
   onOpenSchedule?: (exam: Exam) => void;
+  onExportPdf?: (exam: Exam) => void;
   handleDownloadLatex: (exam: Exam) => void;
   handleDownloadPresentationHtml: (exam: Exam) => void;
   getGradeBadgeStyle: (grade: string) => string;
@@ -1566,6 +1597,7 @@ const ExamCardItem: React.FC<ExamCardItemProps> = ({
   onEditMetadata,
   onToggleLock,
   onOpenSchedule,
+  onExportPdf,
   handleDownloadLatex,
   handleDownloadPresentationHtml,
   getGradeBadgeStyle,
@@ -1745,7 +1777,17 @@ const ExamCardItem: React.FC<ExamCardItemProps> = ({
         </div>
 
         <div className="flex justify-between items-center pt-2 text-xs">
-          <div className="flex gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {onExportPdf && (
+              <button
+                type="button"
+                onClick={() => onExportPdf(exam)}
+                className="text-amber-700 hover:text-amber-800 hover:underline font-bold flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded border border-amber-200"
+                title="Xuất file PDF & In ấn chuẩn Bộ GD&ĐT (A4)"
+              >
+                <Printer className="w-3 h-3 text-amber-600" /> In / PDF
+              </button>
+            )}
             <button
               type="button"
               onClick={() => handleDownloadLatex(exam)}
@@ -1758,7 +1800,7 @@ const ExamCardItem: React.FC<ExamCardItemProps> = ({
               onClick={() => handleDownloadPresentationHtml(exam)}
               className="text-emerald-600 hover:underline font-bold flex items-center gap-0.5"
             >
-              <Download className="w-3 h-3" /> Slide offline
+              <Download className="w-3 h-3" /> Slide
             </button>
           </div>
 

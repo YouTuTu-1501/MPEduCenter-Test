@@ -51,6 +51,9 @@ export interface TikzPath {
   isCycle?: boolean;
   functionExpr?: string;
   doubleArc?: boolean;
+  pattern?: "north west lines" | "north east lines" | "dots" | "crosshatch" | "grid" | "h_lines" | "v_lines" | "none";
+  patternColor?: string;
+  fillOpacity?: number;
 }
 
 export interface AngleMark {
@@ -4281,18 +4284,43 @@ export function parseTikzToSvg(rawTikzCode: string): string {
       const hasFill = isExplicitFill || optStr.includes("fill") || optStr.includes("pattern");
       let fillColor = "none";
       if (hasFill) {
-        fillColor = "rgba(99,102,241,0.08)";
+        fillColor = "rgba(99,102,241,0.12)";
         const fillMatch = optStr.match(/fill\s*=\s*([a-zA-Z0-9_!]+)/);
         if (fillMatch) {
           const fColor = fillMatch[1].toLowerCase();
-          if (fColor.includes("red")) fillColor = "rgba(239, 68, 68, 0.15)";
-          else if (fColor.includes("blue")) fillColor = "rgba(59, 130, 246, 0.15)";
-          else if (fColor.includes("green")) fillColor = "rgba(16, 185, 129, 0.15)";
-          else if (fColor.includes("yellow") || fColor.includes("amber")) fillColor = "rgba(245, 158, 11, 0.15)";
+          if (fColor.includes("red")) fillColor = "rgba(239, 68, 68, 0.18)";
+          else if (fColor.includes("blue")) fillColor = "rgba(59, 130, 246, 0.18)";
+          else if (fColor.includes("green") || fColor.includes("emerald")) fillColor = "rgba(16, 185, 129, 0.18)";
+          else if (fColor.includes("yellow") || fColor.includes("amber")) fillColor = "rgba(245, 158, 11, 0.18)";
           else if (fColor.includes("white")) fillColor = "#ffffff";
-          else if (fColor.includes("gray") || fColor.includes("grey")) fillColor = "rgba(100, 116, 139, 0.15)";
+          else if (fColor.includes("gray") || fColor.includes("grey")) fillColor = "rgba(100, 116, 139, 0.18)";
           else if (fColor.includes("black")) fillColor = "rgba(30, 41, 59, 0.9)";
+          else if (fColor.includes("indigo") || fColor.includes("purple")) fillColor = "rgba(99, 102, 241, 0.2)";
         }
+      }
+
+      // Trích xuất pattern (gạch chéo, lưới, chấm bi biểu diễn miền nghiệm)
+      let pattern: "north west lines" | "north east lines" | "dots" | "crosshatch" | "grid" | "h_lines" | "v_lines" | "none" = "none";
+      if (optStr.includes("north west lines") || optStr.includes("north west")) {
+        pattern = "north west lines";
+      } else if (optStr.includes("north east lines") || optStr.includes("north east")) {
+        pattern = "north east lines";
+      } else if (optStr.includes("crosshatch")) {
+        pattern = "crosshatch";
+      } else if (optStr.includes("dots")) {
+        pattern = "dots";
+      } else if (optStr.includes("grid")) {
+        pattern = "grid";
+      } else if (optStr.includes("horizontal lines")) {
+        pattern = "h_lines";
+      } else if (optStr.includes("vertical lines")) {
+        pattern = "v_lines";
+      }
+
+      let fillOpacity: number | undefined = undefined;
+      const opacityMatch = optStr.match(/(?:fill\s+)?opacity\s*=\s*([0-9.]+)/i);
+      if (opacityMatch) {
+        fillOpacity = parseFloat(opacityMatch[1]);
       }
 
       // Sử dụng parseDrawSubpaths để phân tích toàn diện tất cả các subpaths, cung elip/tròn arc, chu trình cycle và đường thẳng
@@ -4300,6 +4328,10 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
       for (const sp of parsedSubpaths) {
         if (sp.points.length >= 2) {
+          const isDrawExplicit = cmd.startsWith("\\draw") || cmd.startsWith("\\filldraw") || optStr.includes("draw");
+          const stroke = !isDrawExplicit && isExplicitFill ? "none" : strokeColor;
+          const strokeW = !isDrawExplicit && isExplicitFill ? 0 : strokeWidth;
+
           paths.push({
             type: sp.isCycle ? "polygon" : "line",
             points: sp.points,
@@ -4307,10 +4339,12 @@ export function parseTikzToSvg(rawTikzCode: string): string {
             isDotted,
             hasArrowEnd,
             hasArrowStart,
-            strokeColor,
-            strokeWidth,
+            strokeColor: stroke,
+            strokeWidth: strokeW,
             fillColor: isExplicitFill || (hasFill && sp.isCycle) ? fillColor : "none",
             isCycle: sp.isCycle,
+            pattern: pattern !== "none" ? pattern : undefined,
+            fillOpacity,
           });
         }
       }
@@ -4521,13 +4555,27 @@ export function parseTikzToSvg(rawTikzCode: string): string {
           .map((pt, i) => `${i === 0 ? "M" : "L"} ${toSvgX(pt.x).toFixed(1)} ${toSvgY(pt.y).toFixed(1)}`)
           .join(" ") + (path.isCycle ? " Z" : "");
 
+      let finalFill = path.fillColor || "none";
+      if (path.pattern) {
+        if (path.pattern === "north west lines") finalFill = "url(#pat-nw-lines)";
+        else if (path.pattern === "north east lines") finalFill = "url(#pat-ne-lines)";
+        else if (path.pattern === "dots") finalFill = "url(#pat-dots)";
+        else if (path.pattern === "crosshatch") finalFill = "url(#pat-crosshatch)";
+        else if (path.pattern === "grid") finalFill = "url(#pat-grid)";
+        else if (path.pattern === "h_lines") finalFill = "url(#pat-h-lines)";
+        else if (path.pattern === "v_lines") finalFill = "url(#pat-v-lines)";
+      }
+
+      const opacityAttr = path.fillOpacity !== undefined ? `fill-opacity="${path.fillOpacity}"` : "";
+
       svgElements += `
         <path 
           id="tikz-path-${pIdx}"
           d="${d}" 
-          fill="${path.fillColor || "none"}" 
-          stroke="${path.strokeColor}" 
-          stroke-width="${path.strokeWidth}" 
+          fill="${finalFill}" 
+          ${opacityAttr}
+          stroke="${path.strokeColor || "none"}" 
+          stroke-width="${path.strokeWidth || 0}" 
           stroke-linecap="${globalLineCap}" 
           stroke-linejoin="${globalLineJoin}" 
           ${strokeDash}
@@ -4772,7 +4820,6 @@ export function parseTikzToSvg(rawTikzCode: string): string {
         <defs>
           <!-- Pattern nét gạch chéo Tây Bắc (North West Lines) -->
           <pattern id="pat-nw-lines" patternUnits="userSpaceOnUse" width="8" height="8">
-            <rect width="8" height="8" fill="#ffffff" />
             <line x1="0" y1="0" x2="8" y2="8" stroke="#334155" stroke-width="1.1" />
             <line x1="-2" y1="6" x2="2" y2="10" stroke="#334155" stroke-width="1.1" />
             <line x1="6" y1="-2" x2="10" y2="2" stroke="#334155" stroke-width="1.1" />
@@ -4780,7 +4827,6 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
           <!-- Pattern nét gạch chéo Đông Bắc (North East Lines) -->
           <pattern id="pat-ne-lines" patternUnits="userSpaceOnUse" width="8" height="8">
-            <rect width="8" height="8" fill="#ffffff" />
             <line x1="8" y1="0" x2="0" y2="8" stroke="#334155" stroke-width="1.1" />
             <line x1="10" y1="6" x2="6" y2="10" stroke="#334155" stroke-width="1.1" />
             <line x1="2" y1="-2" x2="-2" y2="2" stroke="#334155" stroke-width="1.1" />
@@ -4788,32 +4834,27 @@ export function parseTikzToSvg(rawTikzCode: string): string {
 
           <!-- Pattern chấm bi (Dots) -->
           <pattern id="pat-dots" patternUnits="userSpaceOnUse" width="6" height="6">
-            <rect width="6" height="6" fill="#ffffff" />
             <circle cx="3" cy="3" r="0.9" fill="#334155" />
           </pattern>
 
           <!-- Pattern lưới ô vuông (Grid) -->
           <pattern id="pat-grid" patternUnits="userSpaceOnUse" width="6" height="6">
-            <rect width="6" height="6" fill="#ffffff" />
             <path d="M 6 0 L 0 0 0 6" fill="none" stroke="#475569" stroke-width="0.8"/>
           </pattern>
 
           <!-- Pattern đan chéo (Crosshatch) -->
           <pattern id="pat-crosshatch" patternUnits="userSpaceOnUse" width="8" height="8">
-            <rect width="8" height="8" fill="#ffffff" />
             <line x1="0" y1="0" x2="8" y2="8" stroke="#334155" stroke-width="0.9" />
             <line x1="0" y1="8" x2="8" y2="0" stroke="#334155" stroke-width="0.9" />
           </pattern>
 
           <!-- Pattern sọc ngang (Horizontal Lines) -->
           <pattern id="pat-h-lines" patternUnits="userSpaceOnUse" width="8" height="6">
-            <rect width="8" height="6" fill="#ffffff" />
             <line x1="0" y1="3" x2="8" y2="3" stroke="#334155" stroke-width="1.0" />
           </pattern>
 
           <!-- Pattern sọc dọc (Vertical Lines) -->
           <pattern id="pat-v-lines" patternUnits="userSpaceOnUse" width="6" height="8">
-            <rect width="6" height="8" fill="#ffffff" />
             <line x1="3" y1="0" x2="3" y2="8" stroke="#334155" stroke-width="1.0" />
           </pattern>
 

@@ -8,6 +8,7 @@ import {
   ScoreTierKey,
   isScoreInTier,
   extractGradeFromClass,
+  matchClassFilter,
 } from "../utils/filterUtils";
 import { getDeletedUserIds } from "../services/firestoreService";
 import {
@@ -280,16 +281,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
       });
     }
 
-    // 3. Lọc theo Lớp
+    // 3. Lọc theo Lớp chuẩn xác và logic
     if (selectedClass !== "all") {
-      list = list.filter((s) => {
-        if (!s.studentClass) return false;
-        if (s.studentClass === selectedClass) return true;
-        const clsMatch = selectedClass.match(/\d+/);
-        const sMatch = s.studentClass.match(/\d+/);
-        if (clsMatch && sMatch && clsMatch[0] === sMatch[0] && selectedClass.startsWith("Lớp")) return true;
-        return false;
-      });
+      list = list.filter((s) => matchClassFilter(s.studentClass, selectedClass));
     }
 
     // 4. Nhóm theo từng Học sinh
@@ -414,15 +408,17 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
       rows = rows.filter((r) => isScoreInTier(r.score, selectedScoreTier, r.maxScore));
     }
 
-    // 7. Lọc theo Từ khóa tìm kiếm
+    // 7. Lọc theo Từ khóa tìm kiếm (hỗ trợ không dấu, họ tên, lớp, SBD)
     if (searchKeyword.trim() !== "") {
-      rows = rows.filter((r) => {
-        return (
-          matchSearchQuery(r.studentName, searchKeyword) ||
-          matchSearchQuery(r.studentId, searchKeyword) ||
-          matchSearchQuery(r.studentClass, searchKeyword)
-        );
-      });
+      rows = rows.filter((r) =>
+        matchSearchQuery(
+          searchKeyword,
+          r.studentName,
+          r.studentId,
+          r.studentClass,
+          r.submission.examTitle
+        )
+      );
     }
 
     // 8. Sắp xếp thứ hạng (ưu tiên quy đổi về phần trăm điểm đạt được để xếp hạng công bằng giữa các đề có thang điểm khác nhau)

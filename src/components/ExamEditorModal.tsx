@@ -16,13 +16,16 @@ import {
   generateStandardExamCode,
   parseStandardExamCode,
 } from "../utils/examCodeHelper";
-import { exportExamToLatex, parseLatexExam } from "../utils/latexParser";
+import { exportExamToLatex, parseLatexExam, cleanQuestionContent } from "../utils/latexParser";
 import { MathRenderer } from "./MathRenderer";
 import { TableBuilderModal } from "./TableBuilderModal";
+import { InequalityDomainModal } from "./InequalityDomainModal";
+import { ExamPdfExportModal } from "./ExamPdfExportModal";
 import { useToast } from "../context/ToastContext";
 import {
   X,
   Save,
+  Printer,
   Plus,
   Trash2,
   Copy,
@@ -113,8 +116,10 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
   // 3. Tab LaTeX
   const [latexSource, setLatexSource] = useState<string>("");
 
-  // 4. Modal TableBuilder
+  // 4. Modal TableBuilder & InequalityDomain
   const [showTableBuilder, setShowTableBuilder] = useState<boolean>(false);
+  const [showInequalityModal, setShowInequalityModal] = useState<boolean>(false);
+  const [showPdfExport, setShowPdfExport] = useState<boolean>(false);
   const [targetInsertField, setTargetInsertField] = useState<"content" | "explanation">("content");
 
   // Khởi tạo state khi mở modal hoặc đổi đề thi
@@ -161,17 +166,19 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
       setScheduledOpenTime(exam.scheduledOpenTime || "");
       setScheduledCloseTime(exam.scheduledCloseTime || "");
 
-      // Sao chép sâu mảng câu hỏi
+      // Sao chép sâu mảng câu hỏi và làm sạch triệt để mọi đoạn mã khai báo rò rỉ
       const copiedQuestions: Question[] = (exam.questions || []).map((q, idx) => ({
         ...q,
         id: q.id || `q_${Date.now()}_${idx}`,
         title: q.title || `Câu ${idx + 1}`,
+        content: cleanQuestionContent(q.content || ""),
+        explanation: cleanQuestionContent(q.explanation || ""),
         options: q.options ? q.options.map((opt) => ({ ...opt })) : undefined,
         tfItems: q.tfItems ? q.tfItems.map((item) => ({ ...item })) : undefined,
       }));
       setQuestions(copiedQuestions);
       setSelectedQuestionIndex(0);
-      setLatexSource(exportExamToLatex(exam));
+      setLatexSource(exportExamToLatex({ ...exam, questions: copiedQuestions }));
     }
   }, [exam, isOpen]);
 
@@ -401,6 +408,11 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
 
   // Cập nhật LaTeX từ danh sách câu hỏi hiện tại
   const handleSyncToLatex = () => {
+    const cleanedQuestions = questions.map((q) => ({
+      ...q,
+      content: cleanQuestionContent(q.content || ""),
+      explanation: cleanQuestionContent(q.explanation || ""),
+    }));
     const currentExamState: Exam = {
       id: exam?.id || `exam_${Date.now()}`,
       title,
@@ -413,7 +425,7 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
       description,
       author,
       totalScore: Number(totalScore) || calculatedSumScore || 10,
-      questions,
+      questions: cleanedQuestions,
       createdAt: exam?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isLocked,
@@ -440,7 +452,12 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
         toast.error("Không tìm thấy câu hỏi", "Vui lòng kiểm tra các khối \\begin{ex}...\\end{ex} trong mã LaTeX.");
         return;
       }
-      setQuestions(parsed.questions);
+      const cleanedQuestions = parsed.questions.map((q) => ({
+        ...q,
+        content: cleanQuestionContent(q.content || ""),
+        explanation: cleanQuestionContent(q.explanation || ""),
+      }));
+      setQuestions(cleanedQuestions);
       if (parsed.title) setTitle(parsed.title);
       if (parsed.code) setCode(parsed.code);
       if (parsed.durationMinutes) setDurationMinutes(parsed.durationMinutes);
@@ -457,6 +474,30 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
 
   // Lưu toàn bộ đề thi
   const handleSaveAll = () => {
+    let questionsToSave = questions;
+
+    // Nếu người dùng đang đứng ở Tab 3 (Mã nguồn LaTeX), tự động biên dịch mã LaTeX mới nhất trước khi lưu
+    if (activeTab === "latex") {
+      if (!latexSource.trim()) {
+        toast.warning("Lỗi cú pháp", "Mã nguồn LaTeX không được để trống.");
+        return;
+      }
+      try {
+        const parsed = parseLatexExam(latexSource, title);
+        if (parsed.questions.length === 0) {
+          toast.error("Không tìm thấy câu hỏi", "Vui lòng kiểm tra các khối \\begin{ex}...\\end{ex} trong mã LaTeX.");
+          return;
+        }
+        questionsToSave = parsed.questions;
+        if (parsed.title) setTitle(parsed.title);
+        if (parsed.code) setCode(parsed.code);
+        if (parsed.durationMinutes) setDurationMinutes(parsed.durationMinutes);
+      } catch (err: any) {
+        toast.error("Lỗi biên dịch LaTeX khi lưu", err.message || "Vui lòng kiểm tra lại cú pháp LaTeX.");
+        return;
+      }
+    }
+
     if (!title.trim()) {
       toast.warning("Thiếu tên đề", "Vui lòng nhập Tiêu đề cho bài kiểm tra.");
       setActiveTab("general");
@@ -467,11 +508,18 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
       setActiveTab("general");
       return;
     }
-    if (questions.length === 0) {
+    if (questionsToSave.length === 0) {
       toast.warning("Chưa có câu hỏi", "Đề thi phải có ít nhất một câu hỏi.");
       setActiveTab("questions");
       return;
     }
+
+    // Làm sạch tuyệt đối mọi đoạn mã khai báo, metadata hoặc preamble thừa khỏi từng câu hỏi
+    const finalCleanedQuestions: Question[] = questionsToSave.map((q) => ({
+      ...q,
+      content: cleanQuestionContent(q.content || ""),
+      explanation: cleanQuestionContent(q.explanation || ""),
+    }));
 
     const finalChapter = isCustomChapter ? customChapter : chapter;
     const updatedExam: Exam = {
@@ -486,7 +534,7 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
       description: description.trim(),
       author: author.trim() || "Tổ Toán",
       totalScore: Number(totalScore) || calculatedSumScore || 10,
-      questions,
+      questions: finalCleanedQuestions,
       createdAt: exam?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isLocked,
@@ -537,6 +585,15 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowPdfExport(true)}
+              className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 active:scale-98 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
+              title="Xuất đề thi ra PDF hoặc in ấn trực tiếp chuẩn Bộ GD&ĐT (A4)"
+            >
+              <Printer className="w-4 h-4 text-amber-600" />
+              <span className="hidden sm:inline">Xuất PDF / In</span>
+            </button>
             <button
               type="button"
               onClick={handleSaveAll}
@@ -1246,17 +1303,30 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
                           <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
                           <span>Chèn nhanh ký hiệu & công thức Toán học:</span>
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTargetInsertField("content");
-                            setShowTableBuilder(true);
-                          }}
-                          className="px-2 py-1 bg-white hover:bg-slate-100 text-indigo-700 border border-slate-200 rounded-lg text-[10px] font-bold transition flex items-center gap-1 shadow-2xs"
-                        >
-                          <Table className="w-3 h-3" />
-                          <span>Tạo Bảng biến thiên / Xét dấu</span>
-                        </button>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTargetInsertField("content");
+                              setShowInequalityModal(true);
+                            }}
+                            className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg text-[10px] font-bold transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                          >
+                            <Layers className="w-3 h-3 text-indigo-600" />
+                            <span>Biểu diễn Miền nghiệm Hệ BPT</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTargetInsertField("content");
+                              setShowTableBuilder(true);
+                            }}
+                            className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[10px] font-bold transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                          >
+                            <Table className="w-3 h-3 text-slate-600" />
+                            <span>Bảng biến thiên / Xét dấu</span>
+                          </button>
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -1264,12 +1334,12 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
                           { label: "$x^2$", code: "$x^2$" },
                           { label: "$\\frac{a}{b}$", code: "$\\frac{a}{b}$" },
                           { label: "$\\sqrt{x}$", code: "$\\sqrt{x}$" },
+                          { label: "Hệ PT \\heva", code: "$\\heva{\n  2x + y = 5 \\\\\n  x - y = 1\n}$" },
+                          { label: "Hệ BPT \\heva", code: "$\\heva{\n  x + y \\le 4 \\\\\n  x - y \\le 2 \\\\\n  x \\ge 0 \\\\\n  y \\ge 0\n}$" },
+                          { label: "Ngoặc vuông \\hoac", code: "$\\hoac{\n  x = 2 \\\\\n  x = -2\n}$" },
                           { label: "$\\vec{v}$", code: "$\\vec{v}$" },
                           { label: "$\\overrightarrow{AB}$", code: "$\\overrightarrow{AB}$" },
                           { label: "$\\int_a^b$", code: "$\\int_{a}^{b} f(x) dx$" },
-                          { label: "$\\alpha$", code: "$\\alpha$" },
-                          { label: "$\\pm$", code: "$\\pm$" },
-                          { label: "$\\in$", code: "$\\in$" },
                           { label: "$\\le$", code: "$\\le$" },
                           { label: "$\\ge$", code: "$\\ge$" },
                           { label: "$\\ne$", code: "$\\ne$" },
@@ -1860,6 +1930,48 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
           toast.success("Đã chèn bảng", "Mã bảng LaTeX đã được chèn vào nội dung soạn thảo.");
         }}
       />
+
+      {/* MODAL BIỂU DIỄN MIỀN NGHIỆM HỆ BPT */}
+      <InequalityDomainModal
+        isOpen={showInequalityModal}
+        onClose={() => setShowInequalityModal(false)}
+        onInsertLatex={(latexCode) => {
+          handleInsertFormulaSnippet(latexCode, targetInsertField);
+          setShowInequalityModal(false);
+          toast.success("Đã chèn miền nghiệm", "Đồ họa và hệ bất phương trình đã được đưa vào nội dung.");
+        }}
+      />
+
+      {/* MODAL XUẤT ĐỀ THI SANG PDF & IN ẤN */}
+      {showPdfExport && (
+        <ExamPdfExportModal
+          isOpen={showPdfExport}
+          onClose={() => setShowPdfExport(false)}
+          exam={{
+            id: exam?.id || `exam_${Date.now()}`,
+            title: title.trim() || "Đề kiểm tra",
+            code: code.trim().toUpperCase() || "MA_DE",
+            subject: subject.trim() || "Toán học",
+            grade: grade.trim() || "Lớp 12",
+            targetClass: targetClass.trim() || "Tất cả các lớp",
+            chapter: isCustomChapter ? customChapter : chapter,
+            durationMinutes: Number(durationMinutes) || 90,
+            description: description.trim(),
+            author: author.trim() || "Tổ Toán",
+            totalScore: Number(totalScore) || calculatedSumScore || 10,
+            questions: questions.map((q) => ({
+              ...q,
+              content: cleanQuestionContent(q.content || ""),
+              explanation: cleanQuestionContent(q.explanation || ""),
+            })),
+            createdAt: exam?.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            isLocked,
+            allowReview,
+            password,
+          }}
+        />
+      )}
     </div>
   );
 };

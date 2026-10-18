@@ -101,9 +101,10 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const badges: FilterBadge[] = [];
 
     if (selectedClassFilter !== "all") {
+      const isGrade = selectedClassFilter.startsWith("Lớp ") || selectedClassFilter.startsWith("Khối ");
       badges.push({
         id: "class",
-        label: `Lớp: ${selectedClassFilter}`,
+        label: isGrade ? selectedClassFilter : `Lớp: ${selectedClassFilter}`,
         onRemove: () => setSelectedClassFilter("all"),
       });
     }

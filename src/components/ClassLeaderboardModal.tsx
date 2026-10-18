@@ -8,6 +8,7 @@ import {
   ScoreTierKey,
   isScoreInTier,
   extractGradeFromClass,
+  matchClassFilter,
 } from "../utils/filterUtils";
 import { getDeletedUserIds } from "../services/firestoreService";
 import {
@@ -262,16 +263,9 @@ export const ClassLeaderboardModal: React.FC<ClassLeaderboardModalProps> = ({
       });
     }
 
-    // 3. Lọc theo Lớp
+    // 3. Lọc theo Lớp chuẩn xác và logic
     if (selectedClass !== "all") {
-      filteredSubs = filteredSubs.filter((s) => {
-        if (!s.studentClass) return false;
-        if (s.studentClass === selectedClass) return true;
-        const clsMatch = selectedClass.match(/\d+/);
-        const sMatch = s.studentClass.match(/\d+/);
-        if (clsMatch && sMatch && clsMatch[0] === sMatch[0] && selectedClass.startsWith("Lớp")) return true;
-        return false;
-      });
+      filteredSubs = filteredSubs.filter((s) => matchClassFilter(s.studentClass, selectedClass));
     }
 
     // 4. Lọc theo từ khóa tìm kiếm (Accent-insensitive)

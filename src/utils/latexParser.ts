@@ -1,6 +1,5 @@
 import { Exam, Question, QuestionType, PartType, ChoiceOption, TrueFalseItem } from "../types/exam";
 import { generateStandardExamCode, parseStandardExamCode } from "./examCodeHelper";
-import { extractLatexMacros } from "./tikzParser";
 
 /**
  * Parser phân tích mã LaTeX hỗ trợ 4 dạng thức câu hỏi chuẩn:
@@ -179,10 +178,8 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     });
   }
 
-  // Trích xuất các định nghĩa macro \newcommand, \def, \pgfmathsetmacro ở preamble trước hoặc ngoài các câu hỏi
-  const { cleaned: cleanedLatexContent, macros: preambleMacroMatches } = extractLatexMacros(latexContent);
-  const globalPreambleMacros = preambleMacroMatches.join("\n");
-  const lines = cleanedLatexContent.split("\n");
+  // Tách từng dòng mã nguồn LaTeX chuẩn xác để bóc tách câu hỏi
+  const lines = latexContent.split("\n");
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -220,8 +217,7 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
     if (line.includes("\\end{ex}") && inEx) {
       inEx = false;
       const rawExText = exContentLines.join("\n");
-      const fullExText = globalPreambleMacros ? `${globalPreambleMacros}\n${rawExText}` : rawExText;
-      const parsedQ = parseSingleExBlock(fullExText, currentPart, currentPartName, questionCounter, currentExId);
+      const parsedQ = parseSingleExBlock(rawExText, currentPart, currentPartName, questionCounter, currentExId);
       if (parsedQ) {
         questions.push(parsedQ);
         questionCounter++;
@@ -383,17 +379,38 @@ export function cleanQuestionContent(content: string): string {
   // 3. Xóa các macro \loigiai sót lại
   text = text.replace(/\\loigiai\b(?:\s*\[[^\]]*\])?/gi, "");
 
-  // 4. Xóa các dòng chú thích % ID
-  text = text.replace(/^\s*%\s*(?:ID|id):.*$/gm, "");
+  // 4. Xóa các dòng chú thích % ID và chú thích metadata cấu hình đề
+  text = text.replace(/^\s*%\s*(?:ID|id|GRADE|TARGET_CLASS|CHAPTER|LESSON|ATTEMPT|DURATION|AUTHOR|TITLE|DESCRIPTION|TOTAL_SCORE|IS_LOCKED|ALLOW_REVIEW|PASSWORD):.*$/gim, "");
 
-  // 5. Xóa các khai báo preamble rò rỉ nếu có ở đầu hoặc cuối câu hỏi
+  // 5. Xóa triệt để các đoạn mã khai báo metadata đề thi (thường bị rò rỉ hoặc thêm nhầm vào câu hỏi)
+  text = text.replace(/\\(?:re)?newcommand\*?\s*\{\s*\\(?:tenkythi|tenmonthi|lop|lopapdung|chuong|bai|tacgia|thoigian|thangdiem|thoiluong|totalscore|tieude|mon)\s*\}\s*(\{(?:[^{}]*|\{[^{}]*\})*\}|[^\n]*)/gi, "");
+  text = text.replace(/\\(?:re)?newcommand\*?\s*\\(?:tenkythi|tenmonthi|lop|lopapdung|chuong|bai|tacgia|thoigian|thangdiem|thoiluong|totalscore|tieude|mon)\b\s*(\{(?:[^{}]*|\{[^{}]*\})*\}|[^\n]*)?/gi, "");
+  text = text.replace(/\\def\s*\\(?:tenkythi|tenmonthi|lop|lopapdung|chuong|bai|tacgia|thoigian|thangdiem|thoiluong|totalscore|tieude|mon)\b\s*(\{(?:[^{}]*|\{[^{}]*\})*\}|[^\n]*)?/gi, "");
+
+  // 6. Xóa các khai báo preamble document rò rỉ nếu có ở đầu hoặc trong câu hỏi
+  text = text.replace(/\\documentclass(?:\s*\[[^\]]*\])?\{[^}]+\}/gi, "");
+  text = text.replace(/\\usepackage(?:\s*\[[^\]]*\])?\{[^}]+\}/gi, "");
+  text = text.replace(/\\geometry\{[^}]+\}/gi, "");
+  text = text.replace(/\\everymath\{[^}]+\}/gi, "");
+  text = text.replace(/\\pagestyle\{[^}]+\}/gi, "");
+  text = text.replace(/\\thispagestyle\{[^}]+\}/gi, "");
+  text = text.replace(/\\title\{[^}]+\}/gi, "");
+  text = text.replace(/\\maketitle\b/gi, "");
+  text = text.replace(/\\begin\{document\}|\\end\{document\}/gi, "");
+  text = text.replace(/\\begin\{ex\}(?:\s*%.*)?/gi, "");
+  text = text.replace(/\\end\{ex\}/gi, "");
   text = text.replace(/\\pgfplotsset\{[\s\S]*?\}/gi, "");
   text = text.replace(/\\usepgfplotslibrary\{[^}]+\}/gi, "");
   text = text.replace(/\\usetikzlibrary\{[^}]+\}/gi, "");
-  text = text.replace(/\\usepackage(?:\s*\[[^\]]*\])?\{[^}]+\}/gi, "");
   text = text.replace(/\\tikzset\{[\s\S]*?\}/gi, "");
+  text = text.replace(/\\tikzstyle\{[\s\S]*?\}/gi, "");
 
-  // 6. Chuẩn hóa lệnh khoảng trắng LaTeX "\ " (control space) và xóa dấu \ trơ trọi ở cuối câu dẫn/cuối dòng
+  // 7. Xóa tiêu đề Phần nếu bị dính vào câu hỏi (PHẦN I, PHẦN II...)
+  text = text.replace(/\{\s*\\bf\s+(?:PHẦN|Phần)\s+[IVX1234]+[^}]*\}/gi, "");
+  text = text.replace(/\\textbf\{\s*(?:PHẦN|Phần)\s+[IVX1234]+[^}]*\}/gi, "");
+  text = text.replace(/^\s*(?:PHẦN|Phần)\s+[IVX1234]+\..*$/gim, "");
+
+  // 8. Chuẩn hóa lệnh khoảng trắng LaTeX "\ " (control space) và xóa dấu \ trơ trọi ở cuối câu dẫn/cuối dòng
   text = text.replace(/\\ /g, " ");
   text = text.replace(/(?<!\\)\\(?:\s*)$/, "");
 
@@ -492,16 +509,7 @@ export function extractExplanationAndContent(rawBlock: string): { content: strin
     }
   }
 
-  const cleanPreamble = (s: string) =>
-    s
-      .replace(/\\pgfplotsset\{[\s\S]*?\}/gi, "")
-      .replace(/\\usepgfplotslibrary\{[^}]+\}/gi, "")
-      .replace(/\\usetikzlibrary\{[^}]+\}/gi, "")
-      .replace(/\\usepackage(?:\s*\[[^\]]*\])?\{[^}]+\}/gi, "")
-      .replace(/\\tikzset\{[\s\S]*?\}/gi, "")
-      .trim();
-
-  return { content: cleanPreamble(text), explanation: cleanPreamble(explanation) };
+  return { content: cleanQuestionContent(text), explanation: cleanQuestionContent(explanation) };
 }
 
 /**
@@ -853,38 +861,46 @@ ${exam.targetClass ? `\\newcommand{\\lopapdung}{${exam.targetClass}}\n` : ""}${e
   if (part1.length > 0) {
     tex += `{\\bf PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn.}\n\n`;
     part1.forEach((q) => {
-      tex += `\\begin{ex} % ID: [${q.id}]\n${q.content}\n\\choice\n`;
+      const cleanContent = cleanQuestionContent(q.content || "");
+      const cleanExplanation = cleanQuestionContent(q.explanation || "");
+      tex += `\\begin{ex} % ID: [${q.id}]\n${cleanContent}\n\\choice\n`;
       (q.options || []).forEach((opt) => {
         tex += opt.isCorrect ? `   {\\True ${opt.text}}\n` : `   {${opt.text}}\n`;
       });
-      tex += `\\loigiai{\n${q.explanation}\n}\n\\end{ex}\n\n`;
+      tex += `\\loigiai{\n${cleanExplanation}\n}\n\\end{ex}\n\n`;
     });
   }
 
   if (part2.length > 0) {
     tex += `{\\bf PHẦN II. Câu trắc nghiệm đúng sai.}\n\n`;
     part2.forEach((q) => {
-      tex += `\\begin{ex} % ID: [${q.id}]\n${q.content}\n\\choiceTF[1]\n`;
+      const cleanContent = cleanQuestionContent(q.content || "");
+      const cleanExplanation = cleanQuestionContent(q.explanation || "");
+      tex += `\\begin{ex} % ID: [${q.id}]\n${cleanContent}\n\\choiceTF[1]\n`;
       (q.tfItems || []).forEach((item) => {
         tex += item.isCorrect ? `   {\\True ${item.text}}\n` : `   {${item.text}}\n`;
       });
-      tex += `\\loigiai{\n${q.explanation}\n}\n\\end{ex}\n\n`;
+      tex += `\\loigiai{\n${cleanExplanation}\n}\n\\end{ex}\n\n`;
     });
   }
 
   if (part3.length > 0) {
     tex += `{\\bf PHẦN III. Câu trắc nghiệm trả lời ngắn.}\n\n`;
     part3.forEach((q) => {
-      tex += `\\begin{ex} % ID: [${q.id}]\n${q.content}\n\\shortans{${q.correctAnswer || ""}}\n`;
-      tex += `\\loigiai{\n${q.explanation}\n}\n\\end{ex}\n\n`;
+      const cleanContent = cleanQuestionContent(q.content || "");
+      const cleanExplanation = cleanQuestionContent(q.explanation || "");
+      tex += `\\begin{ex} % ID: [${q.id}]\n${cleanContent}\n\\shortans{${q.correctAnswer || ""}}\n`;
+      tex += `\\loigiai{\n${cleanExplanation}\n}\n\\end{ex}\n\n`;
     });
   }
 
   if (part4.length > 0) {
     tex += `{\\bf PHẦN IV. Câu hỏi tự luận.}\n\n`;
     part4.forEach((q) => {
-      tex += `\\begin{ex} % ID: [${q.id}]\n${q.content}\n`;
-      tex += `\\loigiai{\n${q.explanation}\n}\n\\end{ex}\n\n`;
+      const cleanContent = cleanQuestionContent(q.content || "");
+      const cleanExplanation = cleanQuestionContent(q.explanation || "");
+      tex += `\\begin{ex} % ID: [${q.id}]\n${cleanContent}\n`;
+      tex += `\\loigiai{\n${cleanExplanation}\n}\n\\end{ex}\n\n`;
     });
   }
 

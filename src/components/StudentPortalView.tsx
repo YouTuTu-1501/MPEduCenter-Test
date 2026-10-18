@@ -5,6 +5,7 @@ import { Exam, StudentSubmission, checkExamAccessStatus, STANDARD_GRADES } from 
 import { MathRenderer } from "./MathRenderer";
 import { ExamCodeEntryModal } from "./ExamCodeEntryModal";
 import { isExamCodeMatch, parseStandardExamCode } from "../utils/examCodeHelper";
+import { matchExamSearch } from "../utils/filterUtils";
 import { useToast } from "../context/ToastContext";
 import {
   ResponsiveContainer,
@@ -373,17 +374,11 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
     };
   }, [mySubmissions]);
 
-  // Lọc danh sách đề thi
+  // Lọc danh sách đề thi thông minh (hỗ trợ tiếng Việt không dấu, tìm theo Mã, Tên, Chương...)
   const filteredExams = useMemo(() => {
     return exams.filter((e) => {
       const matchGrade = gradeFilter === "all" || (e.grade && e.grade === gradeFilter);
-      const cleanSearch = searchQuery.trim().toLowerCase();
-      const matchSearch =
-        cleanSearch === "" ||
-        e.title.toLowerCase().includes(cleanSearch) ||
-        isExamCodeMatch(cleanSearch, e.code) ||
-        e.code.toLowerCase().includes(cleanSearch) ||
-        (e.chapter && e.chapter.toLowerCase().includes(cleanSearch));
+      const matchSearch = matchExamSearch(e, searchQuery);
       return matchGrade && matchSearch;
     });
   }, [exams, gradeFilter, searchQuery]);

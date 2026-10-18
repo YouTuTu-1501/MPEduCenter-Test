@@ -25,7 +25,9 @@ import {
   X,
   Volume2,
   VolumeX,
+  Printer,
 } from "lucide-react";
+import { ExamPdfExportModal } from "./ExamPdfExportModal";
 
 interface PresentationViewProps {
   exam: Exam;
@@ -72,6 +74,9 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
   // Toàn màn hình
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Modal Xuất PDF / In ấn
+  const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
 
   const currentQ: Question | undefined = exam.questions[currentIndex];
 
@@ -353,6 +358,18 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
             >
               <span>⏳</span>
               <span>{isTimerRunning ? formatTime(timerRemaining) : `Bắt đầu (${formatTime(timerRemaining)})`}</span>
+            </button>
+
+            {/* Xuất PDF / In ấn đề thi */}
+            <button
+              id="btn-presentation-pdf"
+              type="button"
+              onClick={() => setShowPdfModal(true)}
+              className="px-3 py-1.5 rounded-full bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 font-bold text-xs flex items-center gap-1.5 border border-slate-200 transition shadow-xs"
+              title="Xuất đề thi sang PDF hoặc In ấn A4 (LaTeX)"
+            >
+              <Printer className="w-3.5 h-3.5 text-indigo-600" />
+              <span className="hidden sm:inline">Xuất PDF / In</span>
             </button>
 
             {/* Toàn màn hình */}
@@ -823,6 +840,13 @@ export const PresentationView: React.FC<PresentationViewProps> = ({
           <span className="text-2xl font-black">{feedbackPopup.text}</span>
         </div>
       )}
+
+      {/* Modal Xuất PDF & In ấn chuẩn Bộ GD&ĐT */}
+      <ExamPdfExportModal
+        isOpen={showPdfModal}
+        onClose={() => setShowPdfModal(false)}
+        exam={exam}
+      />
     </div>
   );
 };

@@ -87,6 +87,16 @@ const KATEX_GLOBAL_MACROS: Record<string, string> = {
   "\\lcm": "\\operatorname{lcm}",
   "\\mod": "\\pmod{#1}",
 
+  // Hệ phương trình, bất phương trình và ký hiệu SGK GDPT
+  "\\heva": "\\begin{cases}#1\\end{cases}",
+  "\\hoac": "\\left[\\begin{array}{l}#1\\end{array}\\right.",
+  "\\system": "\\begin{cases}#1\\end{cases}",
+  "\\pt": "\\mathrm{pt}",
+  "\\hpt": "\\mathrm{hpt}",
+  "\\bpt": "\\mathrm{bpt}",
+  "\\hbpt": "\\mathrm{hbpt}",
+  "\\dang": "\\angle",
+
   // Ký hiệu bổ trợ và không gian
   "\\bm": "\\boldsymbol{#1}",
   "\\bold": "\\mathbf{#1}",
@@ -107,9 +117,93 @@ function decodeHtmlEntitiesInMath(raw: string): string {
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
+    .replace(/&le;/gi, "\\le ")
+    .replace(/&ge;/gi, "\\ge ")
+    .replace(/&ne;/gi, "\\ne ")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
     .replace(/<br\s*\/?>/gi, " \\\\ ");
+}
+
+/**
+ * Trích xuất và thay thế an toàn các macro có cặp ngoặc nhọn lồng nhau {...} (như \\heva{...}, \\hoac{...})
+ */
+function replaceBalancedMacro(
+  input: string,
+  macroName: string,
+  transform: (inner: string) => string
+): string {
+  let result = "";
+  let cursor = 0;
+  const pattern = new RegExp(`\\\\${macroName}\\s*\\{`, "g");
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(input)) !== null) {
+    const startIdx = match.index;
+    result += input.substring(cursor, startIdx);
+    const braceStart = pattern.lastIndex - 1;
+
+    let depth = 1;
+    let braceEnd = -1;
+    for (let i = braceStart + 1; i < input.length; i++) {
+      const char = input[i];
+      if (char === "\\") {
+        i++; // Bỏ qua escape
+        continue;
+      }
+      if (char === "{") depth++;
+      else if (char === "}") {
+        depth--;
+        if (depth === 0) {
+          braceEnd = i;
+          break;
+        }
+      }
+    }
+
+    if (braceEnd !== -1) {
+      const innerContent = input.substring(braceStart + 1, braceEnd);
+      result += transform(innerContent);
+      cursor = braceEnd + 1;
+      pattern.lastIndex = cursor;
+    } else {
+      // Không đóng ngoặc: giữ nguyên
+      result += input.substring(startIdx, pattern.lastIndex);
+      cursor = pattern.lastIndex;
+    }
+  }
+
+  result += input.substring(cursor);
+  return result;
+}
+
+/**
+ * Chuẩn hóa các dòng phương trình/bất phương trình trong hệ
+ */
+function formatSystemLines(inner: string): string[] {
+  let normalized = inner;
+  // Chuẩn hóa dấu \ đơn lẻ kèm khoảng trắng/tab/xuống dòng giữa các phương trình (kể cả cùng một dòng hoặc nhiều dòng) thành \\
+  normalized = normalized.replace(/(?<=[^\\])\\\s+(?=\S)/g, " \\\\ ");
+  normalized = normalized.replace(/(?<=[^\\])\\\s*(\n|$)/g, " \\\\ ");
+
+  // Tách dòng bởi \\ hoặc \cr
+  const rawLines = normalized.split(/\\\\|\\cr/g);
+  const formatted: string[] = [];
+
+  for (const raw of rawLines) {
+    let line = raw.trim();
+    if (!line) continue;
+    // Chuẩn hóa & thừa ở đầu dòng nếu không phải căn lề 2 cột
+    if (line.startsWith("&")) {
+      line = line.replace(/^&\s*/, "");
+    }
+    // Xóa dấu phẩy hoặc chấm phẩy cuối dòng nếu đứng trước xuống dòng
+    line = line.replace(/[,;]\s*$/, "");
+    if (line) {
+      formatted.push(line);
+    }
+  }
+  return formatted;
 }
 
 /**
@@ -119,49 +213,106 @@ function cleanMath(raw: string): string {
   if (!raw) return "";
   let m = decodeHtmlEntitiesInMath(raw.trim());
 
-  // Xử lý macro \hoac{...} và \heva{...}
-  m = m.replace(/\\hoac\s*\{([\s\S]*?)\}/g, (_, inner) => {
-    const lines = inner.split(/\\\\|\\cr/g).map((l: string) => l.trim()).filter(Boolean);
+  // 0. Chuẩn hóa các dấu ngắt dòng trong môi trường hệ phương trình / bảng array / cases / aligned
+  // Hỗ trợ trường hợp gõ nhầm 1 dấu \ trước khoảng trắng hoặc xuống dòng (ví dụ "0\ -x" hoặc "0\\\n")
+  m = m.replace(
+    /(\\begin\{(?:array|cases|aligned)\}(?:\{[^}]*\})?)([\s\S]*?)(\\end\{(?:array|cases|aligned)\})/gi,
+    (match, open, body, close) => {
+      let b = body;
+      // Chuyển đổi dấu \ đơn lẻ kèm khoảng trắng/tab/xuống dòng giữa các phương trình thành \\
+      b = b.replace(/(?<=[^\\])\\\s+(?=\S)/g, " \\\\ ");
+      b = b.replace(/(?<=[^\\])\\\s*(\n|$)/g, " \\\\ ");
+
+      // Tách dòng và bổ sung \\ nếu các phương trình nằm trên các dòng riêng mà thiếu \\
+      const rawLines = b.split("\n");
+      const newLines: string[] = [];
+      for (let i = 0; i < rawLines.length; i++) {
+        let line = rawLines[i];
+        if (!line.trim()) {
+          newLines.push(line);
+          continue;
+        }
+        if (
+          !line.trim().endsWith("\\\\") &&
+          !line.trim().endsWith("\\cr") &&
+          i < rawLines.length - 1
+        ) {
+          const remaining = rawLines.slice(i + 1).some((l) => l.trim().length > 0);
+          if (remaining) {
+            line = line + " \\\\";
+          }
+        }
+        newLines.push(line);
+      }
+      b = newLines.join("\n");
+      // Dọn dẹp \\ thừa ở cuối body
+      b = b.replace(/\\\\\s*$/g, "");
+      return open + b + close;
+    }
+  );
+
+  // Chuẩn hóa \ đơn lẻ trong \left\{ ... \right.
+  m = m.replace(/(\\left[\{\[])([\s\S]*?)(\\right\.)/gi, (match, open, body, close) => {
+    if (!body.includes("\\begin{")) {
+      let b = body;
+      b = b.replace(/(?<=[^\\])\\\s+(?=\S)/g, " \\\\ ");
+      b = b.replace(/(?<=[^\\])\\\s*(\n|$)/g, " \\\\ ");
+      return open + b + close;
+    }
+    return match;
+  });
+
+  // 1. Xử lý chuẩn xác các macro hệ phương trình \heva{...}, \system{...} bằng thuật toán đếm ngoặc
+  m = replaceBalancedMacro(m, "heva", (inner) => {
+    const lines = formatSystemLines(inner);
+    return `\\begin{cases}${lines.join(" \\\\ ")}\\end{cases}`;
+  });
+
+  m = replaceBalancedMacro(m, "system", (inner) => {
+    const lines = formatSystemLines(inner);
+    return `\\begin{cases}${lines.join(" \\\\ ")}\\end{cases}`;
+  });
+
+  // 2. Xử lý macro ngoặc vuông hệ tuyển \hoac{...}
+  m = replaceBalancedMacro(m, "hoac", (inner) => {
+    const lines = formatSystemLines(inner);
     return `\\left[\\begin{array}{l}${lines.join(" \\\\ ")}\\end{array}\\right.`;
   });
 
-  m = m.replace(/\\heva\s*\{([\s\S]*?)\}/g, (_, inner) => {
-    const lines = inner.split(/\\\\|\\cr/g).map((l: string) => l.trim()).filter(Boolean);
-    return `\\begin{cases}${lines.join(" \\\\ ")}\\end{cases}`;
-  });
-
-  m = m.replace(/\\system\s*\{([\s\S]*?)\}/g, (_, inner) => {
-    const lines = inner.split(/\\\\|\\cr/g).map((l: string) => l.trim()).filter(Boolean);
-    return `\\begin{cases}${lines.join(" \\\\ ")}\\end{cases}`;
-  });
-
-  // Chuẩn hóa vector macro
+  // 3. Chuẩn hóa vector macro
   m = m.replace(/\\underrightarrow\{([^}]+)\}/g, "\\overrightarrow{$1}");
   m = m.replace(/\\vect\{([^}]+)\}/g, "\\overrightarrow{$1}");
   m = m.replace(/\\vec\{([^}]+)\}/g, "\\overrightarrow{$1}");
   m = m.replace(/\\vec\s+([a-zA-Z0-9])/g, "\\overrightarrow{$1}");
   m = m.replace(/\\vv\{([^}]+)\}/g, "\\overrightarrow{$1}");
 
-  // Chuẩn hóa ký hiệu góc và cung
+  // 4. Chuẩn hóa ký hiệu góc và cung
   m = m.replace(/\\wideparen\{([^}]+)\}/g, "\\overset{\\frown}{$1}");
   m = m.replace(/\\arc\{([^}]+)\}/g, "\\overset{\\frown}{$1}");
+  m = m.replace(/\\dang\b/g, "\\angle");
 
-  // Chuẩn hóa các ký hiệu mũi tên thường gặp trong bảng biến thiên
+  // 5. Chuẩn hóa các ký hiệu mũi tên thường gặp trong bảng biến thiên
   m = m.replace(/\\nearrow/g, "\\nearrow");
   m = m.replace(/\\searrow/g, "\\searrow");
   m = m.replace(/\\uparrow/g, "\\uparrow");
   m = m.replace(/\\downarrow/g, "\\downarrow");
 
-  // Chuẩn hóa vạch kép trong array bảng biến thiên nếu cần
-  m = m.replace(/\\parallel/g, "\\parallel");
-
-  // Dọn dẹp các dấu xuống dòng kép thừa trước \end{array}, \end{matrix}, \end{aligned}, \end{cases}
+  // 6. Dọn dẹp các dấu xuống dòng kép thừa trước các môi trường đóng
   m = m.replace(/\\\\\s*\\end\{array\}/g, "\\end{array}");
   m = m.replace(/\\\\\s*\\end\{matrix\}/g, "\\end{matrix}");
   m = m.replace(/\\\\\s*\\end\{pmatrix\}/g, "\\end{pmatrix}");
   m = m.replace(/\\\\\s*\\end\{bmatrix\}/g, "\\end{bmatrix}");
   m = m.replace(/\\\\\s*\\end\{aligned\}/g, "\\end{aligned}");
   m = m.replace(/\\\\\s*\\end\{cases\}/g, "\\end{cases}");
+
+  // 7. Tự động kiểm tra và cân bằng \left và \right để tránh lỗi KaTeX parse error unclosed delimiter
+  const leftMatches = m.match(/\\left(?:[\[\{\(\|\.]|\\\{)/g);
+  const rightMatches = m.match(/\\right(?:[\]\}\)\|\.]|\\\})/g);
+  const leftCount = leftMatches ? leftMatches.length : 0;
+  const rightCount = rightMatches ? rightMatches.length : 0;
+  if (leftCount > rightCount) {
+    m += "\\right.".repeat(leftCount - rightCount);
+  }
 
   return m;
 }
@@ -320,43 +471,10 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
       return `%%%TIKZ_PLACEHOLDER_${idx}%%%`;
     });
 
-    // =========================================================================
-    // 3. XỬ LÝ ĐẶC BIỆT: \begin{array} NẰM NGOÀI DẤU $$ HOẶC $
-    // =========================================================================
-    text = text.replace(
-      /(?<!\$|\(|\[)\\begin\{array\}\{([\s\S]*?)\}([\s\S]*?)\\end\{array\}(?!\$|\)|\])/g,
-      (match) => `$$${match}$$`
-    );
-
-    // =========================================================================
-    // 4. TRÍCH XUẤT VÀ RENDER CÁC KHỐI TOÁN HỌC KATEX
-    // =========================================================================
-    // Regex chuẩn xác bắt: $$...$$, \[...\], $...$, \(...\)
-    const mathRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^\$\n]+?\$|\\\([\s\S]*?\\\))/g;
-
-    text = text.replace(mathRegex, (match) => {
-      let isDisplay = false;
-      let rawMath = "";
-
-      if (match.startsWith("$$") && match.endsWith("$$")) {
-        isDisplay = true;
-        rawMath = match.slice(2, -2);
-      } else if (match.startsWith("\\[") && match.endsWith("\\]")) {
-        isDisplay = true;
-        rawMath = match.slice(2, -2);
-      } else if (match.startsWith("$") && match.endsWith("$")) {
-        isDisplay = false;
-        rawMath = match.slice(1, -1);
-      } else if (match.startsWith("\\(") && match.endsWith("\\)")) {
-        isDisplay = false;
-        rawMath = match.slice(2, -2);
-      } else {
-        return match;
-      }
-
+    // Hàm tiện ích render KaTeX an toàn có fallback
+    const renderKatexBlock = (rawMath: string, isDisplay: boolean, originalMatch: string): string => {
       const cleaned = cleanMath(rawMath);
       let rendered = "";
-
       try {
         rendered = katex.renderToString(cleaned, {
           displayMode: isDisplay,
@@ -378,14 +496,80 @@ export const MathRenderer: React.FC<MathRendererProps> = ({
             macros: KATEX_GLOBAL_MACROS,
           });
         } catch {
-          rendered = `<span class="text-rose-500 font-mono text-xs">${match}</span>`;
+          rendered = `<span class="text-rose-500 font-mono text-xs">${originalMatch}</span>`;
         }
       }
+      return rendered;
+    };
 
+    // =========================================================================
+    // 3. TRÍCH XUẤT VÀ RENDER CÁC KHỐI TOÁN ĐÃ CÓ DELIMITERS ($$, \[, \(, $)
+    // =========================================================================
+    // Regex chuẩn xác bắt: $$...$$, \[...\], \(...\), và $...$ (hỗ trợ xuống dòng trong hệ phương trình)
+    const mathRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$(?!\$)(?:[^\$\n]|(?<!\n)\n(?!\s*\n))+?\$)/g;
+
+    text = text.replace(mathRegex, (match) => {
+      let isDisplay = false;
+      let rawMath = "";
+
+      if (match.startsWith("$$") && match.endsWith("$$")) {
+        isDisplay = true;
+        rawMath = match.slice(2, -2);
+      } else if (match.startsWith("\\[") && match.endsWith("\\]")) {
+        isDisplay = true;
+        rawMath = match.slice(2, -2);
+      } else if (match.startsWith("\\(") && match.endsWith("\\)")) {
+        isDisplay = false;
+        rawMath = match.slice(2, -2);
+      } else if (match.startsWith("$") && match.endsWith("$")) {
+        // Công thức inline trong cặp dấu $...$ giữ displayMode = false để văn bản và dấu câu (như ?, ., :) không bị rớt dòng
+        isDisplay = false;
+        rawMath = match.slice(1, -1);
+      } else {
+        return match;
+      }
+
+      const rendered = renderKatexBlock(rawMath, isDisplay, match);
       const idx = mathList.length;
       mathList.push(rendered);
       return `%%%MATH_PLACEHOLDER_${idx}%%%`;
     });
+
+    // =========================================================================
+    // 4. XỬ LÝ CÁC MÔI TRƯỜNG TOÁN ĐỘC LẬP CÒN LẠI (Chưa có dấu $ bao quanh)
+    // =========================================================================
+    // 4.1. \begin{array}, \begin{cases}, \begin{aligned}, \begin{matrix}
+    text = text.replace(
+      /\\begin\{(array|cases|aligned|matrix|pmatrix|bmatrix)\}([\s\S]*?)\\end\{\1\}/g,
+      (match) => {
+        const rendered = renderKatexBlock(match, true, match);
+        const idx = mathList.length;
+        mathList.push(rendered);
+        return `%%%MATH_PLACEHOLDER_${idx}%%%`;
+      }
+    );
+
+    // 4.2. \heva{...}, \hoac{...}, \system{...}
+    text = text.replace(
+      /\\(?:heva|hoac|system)\s*\{([\s\S]*?)\}/g,
+      (match) => {
+        const rendered = renderKatexBlock(match, true, match);
+        const idx = mathList.length;
+        mathList.push(rendered);
+        return `%%%MATH_PLACEHOLDER_${idx}%%%`;
+      }
+    );
+
+    // 4.3. \left\{ ... \right. hoặc \left[ ... \right.
+    text = text.replace(
+      /\\left[\{\[]([\s\S]*?)\\right\./g,
+      (match) => {
+        const rendered = renderKatexBlock(match, true, match);
+        const idx = mathList.length;
+        mathList.push(rendered);
+        return `%%%MATH_PLACEHOLDER_${idx}%%%`;
+      }
+    );
 
     // =========================================================================
     // 5. CHUẨN HÓA VĂN BẢN PLAIN TEXT (Sau khi đã bảo vệ toàn bộ Math/TikZ/Tables)

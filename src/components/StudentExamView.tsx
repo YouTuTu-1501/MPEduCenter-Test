@@ -53,7 +53,10 @@ import {
   Target,
   BellOff,
   Zap,
+  Printer,
 } from "lucide-react";
+import { StudentRemedialSection } from "./StudentRemedialSection";
+import { ExamPdfExportModal } from "./ExamPdfExportModal";
 
 interface StudentExamViewProps {
   exam: Exam;
@@ -77,7 +80,35 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
   const [hasStarted, setHasStarted] = useState<boolean>(false);
   const [submission, setSubmission] = useState<StudentSubmission | null>(null);
   const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
+  const [showExportPdfModal, setShowExportPdfModal] = useState<boolean>(false);
   const [enteredPassword, setEnteredPassword] = useState<string>("");
+
+  // Danh sách các câu hỏi học sinh làm sai hoặc chưa đạt điểm trọn vẹn (cho Gemini AI đề xuất bài tập bổ trợ)
+  const wrongQuestionsForAi = useMemo(() => {
+    if (!submission) return [];
+    return exam.questions
+      .filter((q) => {
+        const detail = submission.details[q.id];
+        if (!detail) return true;
+        return !detail.isCorrect || (detail.earnedScore || 0) < ((detail.maxScore || 1) * 0.99);
+      })
+      .map((q) => {
+        const detail = submission.details[q.id];
+        return {
+          id: q.id,
+          title: q.title,
+          type: q.type,
+          content: q.content,
+          options: q.options,
+          tfItems: q.tfItems,
+          correctAnswer: q.correctAnswer,
+          explanation: q.explanation,
+          studentAnswer: detail?.userAnswer,
+          earnedScore: detail?.earnedScore,
+          maxScore: detail?.maxScore,
+        };
+      });
+  }, [submission, exam.questions]);
 
   // Tổng thời gian làm bài (giây)
   const totalDurationSeconds = useMemo(() => exam.durationMinutes * 60, [exam.durationMinutes]);

@@ -11,9 +11,11 @@ import {
 } from "../types/auth";
 import { Exam, StudentSubmission, STANDARD_CLASSES } from "../types/exam";
 import { ExamEditorModal } from "./ExamEditorModal";
+import { ExamPdfExportModal } from "./ExamPdfExportModal";
 import { AdminRealtimeSyncMonitor } from "./AdminRealtimeSyncMonitor";
 import { useToast } from "../context/ToastContext";
 import { useFilter } from "../context/FilterContext";
+import { matchClassFilter, matchExamClassFilter, matchSearchQuery } from "../utils/filterUtils";
 import {
   wipeAndResetAllData,
   clearAllSubmissions,
@@ -142,6 +144,9 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
 
   // State chỉnh sửa đề thi
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
+
+  // State xuất đề thi sang PDF & In ấn chuẩn Bộ GD&ĐT
+  const [pdfExportExam, setPdfExportExam] = useState<Exam | null>(null);
 
   // Chọn người dùng hàng loạt (Batch Selection)
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -342,38 +347,21 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     return analyzeSystemAnomalies(submissions, exams, users);
   }, [submissions, exams, users]);
 
-  // Lọc danh sách người dùng
+  // Lọc danh sách người dùng (hỗ trợ tiếng Việt không dấu, tìm theo Tên, Email, SBD, Lớp, Môn, SĐT)
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
       const matchRole = roleFilter === "all" || u.role === roleFilter;
       const matchStatus = statusFilter === "all" || u.status === statusFilter;
-      let matchClass = adminClassFilter === "all";
-      if (!matchClass && u.schoolClass) {
-        if (u.schoolClass === adminClassFilter) {
-          matchClass = true;
-        } else {
-          const admMatch = adminClassFilter.match(/\d+/);
-          const userMatch = u.schoolClass.match(/\d+/);
-          if (admMatch && userMatch && admMatch[0] === userMatch[0]) {
-            const isFilterGrade = adminClassFilter.startsWith("Lớp") || adminClassFilter.startsWith("Khối") || /^\d+$/.test(adminClassFilter);
-            if (isFilterGrade) {
-              matchClass = true;
-            } else {
-              const uClean = u.schoolClass.toLowerCase().replace(/^(lớp|khối)\s*/, "");
-              const aClean = adminClassFilter.toLowerCase().replace(/^(lớp|khối)\s*/, "");
-              if (uClean === aClean) matchClass = true;
-            }
-          }
-        }
-      }
-      const matchSearch =
-        searchQuery === "" ||
-        u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (u.candidateNumber && u.candidateNumber.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (u.schoolClass && u.schoolClass.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (u.subject && u.subject.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (u.phone && u.phone.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchClass = matchClassFilter(u.schoolClass, adminClassFilter);
+      const matchSearch = matchSearchQuery(
+        searchQuery,
+        u.name,
+        u.email,
+        u.candidateNumber,
+        u.schoolClass,
+        u.subject,
+        u.phone
+      );
       return matchRole && matchStatus && matchClass && matchSearch;
     });
   }, [users, roleFilter, statusFilter, adminClassFilter, searchQuery]);
@@ -436,19 +424,10 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
     setSearchQuery("");
   };
 
-  // Lọc danh sách đề thi theo lớp được Admin chọn
+  // Lọc danh sách đề thi theo lớp hoặc khối được Admin chọn (logic chuẩn xác, không nhận nhầm lớp khác)
   const filteredExams = useMemo(() => {
     if (adminClassFilter === "all") return exams;
-    return exams.filter((e) => {
-      if (e.targetClass && e.targetClass === adminClassFilter) return true;
-      if (e.grade === adminClassFilter) return true;
-      const admMatch = adminClassFilter.match(/\d+/);
-      const gradeMatch = e.grade?.match(/\d+/);
-      const targetMatch = e.targetClass?.match(/\d+/);
-      if (admMatch && gradeMatch && admMatch[0] === gradeMatch[0]) return true;
-      if (admMatch && targetMatch && admMatch[0] === targetMatch[0]) return true;
-      return false;
-    });
+    return exams.filter((e) => matchExamClassFilter(e, adminClassFilter));
   }, [exams, adminClassFilter]);
 
   // Xử lý chọn tất cả trong bảng
@@ -1857,15 +1836,24 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => setPdfExportExam(exam)}
+                          className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold transition flex items-center gap-1 border border-amber-200/60"
+                          title="Xuất đề thi PDF & In ấn chuẩn Bộ GD&ĐT (A4)"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-amber-600" />
+                          <span>In / PDF</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => setEditingExam(exam)}
-                          className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold transition flex items-center gap-1 border border-amber-200/60"
+                          className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition flex items-center gap-1 border border-indigo-200/60"
                           title="Chỉnh sửa toàn diện đề thi (Mã đề, Thời gian, Nội dung, Câu hỏi...)"
                         >
-                          <Edit2 className="w-3.5 h-3.5 text-amber-600" />
+                          <Edit2 className="w-3.5 h-3.5 text-indigo-600" />
                           <span>Sửa đề</span>
                         </button>
                         <button
@@ -1880,7 +1868,7 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
                         <button
                           type="button"
                           onClick={() => onSelectExam(exam, "exam")}
-                          className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition flex items-center gap-1"
+                          className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1"
                           title="Thi trực tuyến"
                         >
                           <span>Thi thử</span>
@@ -3702,6 +3690,15 @@ export const AdminManagementView: React.FC<AdminManagementViewProps> = ({
             onDeleteExam(id);
             setEditingExam(null);
           }}
+        />
+      )}
+
+      {/* MODAL XUẤT ĐỀ THI SANG PDF & IN ẤN */}
+      {pdfExportExam && (
+        <ExamPdfExportModal
+          isOpen={!!pdfExportExam}
+          exam={pdfExportExam}
+          onClose={() => setPdfExportExam(null)}
         />
       )}
     </div>
