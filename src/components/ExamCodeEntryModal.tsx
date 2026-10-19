@@ -1,6 +1,10 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Exam, checkExamAccessStatus } from "../types/exam";
-import { parseStandardExamCode, isExamCodeMatch } from "../utils/examCodeHelper";
+import {
+  parseStandardExamCode,
+  findExamByCodeFlexible,
+} from "../utils/examCodeHelper";
+import { fetchExamByCodeFromCloud } from "../services/firestoreService";
 import { useToast } from "../context/ToastContext";
 import {
   KeyRound,
@@ -17,6 +21,7 @@ import {
   GraduationCap,
   ShieldAlert,
   Info,
+  RefreshCw,
 } from "lucide-react";
 
 interface ExamCodeEntryModalProps {
@@ -38,6 +43,15 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
   const [inputCode, setInputCode] = useState<string>(initialCode);
   const [inputPassword, setInputPassword] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [isSearchingCloud, setIsSearchingCloud] = useState<boolean>(false);
+  const [cloudFoundExam, setCloudFoundExam] = useState<Exam | null>(null);
+
+  useEffect(() => {
+    if (isOpen && initialCode) {
+      setInputCode(initialCode);
+      setErrorMessage("");
+    }
+  }, [isOpen, initialCode]);
 
   // Phân tích mã người dùng đang gõ theo quy luật [lớp][chương][bài][lần]
   const parsedInput = useMemo(() => {
@@ -45,17 +59,43 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
   }, [inputCode]);
 
   // Tìm đề thi tương ứng với mã học sinh nhập (hỗ trợ nhập linh hoạt dạng 12-01-14-01 hoặc 12011401)
-  const matchedExam = useMemo(() => {
-    const clean = inputCode.trim().toLowerCase();
-    if (!clean) return null;
-    return exams.find(
-      (e) =>
-        isExamCodeMatch(clean, e.code) ||
-        e.code.toLowerCase() === clean ||
-        e.id.toLowerCase() === clean ||
-        e.title.toLowerCase().includes(clean)
-    );
+  const localMatchedExam = useMemo(() => {
+    return findExamByCodeFlexible(exams, inputCode) || null;
   }, [exams, inputCode]);
+
+  // Tự động tra cứu trên Firestore nếu học sinh nhập mã chuẩn nhưng danh sách local chưa kịp đồng bộ
+  useEffect(() => {
+    if (!isOpen) return;
+    const clean = inputCode.trim();
+    if (!clean || localMatchedExam) {
+      setCloudFoundExam(null);
+      return;
+    }
+    const parsed = parseStandardExamCode(clean);
+    if (!parsed.isValid && clean.length < 6) {
+      setCloudFoundExam(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingCloud(true);
+    fetchExamByCodeFromCloud(clean, exams)
+      .then(({ matchedExam: found }) => {
+        if (!cancelled) {
+          setCloudFoundExam(found);
+          setIsSearchingCloud(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIsSearchingCloud(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [inputCode, localMatchedExam, isOpen, exams]);
+
+  const matchedExam = localMatchedExam || cloudFoundExam;
 
   // Kiểm tra trạng thái đề nếu tìm thấy
   const accessStatus = matchedExam ? checkExamAccessStatus(matchedExam) : null;
@@ -63,7 +103,7 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
   if (!isOpen) return null;
 
   // Xử lý vào thi
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage("");
 
@@ -72,14 +112,25 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
       return;
     }
 
-    if (!matchedExam) {
+    let targetExam = matchedExam;
+    if (!targetExam) {
+      setIsSearchingCloud(true);
+      const { matchedExam: cloudMatch } = await fetchExamByCodeFromCloud(inputCode, exams);
+      setIsSearchingCloud(false);
+      targetExam = cloudMatch;
+      if (cloudMatch) {
+        setCloudFoundExam(cloudMatch);
+      }
+    }
+
+    if (!targetExam) {
       setErrorMessage(
-        `Không tìm thấy đề thi với mã "${inputCode.trim()}". Vui lòng kiểm tra lại mã theo quy luật [Lớp]-[Chương]-[Bài]-[Lần] (ví dụ: 12-01-14-01)!`
+        `Không tìm thấy đề thi với mã "${inputCode.trim()}". Vui lòng kiểm tra lại mã theo quy luật [Lớp]-[Chương]-[Bài]-[Lần] (ví dụ: 10-04-07-02, 12-01-14-01)!`
       );
       return;
     }
 
-    const status = checkExamAccessStatus(matchedExam);
+    const status = checkExamAccessStatus(targetExam);
 
     // 1. Nếu đề bị khóa
     if (status.status === "locked") {
@@ -106,8 +157,8 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
     }
 
     // 4. Nếu có mật khẩu
-    if (matchedExam.password && matchedExam.password.trim()) {
-      if (inputPassword.trim() !== matchedExam.password.trim()) {
+    if (targetExam.password && targetExam.password.trim()) {
+      if (inputPassword.trim() !== targetExam.password.trim()) {
         setErrorMessage("🔒 Mật khẩu đề thi không chính xác. Vui lòng thử lại!");
         return;
       }
@@ -116,10 +167,10 @@ export const ExamCodeEntryModal: React.FC<ExamCodeEntryModalProps> = ({
     // Hợp lệ -> Vào thi
     toast.success(
       "Xác thực mã đề thành công!",
-      `Đang vào đề thi: ${matchedExam.title} (Mã: ${matchedExam.code})`
+      `Đang vào đề thi: ${targetExam.title} (Mã: ${targetExam.code})`
     );
     onClose();
-    onStartExam(matchedExam);
+    onStartExam(targetExam);
   };
 
   return (

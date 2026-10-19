@@ -522,14 +522,20 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
     }));
 
     const finalChapter = isCustomChapter ? customChapter : chapter;
+    const parsedSavedCode = parseStandardExamCode(code.trim());
+    const finalLessonNum = parsedSavedCode.isValid ? parsedSavedCode.lessonNum : lessonNumber;
+    const finalAttemptNum = parsedSavedCode.isValid ? parsedSavedCode.attemptNum : attemptNumber;
     const updatedExam: Exam = {
       id: exam?.id || `exam_${Date.now()}`,
-      title: title.trim(),
+      title: title.replace(/(\s*-\s*Mã đề:\s*[0-9A-Za-z-_]+)+$/i, "").trim(),
       code: code.trim().toUpperCase(),
       subject: subject.trim() || "Toán học THPT",
       grade: grade.trim() || "Lớp 12",
       targetClass: targetClass.trim() || "Tất cả các lớp",
       chapter: finalChapter ? finalChapter.trim() : undefined,
+      lesson: finalLessonNum,
+      lessonNumber: finalLessonNum,
+      attemptNumber: finalAttemptNum,
       durationMinutes: Number(durationMinutes) || 90,
       description: description.trim(),
       author: author.trim() || "Tổ Toán",
@@ -930,7 +936,15 @@ export const ExamEditorModal: React.FC<ExamEditorModalProps> = ({
                     <input
                       type="text"
                       value={code}
-                      onChange={(e) => setCode(e.target.value.toUpperCase())}
+                      onChange={(e) => {
+                        const newCode = e.target.value.toUpperCase();
+                        setCode(newCode);
+                        const parsed = parseStandardExamCode(newCode);
+                        if (parsed.isValid) {
+                          setLessonNumber(parsed.lessonNum);
+                          setAttemptNumber(parsed.attemptNum);
+                        }
+                      }}
                       className="w-full py-2.5 px-3.5 rounded-xl border-2 border-amber-400 bg-white font-mono font-black text-amber-900 tracking-wider text-base outline-none focus:ring-2 focus:ring-amber-500"
                     />
                     <p className="text-xs text-amber-800 font-medium mt-1">

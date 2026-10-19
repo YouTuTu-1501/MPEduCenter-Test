@@ -4,7 +4,12 @@ import { useAuth } from "../context/AuthContext";
 import { Exam, StudentSubmission, checkExamAccessStatus, STANDARD_GRADES } from "../types/exam";
 import { MathRenderer } from "./MathRenderer";
 import { ExamCodeEntryModal } from "./ExamCodeEntryModal";
-import { isExamCodeMatch, parseStandardExamCode } from "../utils/examCodeHelper";
+import {
+  isExamCodeMatch,
+  parseStandardExamCode,
+  findExamByCodeFlexible,
+} from "../utils/examCodeHelper";
+import { fetchExamByCodeFromCloud } from "../services/firestoreService";
 import { matchExamSearch } from "../utils/filterUtils";
 import { useToast } from "../context/ToastContext";
 import {
@@ -286,24 +291,24 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   };
 
   // Hàm xử lý nhập mã trực tiếp từ thanh công cụ nhanh
-  const handleQuickCodeSubmit = (e: React.FormEvent) => {
+  const handleQuickCodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = quickCodeInput.trim().toLowerCase();
+    const clean = quickCodeInput.trim();
     if (!clean) {
-      toast.warning("Vui lòng nhập Mã đề thi!", "Ví dụ: 12-01-14-01, 10-02-05-01...");
+      toast.warning("Vui lòng nhập Mã đề thi!", "Ví dụ: 10-04-07-02, 12-01-14-01...");
       return;
     }
-    const matched = exams.find(
-      (ex) =>
-        isExamCodeMatch(clean, ex.code) ||
-        ex.code.toLowerCase() === clean ||
-        ex.id.toLowerCase() === clean ||
-        ex.title.toLowerCase().includes(clean)
-    );
+    let matched = findExamByCodeFlexible(exams, clean);
+    if (!matched) {
+      const { matchedExam: cloudMatched } = await fetchExamByCodeFromCloud(clean, exams);
+      if (cloudMatched) {
+        matched = cloudMatched;
+      }
+    }
     if (!matched) {
       toast.error(
         "Không tìm thấy đề thi!",
-        `Không có đề thi nào khớp với mã "${quickCodeInput}". Quy luật mã: [Lớp]-[Chương]-[Bài]-[Lần] (Ví dụ: 12-01-14-01).`
+        `Không có đề thi nào khớp với mã "${quickCodeInput.trim()}". Quy luật mã: [Lớp]-[Chương]-[Bài]-[Lần] (Ví dụ: 10-04-07-02, 12-01-14-01).`
       );
       return;
     }

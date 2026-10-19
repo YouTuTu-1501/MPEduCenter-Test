@@ -19,17 +19,23 @@ export function parseLatexExam(latexContent: string, defaultTitle: string = "Đ�
   let currentExId = "";
   let questionCounter = 1;
 
-  // Trích xuất mã đề nếu có (\tieude{...} hoặc \made{...})
+  // Trích xuất mã đề nếu có (\tieude{...}, \made{...} hoặc % CODE: ...)
   let rawExamCode = "";
-  const codeMatch = latexContent.match(/\\(?:tieude|made)\{([^}]+)\}/);
+  const codeMatch =
+    latexContent.match(/\\(?:tieude|made)\{([^}]+)\}/i) ||
+    latexContent.match(/%\s*(?:CODE|MA_DE|MADE):\s*([^\n]+)/i);
   if (codeMatch) rawExamCode = codeMatch[1].trim();
 
   // Trích xuất tiêu đề nếu có (\tenmonthi{...}, \tieude{...}, \title{...} hoặc % TITLE: ...)
   let examTitle = defaultTitle;
   const initialTitleMatch =
-    latexContent.match(/\\(?:tenmonthi|tenkythi|tieude|title)\{([^}]+)\}/i) ||
-    latexContent.match(/%\s*(?:TITLE|TIEUDE|TIÊU_ĐỀ):\s*([^\n]+)/i);
-  if (initialTitleMatch) examTitle = initialTitleMatch[1].trim();
+    latexContent.match(/%\s*(?:TITLE|TIEUDE|TIÊU_ĐỀ):\s*([^\n]+)/i) ||
+    latexContent.match(/\\(?:tenmonthi|tenkythi|tieude|title)\{([^}]+)\}/i);
+  if (initialTitleMatch) {
+    examTitle = initialTitleMatch[1]
+      .replace(/(\s*-\s*Mã đề:\s*[0-9A-Za-z-_]+)+$/i, "")
+      .trim();
+  }
 
   // Trích xuất Lớp (Grade) nếu có (\lop{...} hoặc % LOP: ... hoặc từ nội dung)
   let examGrade = "Lớp 12";
@@ -829,6 +835,7 @@ export function exportExamToLatex(exam: Exam): string {
 \\everymath{\\displaystyle}
 
 % Thông tin đề thi & Phân loại
+% CODE: ${exam.code}
 % GRADE: ${exam.grade}
 % TARGET_CLASS: ${exam.targetClass || "Tất cả các lớp"}
 % CHAPTER: ${exam.chapter || ""}
@@ -841,14 +848,15 @@ export function exportExamToLatex(exam: Exam): string {
 % TOTAL_SCORE: ${exam.totalScore || 10}
 % IS_LOCKED: ${exam.isLocked ? "true" : "false"}
 % ALLOW_REVIEW: ${exam.allowReview !== false ? "true" : "false"}
-${exam.password ? `% PASSWORD: ${exam.password}\n` : ""}\newcommand{\tenkythi}{${exam.title}}
-\newcommand{\tenmonthi}{${exam.subject} - ${exam.grade}}
-\newcommand{\lop}{${exam.grade}}
+${exam.password ? `% PASSWORD: ${exam.password}\n` : ""}\\newcommand{\\made}{${exam.code}}
+\\newcommand{\\tenkythi}{${exam.title}}
+\\newcommand{\\tenmonthi}{${exam.subject} - ${exam.grade}}
+\\newcommand{\\lop}{${exam.grade}}
 ${exam.targetClass ? `\\newcommand{\\lopapdung}{${exam.targetClass}}\n` : ""}${exam.chapter ? `\\newcommand{\\chuong}{${exam.chapter}}\n` : ""}${exam.lesson || exam.lessonNumber ? `\\newcommand{\\bai}{${exam.lesson || exam.lessonNumber}}\n` : ""}${exam.author ? `\\newcommand{\\tacgia}{${exam.author}}\n` : ""}\\newcommand{\\thoigian}{${exam.durationMinutes}}
-\newcommand{\thangdiem}{${exam.totalScore || 10}}
+\\newcommand{\\thangdiem}{${exam.totalScore || 10}}
 
 \\begin{document}
-\\title{${exam.title} - Mã đề: ${exam.code}}
+\\title{${exam.title}}
 \\maketitle
 
 `;

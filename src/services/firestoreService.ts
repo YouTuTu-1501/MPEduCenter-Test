@@ -18,6 +18,7 @@ import { Exam, StudentSubmission, LiveRoom } from "../types/exam";
 import { initialSampleSubmissions } from "../data/sampleSubmissions";
 import { initialSampleExams } from "../data/defaultExam";
 import { logAuditEvent } from "./auditLogService";
+import { findExamByCodeFlexible } from "../utils/examCodeHelper";
 
 /**
  * Hàm làm sạch đối tượng trước khi gửi lên Firestore
@@ -457,6 +458,46 @@ export interface SubscribeExamsOptions {
   onError?: (error: Error) => void;
 }
 
+export const mergeExamsLists = (
+  lists: Exam[][],
+  ignoreDeleted: boolean = false
+): Exam[] => {
+  const deletedExamIds = ignoreDeleted ? new Set<string>() : getDeletedExamIds();
+  const map = new Map<string, Exam>();
+
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const e of list) {
+      if (!e || !e.id || deletedExamIds.has(e.id)) continue;
+      const existing = map.get(e.id);
+      if (!existing) {
+        map.set(e.id, e);
+      } else {
+        const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+        const incomingTime = e.updatedAt ? new Date(e.updatedAt).getTime() : 0;
+        if (incomingTime >= existingTime) {
+          map.set(e.id, e);
+        }
+      }
+    }
+  }
+
+  return Array.from(map.values());
+};
+
+export const getLocalCachedExams = (ignoreDeleted: boolean = false): Exam[] => {
+  try {
+    const local = localStorage.getItem("edutest_exams");
+    if (local) {
+      const parsed = JSON.parse(local);
+      if (Array.isArray(parsed)) {
+        return mergeExamsLists([parsed], ignoreDeleted);
+      }
+    }
+  } catch {}
+  return [];
+};
+
 export const subscribeExams = (
   callback: (exams: Exam[]) => void,
   optionsOrOnError?: SubscribeExamsOptions | ((error: Error) => void)
@@ -464,105 +505,209 @@ export const subscribeExams = (
   const options: SubscribeExamsOptions =
     typeof optionsOrOnError === "function" ? { onError: optionsOrOnError } : (optionsOrOnError || {});
 
-  const deletedExamIds = getDeletedExamIds();
+  const isStudentRole = options.role === "student";
 
   // 1. Nạp tức thì từ local cache nếu có
-  try {
-    const local = localStorage.getItem("edutest_exams");
-    if (local) {
-      const parsed = JSON.parse(local);
-      if (Array.isArray(parsed)) {
-        const filtered = parsed.filter((e: Exam) => e && e.id && !deletedExamIds.has(e.id));
-        callback(filtered);
-      }
-    }
-  } catch {}
+  const initialLocal = getLocalCachedExams(isStudentRole);
+  if (initialLocal.length > 0) {
+    callback(initialLocal);
+  }
 
-  // 2. Ưu tiên nạp từ Server Cache Proxy (/api/exams)
-  try {
-    fetch("/api/exams")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((serverExams) => {
-        if (Array.isArray(serverExams) && serverExams.length > 0) {
-          const currentDeleted = getDeletedExamIds();
-          const valid = serverExams.filter((e: any) => e && e.id && !currentDeleted.has(e.id));
-          if (valid.length > 0) {
-            try {
-              localStorage.setItem("edutest_exams", JSON.stringify(valid));
-            } catch {}
-            callback(valid);
+  // 2. Nạp và gộp (merge) từ Server Cache Proxy (/api/exams) - tuyệt đối không ghi đè làm mất đề thi từ Firestore
+  const fetchAndMergeFromServer = () => {
+    try {
+      fetch("/api/exams")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((serverExams) => {
+          if (Array.isArray(serverExams) && serverExams.length > 0) {
+            const currentLocal = getLocalCachedExams(isStudentRole);
+            const merged = mergeExamsLists([currentLocal, serverExams], isStudentRole);
+            if (merged.length > 0) {
+              try {
+                localStorage.setItem("edutest_exams", JSON.stringify(merged));
+              } catch {}
+              callback(merged);
+            }
           }
+        })
+        .catch(() => {});
+    } catch {}
+  };
+
+  fetchAndMergeFromServer();
+
+  // Lắng nghe sự kiện đồng bộ đề thi trực tiếp khi học sinh tra cứu mã đề
+  const handleCustomExamSync = (evt: Event) => {
+    const customEvt = evt as CustomEvent<{ exams?: Exam[] }>;
+    if (customEvt.detail?.exams && Array.isArray(customEvt.detail.exams)) {
+      callback(customEvt.detail.exams);
+    }
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener("edutest:exams_updated", handleCustomExamSync);
+  }
+
+  // 3. Nếu Quota Firestore đã đầy trong ngày, chuyển sang Server Proxy Polling + thử getDocs 1 lần
+  if (isFirestoreWriteQuotaExceeded) {
+    getDocs(collection(db, EXAMS_COLLECTION))
+      .then((snap) => {
+        if (!snap.empty) {
+          const fsExams: Exam[] = [];
+          snap.forEach((d) => {
+            const e = d.data() as Exam;
+            if (e && e.id) fsExams.push(e);
+          });
+          const merged = mergeExamsLists([getLocalCachedExams(isStudentRole), fsExams], isStudentRole);
+          try {
+            localStorage.setItem("edutest_exams", JSON.stringify(merged));
+          } catch {}
+          callback(merged);
         }
       })
       .catch(() => {});
-  } catch {}
 
-  // 3. Phân quyền truy vấn: Học sinh không cần giữ listener realtime liên tục tới collection exams
-  // Chỉ cần nạp danh sách đề thi (đã nạp từ Server Cache & LocalStorage) và cập nhật qua Server Cache
-  if (options.role === "student") {
-    const pollId = setInterval(() => {
-      fetch("/api/exams")
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (Array.isArray(data) && data.length > 0) callback(data);
-        })
-        .catch(() => {});
-    }, 120000);
-    return () => clearInterval(pollId);
+    const pollId = setInterval(fetchAndMergeFromServer, 30000);
+    return () => {
+      clearInterval(pollId);
+      if (typeof window !== "undefined") {
+        window.removeEventListener("edutest:exams_updated", handleCustomExamSync);
+      }
+    };
   }
 
-  // 4. Nếu Quota Firestore đã đầy trong ngày, chuyển sang Server Proxy Polling (cho Giáo viên / Admin)
-  if (isFirestoreWriteQuotaExceeded) {
-    const pollId = setInterval(() => {
-      fetch("/api/exams")
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (Array.isArray(data) && data.length > 0) callback(data);
-        })
-        .catch(() => {});
-    }, 30000);
-    return () => clearInterval(pollId);
-  }
-
-  // 5. Kết nối Firestore khi Quota còn hạn
+  // 4. Kết nối Firestore cho TẤT CẢ vai trò (Học sinh, Giáo viên, Admin) để luôn nhận đầy đủ các đề thi mới nhất (như 10-04-07-02)
   try {
     const q = query(collection(db, EXAMS_COLLECTION));
-    return onSnapshot(
+    const unsubSnapshot = onSnapshot(
       q,
       (snapshot) => {
-        const currentDeleted = getDeletedExamIds();
         if (snapshot.empty) {
-          try {
-            localStorage.setItem("edutest_exams", JSON.stringify([]));
-          } catch {}
-          callback([]);
+          const fallback = getLocalCachedExams(isStudentRole);
+          callback(fallback);
           return;
         }
 
-        const exams: Exam[] = [];
+        const firestoreExams: Exam[] = [];
         snapshot.forEach((docSnap) => {
           const e = docSnap.data() as Exam;
-          if (e && e.id && !currentDeleted.has(e.id)) {
-            exams.push(e);
+          if (e && e.id) {
+            firestoreExams.push(e);
           }
         });
 
+        const merged = mergeExamsLists(
+          [getLocalCachedExams(isStudentRole), firestoreExams],
+          isStudentRole
+        );
+
         try {
-          localStorage.setItem("edutest_exams", JSON.stringify(exams));
+          localStorage.setItem("edutest_exams", JSON.stringify(merged));
         } catch {}
-        callback(exams);
+
+        // Đồng bộ ngược lên Server Cache (/api/exams/sync) để bộ nhớ đệm server luôn đầy đủ 100% đề thi
+        try {
+          fetch("/api/exams/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(merged),
+          }).catch(() => {});
+        } catch {}
+
+        callback(merged);
       },
       (err) => {
         handleFirestoreWriteError(err, "subscribeExams");
         console.warn("Firestore subscribeExams fallback to Server Proxy / local:", err);
+        fetchAndMergeFromServer();
         if (options.onError) options.onError(err);
       }
     );
+
+    return () => {
+      unsubSnapshot();
+      if (typeof window !== "undefined") {
+        window.removeEventListener("edutest:exams_updated", handleCustomExamSync);
+      }
+    };
   } catch (error: any) {
     handleFirestoreWriteError(error, "subscribeExams init");
     console.warn("Firestore subscribeExams error:", error);
-    return () => {};
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("edutest:exams_updated", handleCustomExamSync);
+      }
+    };
   }
+};
+
+/**
+ * Tra cứu đề thi theo Mã đề trực tiếp từ Firestore & Server Cache khi danh sách hiện tại chưa kịp đồng bộ
+ */
+export const fetchExamByCodeFromCloud = async (
+  rawInputCode: string,
+  existingExams: Exam[] = []
+): Promise<{ matchedExam: Exam | null; allExams: Exam[] }> => {
+  // 1. Kiểm tra ngay trong danh sách hiện có
+  const immediateMatch = findExamByCodeFlexible(existingExams, rawInputCode);
+  if (immediateMatch) {
+    return { matchedExam: immediateMatch, allExams: existingExams };
+  }
+
+  // 2. Kiểm tra trong LocalStorage (bỏ qua danh sách xóa phòng trường hợp bị ẩn nhầm)
+  const localExams = getLocalCachedExams(true);
+  const localMatch = findExamByCodeFlexible(localExams, rawInputCode);
+  if (localMatch) {
+    removeDeletedExamId(localMatch.id);
+    const mergedLocal = mergeExamsLists([existingExams, localExams], true);
+    return { matchedExam: localMatch, allExams: mergedLocal };
+  }
+
+  // 3. Tải trực tiếp từ Firestore và /api/exams song song
+  const fetchedLists: Exam[][] = [existingExams, localExams];
+
+  const [firestoreList, serverList] = await Promise.all([
+    getDocs(collection(db, EXAMS_COLLECTION))
+      .then((snap) => {
+        const arr: Exam[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as Exam;
+          if (data && data.id) arr.push(data);
+        });
+        return arr;
+      })
+      .catch(() => [] as Exam[]),
+    fetch("/api/exams")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => (Array.isArray(data) ? (data as Exam[]) : []))
+      .catch(() => [] as Exam[]),
+  ]);
+
+  if (firestoreList.length > 0) fetchedLists.push(firestoreList);
+  if (serverList.length > 0) fetchedLists.push(serverList);
+
+  const allMerged = mergeExamsLists(fetchedLists, true);
+  const matched = findExamByCodeFlexible(allMerged, rawInputCode) || null;
+
+  if (matched) {
+    removeDeletedExamId(matched.id);
+  }
+
+  if (allMerged.length > 0) {
+    try {
+      localStorage.setItem("edutest_exams", JSON.stringify(allMerged));
+    } catch {}
+    if (typeof window !== "undefined") {
+      try {
+        window.dispatchEvent(
+          new CustomEvent("edutest:exams_updated", {
+            detail: { exams: allMerged },
+          })
+        );
+      } catch {}
+    }
+  }
+
+  return { matchedExam: matched, allExams: allMerged };
 };
 
 export const saveExamToFirestore = async (exam: Exam): Promise<void> => {

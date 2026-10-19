@@ -625,11 +625,25 @@ BẮT BUỘC TRẢ VỀ DƯỚI ĐỊNH DẠNG JSON HỢP LỆ THEO SCHEMA DƯ�
     cacheStats.totalRequests++;
     const now = Date.now();
 
-    if (now - examsCacheTime > CACHE_TTL_MS || cachedExamsData.length === 0) {
+    if (now - examsCacheTime > CACHE_TTL_MS || cachedExamsData.length <= 4) {
       cacheStats.misses++;
       const fromDisk = loadExamsFromDisk();
       if (fromDisk.length > 0) {
-        cachedExamsData = fromDisk;
+        const map = new Map<string, any>();
+        customExams.forEach((e) => {
+          if (e && e.id) map.set(e.id, e);
+        });
+        fromDisk.forEach((e) => {
+          if (e && e.id) {
+            const existing = map.get(e.id);
+            if (!existing || (e.updatedAt && (!existing.updatedAt || e.updatedAt >= existing.updatedAt))) {
+              map.set(e.id, e);
+            }
+          }
+        });
+        customExams.length = 0;
+        customExams.push(...map.values());
+        cachedExamsData = [...customExams];
       } else {
         cachedExamsData = [...customExams];
       }
@@ -639,8 +653,34 @@ BẮT BUỘC TRẢ VỀ DƯỚI ĐỊNH DẠNG JSON HỢP LỆ THEO SCHEMA DƯ�
       cacheStats.savedFirestoreReads++;
     }
 
-    res.setHeader("Cache-Control", "public, max-age=30");
+    res.setHeader("Cache-Control", "no-cache");
     res.json(cachedExamsData);
+  });
+
+  app.post("/api/exams/sync", (req, res) => {
+    cacheStats.totalRequests++;
+    const incoming = req.body;
+    if (Array.isArray(incoming)) {
+      const map = new Map<string, any>();
+      customExams.forEach((e) => {
+        if (e && e.id) map.set(e.id, e);
+      });
+      incoming.forEach((e: any) => {
+        if (e && e.id) {
+          const existing = map.get(e.id);
+          if (!existing || (e.updatedAt && (!existing.updatedAt || e.updatedAt >= existing.updatedAt))) {
+            map.set(e.id, e);
+          }
+        }
+      });
+      customExams.length = 0;
+      customExams.push(...map.values());
+      saveExamsToDisk(customExams);
+      cachedExamsData = [...customExams];
+      examsCacheTime = Date.now();
+      return res.json({ success: true, count: customExams.length });
+    }
+    res.status(400).json({ error: "Array expected" });
   });
 
   app.get("/api/exams/:id", (req, res) => {
@@ -658,8 +698,8 @@ BẮT BUỘC TRẢ VỀ DƯỚI ĐỊNH DẠNG JSON HỢP LỆ THEO SCHEMA DƯ�
     const newExam = {
       ...req.body,
       id: req.body.id || "exam_" + Date.now(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: req.body.createdAt || new Date().toISOString(),
+      updatedAt: req.body.updatedAt || new Date().toISOString(),
     };
     const index = customExams.findIndex((e) => e.id === newExam.id);
     if (index >= 0) {

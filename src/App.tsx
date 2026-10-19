@@ -189,11 +189,11 @@ function MainApp({ currentUser }: { currentUser: User }) {
 
   // Đồng bộ Ngân hàng đề thi và Kết quả thi theo vai trò (RBAC Data Scoping) và Server Proxy Cache
   useEffect(() => {
-    // 1. Subscribe Đề thi (Học sinh dùng Server Cache, Giáo viên có thể sync realtime)
+    // 1. Subscribe Đề thi (Tất cả vai trò đều nhận đầy đủ đề thi từ Firestore & Server Cache)
     const unsubExams = subscribeExams(
       (loadedExams) => {
         if (loadedExams) {
-          const deleted = getDeletedExamIds();
+          const deleted = isStudent ? new Set<string>() : getDeletedExamIds();
           const filtered = loadedExams.filter((e) => e && e.id && !deleted.has(e.id));
           setExams(filtered);
           setSelectedExam((current) => {
@@ -329,6 +329,10 @@ function MainApp({ currentUser }: { currentUser: User }) {
 
   // Học sinh bắt đầu làm bài thi
   const handleStudentStartExam = (exam: Exam) => {
+    setExams((prev) => {
+      if (prev.some((e) => e.id === exam.id)) return prev;
+      return [exam, ...prev];
+    });
     setSelectedExam(exam);
     setActiveView("exam");
   };

@@ -175,10 +175,13 @@ export const parseStandardExamCode = (codeStr: string): ExamCodeStructure => {
     };
   }
 
-  const raw = codeStr.trim();
+  const raw = codeStr
+    .replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u3000\uFEFF]/g, " ")
+    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")
+    .trim();
   // Trường hợp chuẩn: có dấu gạch ngang (ví dụ: "12-01-14-01", "12-1-14-1")
   const dashParts = raw.split(/[-_./\s]+/);
-  if (dashParts.length === 4) {
+  if (dashParts.length === 4 && dashParts.every((p) => /^\d{1,2}$/.test(p))) {
     const g = pad2(dashParts[0], "12");
     const c = pad2(dashParts[1], "01");
     const l = pad2(dashParts[2], "01");
@@ -205,7 +208,7 @@ export const parseStandardExamCode = (codeStr: string): ExamCodeStructure => {
 
   // Trường hợp chuỗi số liên tiếp 8 chữ số: "12011401"
   const digitsOnly = raw.replace(/\D/g, "");
-  if (digitsOnly.length === 8) {
+  if (digitsOnly.length === 8 && /^[\d\-_./\s]+$/.test(raw)) {
     const g = digitsOnly.slice(0, 2);
     const c = digitsOnly.slice(2, 4);
     const l = digitsOnly.slice(4, 6);
@@ -264,21 +267,109 @@ export const parseStandardExamCode = (codeStr: string): ExamCodeStructure => {
 };
 
 /**
+ * Chuẩn hóa chuỗi mã nhập vào (loại bỏ ký tự ẩn, chuẩn hóa dấu gạch ngang Unicode từ iPhone/Zalo)
+ */
+export const normalizeCodeString = (str?: string | null): string => {
+  if (!str) return "";
+  return String(str)
+    .replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u3000\uFEFF]/g, " ")
+    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")
+    .trim();
+};
+
+/**
  * Kiểm tra xem mã đề học sinh nhập có khớp với mã đề của đề thi không (hỗ trợ nhập linh hoạt có/không có dấu gạch)
  */
 export const isExamCodeMatch = (inputCode: string, examCode: string): boolean => {
-  if (!inputCode || !examCode) return false;
-  const cleanInput = inputCode.trim().toLowerCase().replace(/[-_./\s]/g, "");
-  const cleanExam = examCode.trim().toLowerCase().replace(/[-_./\s]/g, "");
+  const normInput = normalizeCodeString(inputCode);
+  const normExam = normalizeCodeString(examCode);
+  if (!normInput || !normExam) return false;
 
-  if (cleanInput === cleanExam) return true;
+  // So sánh nguyên bản (không phân biệt hoa thường)
+  if (normInput.toLowerCase() === normExam.toLowerCase()) return true;
 
-  // So sánh nguyên bản
-  if (inputCode.trim().toLowerCase() === examCode.trim().toLowerCase()) return true;
+  // So sánh sau khi bỏ toàn bộ dấu phân cách
+  const cleanInput = normInput.toLowerCase().replace(/[-_./\s]/g, "");
+  const cleanExam = normExam.toLowerCase().replace(/[-_./\s]/g, "");
+  if (cleanInput && cleanInput === cleanExam) return true;
 
-  // So sánh sau khi chuẩn hóa mã
-  const parsedInput = parseStandardExamCode(inputCode);
-  const parsedExam = parseStandardExamCode(examCode);
+  // So sánh sau khi chuẩn hóa mã [Lớp]-[Chương]-[Bài]-[Lần]
+  const parsedInput = parseStandardExamCode(normInput);
+  const parsedExam = parseStandardExamCode(normExam);
+  if (parsedInput.isValid && parsedExam.isValid) {
+    return parsedInput.formattedCode === parsedExam.formattedCode;
+  }
 
-  return parsedInput.formattedCode === parsedExam.formattedCode;
+  return false;
+};
+
+/**
+ * Tìm đề thi khớp với mã học sinh nhập vào trong danh sách đề thi
+ * Hỗ trợ:
+ * 1. Khớp trực tiếp hoặc chuẩn hóa theo exam.code (ví dụ: "10-04-07-02", "10040702", "10-4-7-2")
+ * 2. Khớp theo exam.id
+ * 3. Khớp theo mã chuẩn sinh từ thông tin phân loại (grade, chapter, lessonNumber/lesson, attemptNumber)
+ * 4. Khớp theo tiêu đề đề thi
+ */
+export const findExamByCodeFlexible = <
+  T extends {
+    id?: string;
+    code?: string;
+    title?: string;
+    grade?: string;
+    chapter?: string;
+    lesson?: string;
+    lessonNumber?: string;
+    attemptNumber?: string | number;
+  }
+>(
+  exams: T[],
+  rawInputCode: string
+): T | undefined => {
+  const normInput = normalizeCodeString(rawInputCode);
+  if (!normInput || !Array.isArray(exams) || exams.length === 0) return undefined;
+  const lowerInput = normInput.toLowerCase();
+
+  // Ưu tiên 1: Khớp chính xác hoặc chuẩn hóa với exam.code hoặc exam.id
+  const directMatch = exams.find(
+    (e) =>
+      e &&
+      ((e.code && isExamCodeMatch(normInput, e.code)) ||
+        (e.id && normalizeCodeString(e.id).toLowerCase() === lowerInput))
+  );
+  if (directMatch) return directMatch;
+
+  // Ưu tiên 2: Nếu người dùng nhập một mã chuẩn [Lớp]-[Chương]-[Bài]-[Lần], kiểm tra cả mã suy diễn từ metadata hoặc tiêu đề
+  const parsedInput = parseStandardExamCode(normInput);
+  if (parsedInput.isValid) {
+    const metadataMatch = exams.find((e) => {
+      if (!e) return false;
+      if (e.grade && (e.chapter || e.lesson || e.lessonNumber)) {
+        const derivedCode = generateStandardExamCode({
+          grade: e.grade,
+          chapter: e.chapter || parsedInput.chapterNum,
+          lesson: e.lessonNumber || e.lesson || e.title,
+          attempt: e.attemptNumber || "01",
+        });
+        if (derivedCode === parsedInput.formattedCode) return true;
+      }
+      // Kiểm tra nếu trong tiêu đề có chứa thông tin Bài / Lần khớp với mã
+      if (e.title && e.grade) {
+        const derivedFromTitle = generateStandardExamCode({
+          grade: e.grade,
+          chapter: e.chapter || "01",
+          lesson: e.title,
+          attempt: e.title.match(/(?:Lần|Đợt)\s*0?(\d+)/i)?.[1] || e.attemptNumber || "01",
+        });
+        if (derivedFromTitle === parsedInput.formattedCode) return true;
+      }
+      return false;
+    });
+    if (metadataMatch) return metadataMatch;
+  }
+
+  // Ưu tiên 3: Khớp theo tiêu đề đề thi (nếu người dùng nhập tên đề hoặc mã nằm trong tiêu đề)
+  return exams.find(
+    (e) => e && e.title && normalizeCodeString(e.title).toLowerCase().includes(lowerInput)
+  );
 };
