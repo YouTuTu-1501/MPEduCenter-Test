@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: rm -f package-lock.json && npm install --no-audit --legacy-peer-deps --include=optional
+      - run: rm -f package-lock.json && (npm install --no-audit --include=optional || npm install --no-audit --legacy-peer-deps --include=optional)
       - run: npm run lint
       - run: npm run build
         env:

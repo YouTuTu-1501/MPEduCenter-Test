@@ -32,7 +32,7 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        run: rm -f package-lock.json && npm install --no-audit --legacy-peer-deps --include=optional
+        run: rm -f package-lock.json && (npm install --no-audit --include=optional || npm install --no-audit --legacy-peer-deps --include=optional)
 
       - name: Build SPA
         run: npm run build
