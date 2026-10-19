@@ -993,6 +993,14 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
             )}
           </div>
 
+          {/* Trợ lý AI Gemini: Đề xuất câu hỏi tương tự & Bài tập bổ trợ dựa trên các câu làm sai */}
+          <StudentRemedialSection
+            examTitle={exam.title}
+            grade={exam.grade || "Lớp 12"}
+            subject={exam.subject || "Toán học"}
+            wrongQuestions={wrongQuestionsForAi}
+          />
+
           {/* Danh sách rà soát chi tiết từng câu */}
           <div className="mt-8 space-y-6">
             <h3 className="font-black text-lg text-slate-800 flex items-center gap-2">
@@ -1165,6 +1173,16 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-3 mt-8 pt-4 border-t border-slate-200">
+            <button
+              id="btn-export-pdf-student-review"
+              type="button"
+              onClick={() => setShowExportPdfModal(true)}
+              className="px-5 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-sm border border-indigo-200 shadow-xs transition flex items-center gap-2"
+              title="Xuất đề thi và bảng đáp án sang định dạng PDF để in ấn"
+            >
+              <Printer className="w-4 h-4 text-indigo-600" />
+              <span>Xuất PDF / In Đề Thi</span>
+            </button>
             {onOpenHistory && (
               <button
                 id="btn-view-exam-history"
@@ -1188,6 +1206,13 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
               Hoàn tất & Thoát
             </button>
           </div>
+
+          {/* Modal Xuất PDF Đề Thi & Lời Giải */}
+          <ExamPdfExportModal
+            isOpen={showExportPdfModal}
+            onClose={() => setShowExportPdfModal(false)}
+            exam={exam}
+          />
 
           {/* Modal xem phóng to ảnh chụp bài làm học sinh */}
           {selectedReviewImage && (

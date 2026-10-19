@@ -10,7 +10,11 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        'html2pdf.js': path.resolve(__dirname, 'node_modules/html2pdf.js/dist/html2pdf.bundle.min.js'),
       },
+    },
+    build: {
+      chunkSizeWarningLimit: 3000,
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
